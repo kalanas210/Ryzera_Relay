@@ -1,0 +1,5 @@
+# Normalize line endings to LF so shell scripts and Docker files work on Linux containers
+* text=auto eol=lf
+*.pdf binary
+*.png binary
+*.jpg binary

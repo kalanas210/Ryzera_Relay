@@ -1,0 +1,23 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.next/
+__pycache__/
+*.pyc
+.venv/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Competition material we don't redistribute
+Challenge Booklet.pdf
+
+# Raw datasets stay out of git until the organizers confirm how seed data may be shared
+data/raw/
+
+# OS files
+.DS_Store
+Thumbs.db
