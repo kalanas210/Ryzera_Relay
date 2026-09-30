@@ -337,6 +337,9 @@ def main() -> None:
 
     # derived: usual runs, unloading times, and which stores order on which weekday ------------------
     write(DERIVED / "usual_runs.csv", ["vehicle_id", "dow_name", "trip_no", "brand", "temp", "district", "share"], usual_runs())
+    write(DERIVED / "usual_stops.csv",
+          ["vehicle_id", "dow_name", "trip_no", "brand", "temp", "district", "outlet_id", "share", "run_share"],
+          usual_stops())
     write(DERIVED / "outlet_dwell.csv", ["outlet_id", "monsoon", "p10", "p50", "p90"], outlet_dwell())
     streams = [dict(dow_name=dow, outlet_id=o, temp=t) for dow in M.DOWS for (o, t) in M.fixed_streams(dow)]
     write(DERIVED / "order_streams.csv", ["dow_name", "outlet_id", "temp"], streams)
@@ -390,6 +393,31 @@ def usual_runs() -> list[dict]:
         if share >= 0.25:
             out.append(dict(vehicle_id=vid, dow_name=dow, trip_no=int(tn), brand=brand, temp=t, district=district,
                             share=round(share, 3)))
+    return out
+
+
+def usual_stops() -> list[dict]:
+    """The stores each vehicle's usual trip visits on a weekday. A trip that goes to one run (brand, temperature and
+    district) on some weeks and another on others has one row set per run it makes on at least a quarter of those
+    weekdays; its stores are the ones on at least half of those trips. run_share is how often the run happens."""
+    lg = pd.concat([M.LEGS_TR, M.LEGS_TE]).merge(M.CAL[["dow_name"]], left_on="date", right_index=True)
+    temp = M.DEL.dropna(subset=["route_id"]).groupby("route_id").temp_requirement.first()
+    starts = lg[lg.seq == 0].copy()
+    starts["temp"] = starts.route_id.map(temp).fillna("ambient")
+    starts["dep"] = M._mm(starts.planned_depart_time)
+    starts = starts.sort_values(["date", "vehicle_id", "dep"])
+    starts["trip_no"] = starts.groupby(["date", "vehicle_id"]).cumcount() + 1
+    lg = lg.merge(starts[["route_id", "trip_no", "temp"]], on="route_id")
+    days = lg.groupby("dow_name").date.nunique()
+    keys = ["vehicle_id", "dow_name", "trip_no", "brand", "temp", "district"]
+    runs_by = starts.groupby(keys).route_id.nunique()
+    visits = lg.groupby([*keys, "to_outlet"]).route_id.nunique()
+    out = []
+    for (vid, dow, tn, brand, t, district, outlet), n in visits.items():
+        runs = runs_by[(vid, dow, tn, brand, t, district)]
+        if runs / days[dow] >= 0.25 and n / runs >= 0.5:
+            out.append(dict(vehicle_id=vid, dow_name=dow, trip_no=int(tn), brand=brand, temp=t, district=district,
+                            outlet_id=outlet, share=round(n / runs, 3), run_share=round(runs / days[dow], 3)))
     return out
 
 
