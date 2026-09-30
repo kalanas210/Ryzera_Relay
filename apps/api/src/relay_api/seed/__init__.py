@@ -18,8 +18,9 @@ log = logging.getLogger("relay.seed")
 
 def seed_all(db: Session) -> None:
     settings = get_settings()
-    if load_reference(db, settings.seed_dir):
-        log.info("Loaded the network: outlets, vehicles, calendar, travel and handling tables")
+    filled = load_reference(db, settings.seed_dir)
+    if filled:
+        log.info("Loaded %s", ", ".join(filled))
     people = load_people(db, settings.seed_dir, settings.seed_password)
     if people:
         log.info("Created %d people", people)

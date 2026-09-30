@@ -79,16 +79,32 @@ STORY_DRIVERS = {
     "VEH057": "Priyantha Silva",
     "VEH060": "Nimal Fernando",
 }
-FIRST = ["Chaminda", "Ruwan", "Tharindu", "Mahesh", "Suresh", "Ajith", "Pradeep", "Lasith", "Dinesh", "Nalin",
-         "Roshan", "Kamal", "Sunil", "Janaka", "Asanka", "Nuwan", "Sameera", "Upul", "Ranjith", "Thilina",
-         "Faisal", "Rifkhan", "Arun", "Vijay", "Saman", "Gayan", "Indika", "Buddhika", "Chathura", "Heshan",
-         "Kumar", "Senthil", "Nimesh", "Dilshan", "Kelum", "Ravindu", "Isuru", "Shiran", "Prasanna", "Hasitha",
-         "Anura", "Malith", "Charith", "Yasas", "Thushara", "Waruna", "Imran", "Rajitha", "Dhanushka", "Sajith",
-         "Lahiru", "Chanaka", "Mohan", "Priyanka", "Jagath", "Kavinda"]
-LAST = ["Perera", "Fernando", "Silva", "Jayasinghe", "Wijesinghe", "Rathnayake", "Dissanayake", "Herath",
-        "Gunawardena", "Senanayake", "Bandara", "Ekanayake", "Karunaratne", "Weerasinghe", "Rajapaksha",
-        "Samarasinghe", "Kumara", "Pathirana", "Liyanage", "Mohamed", "Nadarajah", "Sivakumar", "Hameed",
-        "Ranasinghe", "Wickramasinghe", "Abeysekara", "Munasinghe", "Kodithuwakku", "Rodrigo", "Jayawardena"]
+# Generated driver names keep a first name and a surname from the same community.
+NAMES = {
+    "sinhala": (
+        ["Chaminda", "Ruwan", "Tharindu", "Mahesh", "Ajith", "Pradeep", "Lasith", "Dinesh", "Nalin", "Roshan", "Kamal",
+         "Sunil", "Janaka", "Asanka", "Sameera", "Upul", "Ranjith", "Thilina", "Saman", "Gayan", "Indika", "Buddhika",
+         "Chathura", "Heshan", "Nimesh", "Dilshan", "Kelum", "Ravindu", "Isuru", "Shiran", "Prasanna", "Hasitha", "Anura",
+         "Malith", "Charith", "Thushara", "Waruna", "Rajitha", "Dhanushka", "Sajith", "Lahiru", "Chanaka", "Jagath"],
+        ["Perera", "Fernando", "Silva", "Jayasinghe", "Wijesinghe", "Rathnayake", "Dissanayake", "Herath", "Gunawardena",
+         "Senanayake", "Bandara", "Ekanayake", "Karunaratne", "Weerasinghe", "Rajapaksha", "Samarasinghe", "Kumara",
+         "Pathirana", "Liyanage", "Ranasinghe", "Abeysekara", "Munasinghe", "Kodithuwakku", "Rodrigo"],
+    ),
+    "tamil": (
+        ["Suresh", "Arun", "Vijay", "Senthil", "Mohan", "Rajan", "Prakash", "Ganesh", "Sathish", "Kannan"],
+        ["Nadarajah", "Sivakumar", "Rajendran", "Thangarajah", "Selvaraj", "Krishnan", "Kanagaratnam"],
+    ),
+    "muslim": (
+        ["Faisal", "Rifkhan", "Imran", "Nazeer", "Fazal", "Ashraf", "Irshad"],
+        ["Hameed", "Marikkar", "Ismail", "Farook", "Cassim", "Lafir"],
+    ),
+}
+
+
+def driver_name(rng: random.Random) -> str:
+    community = rng.choices(["sinhala", "tamil", "muslim"], weights=[70, 18, 12])[0]
+    first, last = NAMES[community]
+    return f"{rng.choice(first)} {rng.choice(last)}"
 
 
 def block(name: str) -> str:
@@ -305,7 +321,7 @@ def main() -> None:
             name = STORY_DRIVERS[vid]
         else:
             while True:
-                name = f"{rng.choice(FIRST)} {rng.choice(LAST)}"
+                name = driver_name(rng)
                 if name not in used_names:
                     break
         used_names.add(name)

@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { SignIn } from "@/auth/SignIn";
 import { DispatcherShell } from "@/roles/dispatcher/DispatcherShell";
+import { PlanPage } from "@/roles/dispatcher/plan/PlanPage";
 import { QueuePage } from "@/roles/dispatcher/Queue";
 import { Placeholder } from "@/roles/Placeholder";
 import { MyOrders } from "@/roles/store/MyOrders";
@@ -19,12 +20,7 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <QueuePage /> },
-      {
-        path: "plan",
-        element: (
-          <Placeholder title="Plan board">The plan board opens once Wednesday's orders lock at 4:00 PM.</Placeholder>
-        ),
-      },
+      { path: "plan", element: <PlanPage /> },
       {
         path: "live",
         element: <Placeholder title="Live runs">Runs appear here once the plan is published.</Placeholder>,

@@ -129,6 +129,24 @@ class UsualRun(Base):
     """How often this vehicle ran this trip on that weekday in the history."""
 
 
+class UsualStop(Base):
+    """The stores a vehicle's usual trip visits on a weekday, per run it makes (brand, temperature, district),
+    learned from the route history. The proposal keeps vehicles on these runs first (Relay's rule 1)."""
+
+    __tablename__ = "usual_stop"
+
+    vehicle_id: Mapped[str] = mapped_column(ForeignKey("vehicle.vehicle_id"), primary_key=True)
+    dow_name: Mapped[str] = mapped_column(String(3), primary_key=True)
+    trip_no: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    brand: Mapped[str] = mapped_column(String(8), primary_key=True)
+    temp: Mapped[str] = mapped_column(String(8), primary_key=True)
+    district: Mapped[str] = mapped_column(ForeignKey("district.name"), primary_key=True)
+    outlet_id: Mapped[str] = mapped_column(ForeignKey("outlet.outlet_id"), primary_key=True)
+    share: Mapped[float] = mapped_column(Numeric(4, 3, asdecimal=False))
+    run_share: Mapped[float] = mapped_column(Numeric(4, 3, asdecimal=False))
+    """How often the vehicle makes this run on that weekday."""
+
+
 class OrderStream(Base):
     """A store that orders on this weekday, with this temperature, in nearly every week of the history.
     The order queue uses it to list the stores that have not ordered yet."""

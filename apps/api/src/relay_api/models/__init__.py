@@ -49,6 +49,7 @@ from relay_api.models.reference import (
     ServiceHistory,
     TrafficSpeed,
     UsualRun,
+    UsualStop,
     Vehicle,
 )
 from relay_api.models.store import IssueKind, Receipt, ReceiptIssue, ReceiptStatus
@@ -107,6 +108,7 @@ __all__ = [
     "Trip",
     "TripStatus",
     "UsualRun",
+    "UsualStop",
     "Vehicle",
     "VehicleDay",
     "VehicleDayStatus",
