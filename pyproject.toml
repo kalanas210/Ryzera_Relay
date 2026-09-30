@@ -1,0 +1,36 @@
+# Python workspace: the planning engine and the API share one lockfile.
+[tool.uv.workspace]
+members = ["apps/api", "packages/engine"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "hypothesis>=6.120",
+  "httpx>=0.28",
+  "ruff>=0.8",
+  "mypy>=1.13",
+  "pandas>=2.2",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["tools/data-check", "apps/api/migrations/versions", "seed/build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PT"]
+ignore = ["RUF001", "RUF002", "RUF003", "C408"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["relay_engine", "relay_api"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["packages/engine/tests", "apps/api/tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+exclude = ["tools/", "migrations/"]
