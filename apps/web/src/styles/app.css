@@ -1,0 +1,226 @@
+@import "tailwindcss";
+
+/* Relay design tokens, from docs/design/04-style-guide.md and specs/components.md.
+   Tailwind's default palette is removed: every color in the app is one of these tokens. */
+
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("/fonts/atkinson-hyperlegible-next.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Yaldevi";
+  src: url("/fonts/yaldevi-sinhala.woff2") format("woff2");
+  font-weight: 200 700;
+  font-display: swap;
+  unicode-range: U+0D80-0DFF, U+200C-200D, U+25CC;
+}
+@font-face {
+  font-family: "Noto Sans Tamil";
+  src: url("/fonts/noto-sans-tamil.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0B80-0BFF, U+200C-200D, U+25CC;
+}
+
+@theme {
+  --color-*: initial;
+  --color-white: var(--relay-white);
+  --color-asphalt-900: var(--relay-asphalt-900);
+  --color-asphalt-700: var(--relay-asphalt-700);
+  --color-asphalt-500: var(--relay-asphalt-500);
+  --color-asphalt-300: var(--relay-asphalt-300);
+  --color-asphalt-200: var(--relay-asphalt-200);
+  --color-asphalt-100: var(--relay-asphalt-100);
+  --color-asphalt-50: var(--relay-asphalt-50);
+  --color-petrol-800: var(--relay-petrol-800);
+  --color-petrol-700: var(--relay-petrol-700);
+  --color-petrol-50: var(--relay-petrol-50);
+  --color-signal-400: var(--relay-signal-400);
+  --color-signal-ink: var(--relay-signal-ink);
+  --color-chilled: var(--relay-chilled);
+  --color-chilled-soft: var(--relay-chilled-soft);
+  --color-done: var(--relay-done);
+  --color-done-soft: var(--relay-done-soft);
+  --color-attention: var(--relay-attention);
+  --color-attention-soft: var(--relay-attention-soft);
+  --color-problem: var(--relay-problem);
+  --color-problem-soft: var(--relay-problem-soft);
+  --color-waiting: var(--relay-waiting);
+  --color-waiting-soft: var(--relay-waiting-soft);
+  --color-scrim: var(--relay-scrim);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --font-sans: "Atkinson Hyperlegible Next", "Yaldevi", "Noto Sans Tamil", system-ui, sans-serif;
+
+  --radius-chip: 6px;
+  --radius-button: 8px;
+  --radius-card: 12px;
+  --radius-sheet: 16px;
+
+  --shadow-float: 0 8px 24px rgb(20 24 31 / 0.12);
+}
+
+:root {
+  --relay-white: #ffffff;
+  --relay-asphalt-900: #14181f;
+  --relay-asphalt-700: #3a424e;
+  --relay-asphalt-500: #69727f;
+  --relay-asphalt-300: #b8bfc9;
+  --relay-asphalt-200: #d8dde4;
+  --relay-asphalt-100: #eceff3;
+  --relay-asphalt-50: #f5f7f9;
+  --relay-petrol-800: #0a4450;
+  --relay-petrol-700: #0f5563;
+  --relay-petrol-50: #e5f1f3;
+  --relay-signal-400: #f2b705;
+  --relay-signal-ink: #14181f;
+  --relay-chilled: #0a6ebd;
+  --relay-chilled-soft: #e4f1fb;
+  --relay-done: #1f7a4d;
+  --relay-done-soft: #e3f3ea;
+  --relay-attention: #a15c00;
+  --relay-attention-soft: #fcefd9;
+  --relay-problem: #b3261e;
+  --relay-problem-soft: #fbe9e7;
+  --relay-waiting: #69727f;
+  --relay-waiting-soft: #eceff3;
+  --relay-scrim: rgb(20 24 31 / 0.4);
+
+  color-scheme: light;
+  accent-color: var(--relay-petrol-700);
+}
+
+/* Night: the driver route only, following the phone's dark setting (spec-driver.md, Night token table).
+   data-night pins it either way from the driver's menu. */
+.night-capable {
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  .night-capable:not([data-night="off"]) {
+    --relay-white: #181d24;
+    --relay-asphalt-900: #eef1f5;
+    --relay-asphalt-700: #c4cbd4;
+    --relay-asphalt-500: #9aa3af;
+    --relay-asphalt-300: #46505c;
+    --relay-asphalt-200: #2f3741;
+    --relay-asphalt-100: #232a33;
+    --relay-asphalt-50: #0f1318;
+    --relay-petrol-800: #63aebd;
+    --relay-petrol-700: #7cc4d2;
+    --relay-petrol-50: #153840;
+    --relay-chilled: #72b8f0;
+    --relay-chilled-soft: #11283b;
+    --relay-done: #6ccb96;
+    --relay-done-soft: #14301f;
+    --relay-attention: #edae55;
+    --relay-attention-soft: #38280f;
+    --relay-problem: #f2958b;
+    --relay-problem-soft: #3b1815;
+    --relay-waiting: #9aa3af;
+    --relay-waiting-soft: #232a33;
+    --relay-scrim: rgb(0 0 0 / 0.6);
+  }
+}
+.night-capable[data-night="on"] {
+  color-scheme: dark;
+  --relay-white: #181d24;
+  --relay-asphalt-900: #eef1f5;
+  --relay-asphalt-700: #c4cbd4;
+  --relay-asphalt-500: #9aa3af;
+  --relay-asphalt-300: #46505c;
+  --relay-asphalt-200: #2f3741;
+  --relay-asphalt-100: #232a33;
+  --relay-asphalt-50: #0f1318;
+  --relay-petrol-800: #63aebd;
+  --relay-petrol-700: #7cc4d2;
+  --relay-petrol-50: #153840;
+  --relay-chilled: #72b8f0;
+  --relay-chilled-soft: #11283b;
+  --relay-done: #6ccb96;
+  --relay-done-soft: #14301f;
+  --relay-attention: #edae55;
+  --relay-attention-soft: #38280f;
+  --relay-problem: #f2958b;
+  --relay-problem-soft: #3b1815;
+  --relay-waiting: #9aa3af;
+  --relay-waiting-soft: #232a33;
+  --relay-scrim: rgb(0 0 0 / 0.6);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 22px;
+    color: var(--relay-asphalt-900);
+    background: var(--relay-asphalt-50);
+    -webkit-text-size-adjust: 100%;
+    font-size-adjust: from-font;
+  }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--relay-asphalt-50);
+  }
+  :lang(si) {
+    font-family: "Yaldevi", "Atkinson Hyperlegible Next", sans-serif;
+  }
+  :lang(ta) {
+    font-family: "Noto Sans Tamil", "Atkinson Hyperlegible Next", sans-serif;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid var(--relay-petrol-700);
+    outline-offset: 2px;
+  }
+  dialog::backdrop {
+    background: var(--relay-scrim);
+  }
+}
+
+@supports not (font-size-adjust: from-font) {
+  :lang(si),
+  :lang(ta) {
+    line-height: 1.6;
+  }
+}
+
+/* Type ramp. Sinhala and Tamil sit on a taller ramp so their marks never clip. */
+@layer components {
+  .t-display { font-size: 32px; line-height: 40px; font-weight: 700; }
+  .t-h1 { font-size: 24px; line-height: 32px; font-weight: 700; }
+  .t-h2 { font-size: 20px; line-height: 28px; font-weight: 600; }
+  .t-h3 { font-size: 16px; line-height: 24px; font-weight: 600; }
+  .t-field { font-size: 18px; line-height: 24px; font-weight: 600; }
+  .t-body { font-size: 15px; line-height: 22px; font-weight: 400; }
+  .t-body-strong { font-size: 15px; line-height: 22px; font-weight: 600; }
+  .t-dense { font-size: 14px; line-height: 20px; font-weight: 400; }
+  .t-dense-strong { font-size: 14px; line-height: 20px; font-weight: 600; }
+  .t-label { font-size: 13px; line-height: 18px; font-weight: 500; }
+  .t-label-strong { font-size: 13px; line-height: 18px; font-weight: 600; }
+  .t-caption { font-size: 12px; line-height: 16px; font-weight: 500; }
+  .t-button { font-size: 15px; line-height: 22px; font-weight: 600; }
+  .t-field-button { font-size: 18px; line-height: 24px; font-weight: 600; }
+
+  :lang(si) .t-display, :lang(ta) .t-display { line-height: 48px; }
+  :lang(si) .t-h1, :lang(ta) .t-h1 { line-height: 36px; }
+  :lang(si) .t-h2, :lang(ta) .t-h2 { line-height: 30px; }
+  :lang(si) .t-h3, :lang(ta) .t-h3 { line-height: 26px; }
+  :lang(si) .t-body, :lang(ta) .t-body, :lang(si) .t-body-strong, :lang(ta) .t-body-strong { line-height: 24px; }
+  :lang(si) .t-label, :lang(ta) .t-label, :lang(si) .t-label-strong, :lang(ta) .t-label-strong { line-height: 20px; }
+  :lang(si) .t-caption, :lang(ta) .t-caption { line-height: 18px; }
+  :lang(si) .t-field, :lang(ta) .t-field, :lang(si) .t-field-button, :lang(ta) .t-field-button { line-height: 28px; }
+
+  /* Numbers line up in columns; never a monospace face. */
+  .num { font-variant-numeric: tabular-nums; }
+  /* IDs, brand names and people's names stay in Latin, in Atkinson, in every language. */
+  .latin { font-family: "Atkinson Hyperlegible Next", sans-serif; }
+}

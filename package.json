@@ -1,0 +1,12 @@
+{
+  "name": "relay",
+  "private": true,
+  "packageManager": "pnpm@10.30.1",
+  "scripts": {
+    "dev": "pnpm --filter @relay/web dev",
+    "build": "pnpm --filter @relay/web build",
+    "test": "pnpm --filter @relay/web test",
+    "lint": "pnpm --filter @relay/web lint",
+    "e2e": "pnpm --filter @relay/e2e test"
+  }
+}
