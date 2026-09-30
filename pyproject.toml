@@ -16,7 +16,7 @@ dev = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-extend-exclude = ["tools/data-check", "apps/api/migrations/versions", "seed/build"]
+extend-exclude = ["tools/data-check", "apps/api/migrations/versions", "seed/scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PT"]

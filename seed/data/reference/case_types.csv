@@ -1,0 +1,9 @@
+code,name,brand,temp,kg,m3,load_rank
+rice_dhal,Rice and dhal case,Fresh,ambient,10.0,0.04,1
+packet_foods,Packet foods case,Fresh,ambient,5.2,0.036,2
+tea_biscuit,Tea and biscuit case,Fresh,ambient,4.4,0.034,3
+dairy,Dairy crate,Fresh,chilled,8.4,0.038,1
+meat_fish,Meat and fish box,Fresh,chilled,7.2,0.03,2
+produce,Produce crate,Fresh,chilled,5.6,0.042,3
+garment_carton,Garment carton,Style,ambient,14.4,0.23,1
+appliance,Appliance,Tech,ambient,213.6,0.707,1
