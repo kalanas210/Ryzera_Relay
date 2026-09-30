@@ -1,0 +1,24 @@
+# Keep the build context small and never copy local installs into an image.
+**/node_modules
+**/dist
+**/.vite
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.hypothesis
+**/coverage
+**/playwright-report
+**/test-results
+.git
+.claude
+data
+docs
+tools
+e2e/tests
+Challenge Booklet.pdf
+.env
+.env.*
+!.env.example
