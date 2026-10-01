@@ -309,3 +309,57 @@ export function useConfirm(planId: string | undefined, depot: DepotName) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------------------------- after publishing
+export type StopShift = {
+  order_ref: string;
+  outlet_id: string;
+  place: string;
+  from_seq: number;
+  to_seq: number;
+  closes: string;
+  expected_before: string;
+  expected_after: string;
+  margin_before: number;
+  margin_after: number;
+};
+export type ReorderPreview = {
+  vehicle_id: string;
+  trip_no: number;
+  stops: StopShift[];
+  broken: string[];
+  costs: string[];
+  told: string[];
+};
+
+function reorderPath(planId: string, vehicleId: string, tripNo: number) {
+  return `/api/dispatch/plan/${planId}/trips/${vehicleId}/${tripNo}/reorder`;
+}
+
+/** What a new stop order on a published trip costs, asked before anyone is told. */
+export function useReorderPreview(planId: string, vehicleId: string, tripNo: number, orderRefs: string[] | null) {
+  return useQuery({
+    queryKey: ["reorder-preview", planId, vehicleId, tripNo, orderRefs?.join(",")],
+    queryFn: ({ signal }) =>
+      api.post<ReorderPreview>(
+        `${reorderPath(planId, vehicleId, tripNo)}/preview`,
+        { order_refs: orderRefs },
+        {
+          role,
+          signal,
+        },
+      ),
+    enabled: Boolean(orderRefs),
+    staleTime: 0,
+  });
+}
+
+export function useReorder(depot: DepotName, planId: string | undefined) {
+  return useBoardMutation(depot, (input: { vehicle_id: string; trip_no: number; order_refs: string[]; note: string }) =>
+    api.post<Board>(
+      reorderPath(planId ?? "", input.vehicle_id, input.trip_no),
+      { order_refs: input.order_refs, note: input.note },
+      { role },
+    ),
+  );
+}

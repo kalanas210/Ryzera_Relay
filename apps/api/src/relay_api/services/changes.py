@@ -29,7 +29,7 @@ from relay_api.models import (
 from relay_api.schemas.common import Schema
 from relay_api.services import network as adapters
 from relay_api.services import words
-from relay_api.services.dock import Lookup, quiet_until
+from relay_api.services.dock import DEPOT_LABEL, Lookup, quiet_until
 from relay_api.services.notify import notify_store
 from relay_api.services.planning import PlanError, context, run_orders, stored_trips
 from relay_engine.model import Trip as EngineTrip
@@ -127,7 +127,7 @@ def preview_reorder(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[st
             who = manager.display_name if manager else f"{s.outlet_id} {s.place}"
             told.append(f"{who} is told the new time, around {words.clock(words.round5(s.expected_after))}.")
     driver = look.driver_of(trip, plan.run_date)
-    told.insert(0, f"The {plan.depot} dock sees the new loading order.")
+    told.insert(0, f"The {DEPOT_LABEL.get(plan.depot, plan.depot)} dock sees the new loading order.")
     if driver is not None:
         told.insert(1, f"{driver.display_name}'s run sheet updates.")
     return ReorderPreview(

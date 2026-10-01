@@ -9,6 +9,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import {
+  ArrowUp,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -29,7 +30,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/api/client";
-import { Button } from "@/design/Button";
+import { Button, IconButton } from "@/design/Button";
 import { Meter } from "@/design/Meter";
 import { Notice } from "@/design/Notice";
 import { Segmented } from "@/design/Segmented";
@@ -50,6 +51,7 @@ import {
   useUndo,
   type Waiting,
 } from "./api";
+import { ChangeOrder } from "./ChangeOrder";
 import { DeferralsDrawer } from "./Deferrals";
 import { PublishCheck } from "./PublishCheck";
 
@@ -778,6 +780,13 @@ const ACCESS: Record<string, { word: string; icon: typeof Warehouse }> = {
 function TripDetail({ trip, lane, depot, board }: { trip: PlanTrip; lane: Lane; depot: DepotName; board: Board }) {
   const undo = useUndo(depot, board.plan.id);
   const [open, setOpen] = useState(false);
+  const [proposed, setProposed] = useState<string[] | null>(null);
+  const published = board.plan.status === "published";
+  const moveEarlier = (index: number) => {
+    const refs = trip.stops.map((s) => s.order_ref);
+    [refs[index - 1], refs[index]] = [refs[index] as string, refs[index - 1] as string];
+    setProposed(refs);
+  };
   const broken = trip.rules.filter((r) => !r.passed);
   const fresh = trip.brand === "Fresh";
   const kind = trip.temp === "chilled" ? "Fresh chilled" : fresh ? "Fresh dry" : trip.brand;
@@ -907,6 +916,11 @@ function TripDetail({ trip, lane, depot, board }: { trip: PlanTrip; lane: Lane; 
           <p className="t-label-strong text-asphalt-700">Stops, in delivery order</p>
           <span className="t-caption text-asphalt-500">Planned</span>
         </div>
+        {published && trip.stops.length > 1 ? (
+          <p className="t-caption text-asphalt-500">
+            Published. Move a stop earlier and Relay shows the cost before the dock, the driver and the stores are told.
+          </p>
+        ) : null}
         <ol className="mt-1 flex flex-col">
           {trip.stops.map((s, i) => {
             const late = s.planned.slice(11, 16) > s.window_close;
@@ -935,6 +949,18 @@ function TripDetail({ trip, lane, depot, board }: { trip: PlanTrip; lane: Lane; 
                   </p>
                 </div>
                 <span className={cx("num t-label", late && "text-problem")}>{formatTime(s.planned)}</span>
+                {published && trip.stops.length > 1 ? (
+                  i > 0 ? (
+                    <IconButton
+                      icon={ArrowUp}
+                      density="desk"
+                      label={`Move ${s.short_name} earlier, to stop ${i}`}
+                      onClick={() => moveEarlier(i)}
+                    />
+                  ) : (
+                    <span className="size-8 shrink-0" />
+                  )
+                ) : null}
               </li>
             );
           })}
@@ -951,6 +977,15 @@ function TripDetail({ trip, lane, depot, board }: { trip: PlanTrip; lane: Lane; 
           <CircleDot size={14} strokeWidth={1.75} aria-hidden />
           {trip.vehicle_id}'s usual run on a {formatWeekday(dayOf(board.plan.run_date))}.
         </p>
+      ) : null}
+      {published ? (
+        <ChangeOrder
+          planId={board.plan.id}
+          depot={depot}
+          trip={trip}
+          order={proposed}
+          onClose={() => setProposed(null)}
+        />
       ) : null}
     </section>
   );
