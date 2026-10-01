@@ -1,17 +1,27 @@
+import { type ComponentType, lazy } from "react";
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { SignIn } from "@/auth/SignIn";
-import { DispatcherShell } from "@/roles/dispatcher/DispatcherShell";
-import { LivePage } from "@/roles/dispatcher/live/LivePage";
-import { PlanPage } from "@/roles/dispatcher/plan/PlanPage";
-import { QueuePage } from "@/roles/dispatcher/Queue";
-import { HandoverPage } from "@/roles/loader/Handover";
-import { LoaderShell } from "@/roles/loader/LoaderShell";
-import { LoadVehiclePage } from "@/roles/loader/LoadVehicle";
-import { TonightPage } from "@/roles/loader/Tonight";
 import { Placeholder } from "@/roles/Placeholder";
-import { MyOrders } from "@/roles/store/MyOrders";
-import { PlaceOrder } from "@/roles/store/PlaceOrder";
 import { RoleLayout } from "./RoleLayout";
+
+/** Each role's screens load as their own chunk, so a driver's phone never downloads the dispatcher's board. */
+function page<M, K extends keyof M>(load: () => Promise<M>, name: K) {
+  return lazy(async () => ({ default: (await load())[name] as ComponentType }));
+}
+
+const dispatcher = () => import("@/roles/dispatcher");
+const loader = () => import("@/roles/loader");
+const store = () => import("@/roles/store");
+const DispatcherShell = page(dispatcher, "DispatcherShell");
+const QueuePage = page(dispatcher, "QueuePage");
+const PlanPage = page(dispatcher, "PlanPage");
+const LivePage = page(dispatcher, "LivePage");
+const LoaderShell = page(loader, "LoaderShell");
+const TonightPage = page(loader, "TonightPage");
+const LoadVehiclePage = page(loader, "LoadVehiclePage");
+const HandoverPage = page(loader, "HandoverPage");
+const MyOrders = page(store, "MyOrders");
+const PlaceOrder = page(store, "PlaceOrder");
 
 export const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/signin" replace /> },

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import { Navigate, ScrollRestoration, useLocation } from "react-router";
 import type { Role } from "@/api/client";
 import { DemoBar } from "@/demo/DemoBar";
@@ -26,7 +26,11 @@ export function RoleLayout({ appRole: role, children }: { appRole: Role; childre
     <RoleProvider role={role}>
       <ScrollRestoration />
       <DemoBar />
-      {children}
+      <Suspense
+        fallback={<div className="flex min-h-dvh items-center justify-center t-body text-asphalt-500">Loading</div>}
+      >
+        {children}
+      </Suspense>
     </RoleProvider>
   );
 }

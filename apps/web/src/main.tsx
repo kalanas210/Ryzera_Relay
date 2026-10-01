@@ -1,3 +1,4 @@
+import { registerSW } from "virtual:pwa-register";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -15,6 +16,9 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Cache the app shell for the field roles' phones; a new build takes over on the next load.
+registerSW({ immediate: true });
 
 const root = document.getElementById("root");
 if (!root) throw new Error("No #root element");
