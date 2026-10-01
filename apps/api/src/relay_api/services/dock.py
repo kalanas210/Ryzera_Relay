@@ -188,7 +188,7 @@ def loads_for(db: Session, trips: Sequence[Trip]) -> dict[uuid.UUID, Load]:
     ids = [t.id for t in trips]
     loads = {t.id: Load(t) for t in trips}
     order_ids = [s.order_id for t in trips for s in t.stops]
-    refs = dict(db.execute(select(Order.id, Order.order_ref).where(Order.id.in_(order_ids))).tuples().all())
+    refs = dict(db.execute(select(Order.id, Order.order_ref).where(Order.id.in_(order_ids))).all())
     for t in trips:
         loads[t.id].refs = {s.id: refs[s.order_id] for s in t.stops}
     trip_of_line: dict[uuid.UUID, uuid.UUID] = {}

@@ -1,7 +1,7 @@
 """The eleven rules, on the moves the Designathon's plan board shows."""
 
 import pytest
-from conftest import story_orders, story_vehicles, usual_runs
+from story_data import story_orders, story_vehicles, usual_runs
 
 from relay_engine.clock import Conditions
 from relay_engine.model import Trip

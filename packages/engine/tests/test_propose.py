@@ -2,7 +2,7 @@
 vehicles are in the workshop, so one chilled order has to wait, and Relay's rules choose which."""
 
 import pytest
-from conftest import protected_orders, story_orders, story_vehicles, usual_runs
+from story_data import protected_orders, story_orders, story_vehicles, usual_runs
 
 from relay_engine.clock import Conditions, format_clock
 from relay_engine.model import TripReport

@@ -5,7 +5,7 @@ name: relay
 
 x-api-env: &api-env
   RELAY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-relay}:${POSTGRES_PASSWORD:-relay}@db:5432/${POSTGRES_DB:-relay}
-  RELAY_SECRET_KEY: ${RELAY_SECRET_KEY:-local-only-secret-change-me}
+  RELAY_SECRET_KEY: ${RELAY_SECRET_KEY:-local-only-secret-change-me-before-deploying}
   RELAY_DEMO_MODE: ${RELAY_DEMO_MODE:-true}
   RELAY_SEED_PASSWORD: ${RELAY_SEED_PASSWORD:-relay2026}
   RELAY_COOKIE_SECURE: ${RELAY_COOKIE_SECURE:-false}

@@ -28,6 +28,10 @@ known-first-party = ["relay_engine", "relay_api"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["packages/engine/tests", "apps/api/tests"]
+filterwarnings = [
+  # FastAPI's TestClient still wraps httpx; nothing in Relay uses it outside the tests
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
 
 [tool.mypy]
 python_version = "3.11"

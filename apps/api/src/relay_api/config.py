@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RELAY_", env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://relay:relay@localhost:5432/relay"
-    secret_key: str = "dev-only-secret-change-me"
+    secret_key: str = "dev-only-secret-change-me-before-any-deploy"
     session_hours: int = 12
     cookie_secure: bool = False
 
