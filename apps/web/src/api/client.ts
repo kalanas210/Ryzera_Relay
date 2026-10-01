@@ -65,4 +65,5 @@ export const api = {
     request<T>("POST", path, { ...options, body: body ?? {} }),
   patch: <T>(path: string, body?: unknown, options?: Omit<Options, "body">) =>
     request<T>("PATCH", path, { ...options, body: body ?? {} }),
+  del: <T>(path: string, options?: Omit<Options, "body">) => request<T>("DELETE", path, options),
 };

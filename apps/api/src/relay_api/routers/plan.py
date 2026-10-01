@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from relay_api.models import AppUser, Plan, Role, VehicleDay, VehicleDayStatus
+from relay_api.models import AppUser, Plan, Role, Trip, VehicleDay, VehicleDayStatus
 from relay_api.schemas.plan import BoardOut, FitOut
 from relay_api.security import require
 from relay_api.services import board as boards
+from relay_api.services import changes, planning
 from relay_api.services import drawer as drawers
-from relay_api.services import planning
 from relay_api.services.ordering import current_run
 from relay_api.workspaces import Scope, ScopeDep
 
@@ -135,6 +135,42 @@ def check(plan_id: uuid.UUID, scope: ScopeDep, _user: Dispatcher) -> dict[str, A
 def publish(plan_id: uuid.UUID, scope: ScopeDep, user: Dispatcher) -> BoardOut:
     plan = _plan(scope, plan_id)
     _guard(lambda: planning.publish(scope.db, scope.now, plan, user))
+    scope.db.commit()
+    return boards.board(scope.db, scope.now, plan)
+
+
+class ReorderIn(BaseModel):
+    order_refs: list[str] = Field(min_length=1, max_length=12, description="The trip's orders in the new stop order")
+    note: str = Field(default="", max_length=300)
+
+
+def _published_trip(scope: Scope, plan: Plan, vehicle_id: str, trip_no: int) -> Trip:
+    trip = scope.db.scalar(
+        select(Trip).where(Trip.plan_id == plan.id, Trip.vehicle_id == vehicle_id, Trip.trip_no == trip_no)
+    )
+    if trip is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such trip")
+    return trip
+
+
+@router.post("/{plan_id}/trips/{vehicle_id}/{trip_no}/reorder/preview", response_model=changes.ReorderPreview)
+def reorder_preview(
+    plan_id: uuid.UUID, vehicle_id: str, trip_no: int, body: ReorderIn, scope: ScopeDep, _user: Dispatcher
+) -> changes.ReorderPreview:
+    """What a new stop order on a published trip costs, before anyone is told."""
+    plan = _plan(scope, plan_id)
+    trip = _published_trip(scope, plan, vehicle_id, trip_no)
+    return _guard(lambda: changes.preview_reorder(scope.db, plan, trip, body.order_refs))
+
+
+@router.post("/{plan_id}/trips/{vehicle_id}/{trip_no}/reorder", response_model=BoardOut)
+def reorder(
+    plan_id: uuid.UUID, vehicle_id: str, trip_no: int, body: ReorderIn, scope: ScopeDep, user: Dispatcher
+) -> BoardOut:
+    """Change the stop order of a published trip. The dock, the driver and each store whose time moved are told."""
+    plan = _plan(scope, plan_id)
+    trip = _published_trip(scope, plan, vehicle_id, trip_no)
+    _guard(lambda: changes.reorder(scope.db, scope.now, plan, trip, body.order_refs, user, body.note))
     scope.db.commit()
     return boards.board(scope.db, scope.now, plan)
 

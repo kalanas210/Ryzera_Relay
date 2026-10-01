@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router/dom";
 import { ApiError } from "./api/client";
 import { router } from "./app/router";
+import "./i18n";
 import "./styles/app.css";
 
 const queryClient = new QueryClient({

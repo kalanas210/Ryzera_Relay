@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -35,6 +35,8 @@ from relay_api.models import (
     TripStatus,
 )
 from relay_api.services import network as adapters
+from relay_api.services import words
+from relay_api.services.engine_cache import propose_cached
 from relay_api.services.notify import notify_store
 from relay_api.services.ordering import next_operating_day
 from relay_engine.clock import sequence_stops
@@ -137,7 +139,7 @@ def propose_plan(db: Session, now: datetime, plan: Plan, *, forced: Iterable[str
         conditions=ctx.conditions,
         protected=protected,
     )
-    result = propose(run)
+    result = propose_cached(db, run)
     _write_trips(db, plan, result.trips, by_ref)
     _write_deferrals(db, now, plan, result.deferred, result.analyses, by_ref, forced)
     plan.version += 1
@@ -636,7 +638,7 @@ def publish(db: Session, now: datetime, plan: Plan, user: AppUser | None) -> Non
         for stop in stops:
             order = by_id[stop.order_id]
             outlet = db.get(Outlet, order.outlet_id)
-            expected = _round5(stop.expected_arrival or stop.planned_arrival)
+            expected = words.round5(stop.expected_arrival or stop.planned_arrival)
             kind = "chilled" if order.temp == "chilled" else "dry" if order.brand == "Fresh" else order.brand
             notify_store(
                 db,
@@ -679,23 +681,10 @@ def publish(db: Session, now: datetime, plan: Plan, user: AppUser | None) -> Non
     )
 
 
-def _round5(moment: datetime) -> datetime:
-    local = moment.astimezone(COLOMBO)
-    minutes = round((local.hour * 60 + local.minute + local.second / 60) / 5) * 5
-    return local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=minutes)
-
-
 def _clock(moment: datetime) -> str:
     local = moment.astimezone(COLOMBO)
     return ampm(local.hour * 60 + local.minute)
 
 
 def _window(outlet: Outlet | None) -> str:
-    if outlet is None:
-        return ""
-    open_, close = outlet.window_open, outlet.window_close
-    a = ampm(int(open_[:2]) * 60 + int(open_[3:]))
-    b = ampm(int(close[:2]) * 60 + int(close[3:]))
-    if a[-2:] == b[-2:]:
-        return f"{a[:-3]} to {b}"
-    return f"{a} to {b}"
+    return words.window(outlet.window_open, outlet.window_close) if outlet else ""

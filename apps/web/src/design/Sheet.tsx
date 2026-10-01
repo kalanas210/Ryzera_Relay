@@ -16,6 +16,8 @@ type Props = {
   /** A drawer without a scrim leaves the page behind it readable (DEG-03 / move stop 4). */
   modal?: boolean;
   dismissible?: boolean;
+  /** The close button's accessible name, in the reader's language. */
+  closeLabel?: string;
 };
 
 /** Sheets, drawers and dialogs, all on the native <dialog>: the browser traps focus, handles Esc and
@@ -31,6 +33,7 @@ export function Sheet({
   meta,
   modal = true,
   dismissible = true,
+  closeLabel = "Close",
 }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -100,7 +103,12 @@ export function Sheet({
           {meta ? <p className="t-label mt-0.5 text-asphalt-700">{meta}</p> : null}
         </div>
         {dismissible ? (
-          <IconButton icon={X} label="Close" density={variant === "bottom" ? "field" : "store"} onClick={onClose} />
+          <IconButton
+            icon={X}
+            label={closeLabel}
+            density={variant === "bottom" ? "field" : "store"}
+            onClick={onClose}
+          />
         ) : null}
       </header>
       <div className={cx("min-h-0 flex-1 overflow-y-auto", variant === "bottom" ? "px-4 pb-4" : "px-6 py-4")}>

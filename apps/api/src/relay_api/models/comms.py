@@ -25,7 +25,8 @@ class Notification(WorkspaceScoped, Base):
     data: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime]
     show_after: Mapped[datetime]
-    """Night notices to stores wait for the morning."""
+    """When it may ring. A notice to a store between 10:00 PM and 5:00 AM arrives silently at once, readable in
+    the app, and rings at 5:00 AM."""
     read_at: Mapped[datetime | None]
     acknowledged_at: Mapped[datetime | None]
 

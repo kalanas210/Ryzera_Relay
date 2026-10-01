@@ -16,10 +16,17 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   reason?: ReactNode;
 };
 
+/** Store and field buttons grow to a second line rather than clip: Sinhala and Tamil labels run longer. */
 const HEIGHT: Record<Density, { primary: string; other: string; compact: string; text: string; icon: number }> = {
   desk: { primary: "h-9", other: "h-9", compact: "h-8", text: "t-dense-strong", icon: 20 },
-  store: { primary: "h-12", other: "h-12", compact: "h-11", text: "t-button", icon: 20 },
-  field: { primary: "h-14", other: "h-12", compact: "h-12", text: "t-field-button", icon: 24 },
+  store: { primary: "min-h-12 py-1.5", other: "min-h-12 py-1.5", compact: "min-h-11 py-1", text: "t-button", icon: 20 },
+  field: {
+    primary: "min-h-14 py-2",
+    other: "min-h-12 py-1.5",
+    compact: "min-h-12 py-1",
+    text: "t-field-button",
+    icon: 24,
+  },
 };
 
 const VARIANT: Record<Variant, string> = {
@@ -53,7 +60,7 @@ export function Button({
       type={type}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center justify-center gap-2 rounded-button px-4 transition-colors select-none",
+        "inline-flex items-center justify-center gap-2 rounded-button px-4 text-center transition-colors select-none",
         "disabled:cursor-not-allowed",
         height,
         text,

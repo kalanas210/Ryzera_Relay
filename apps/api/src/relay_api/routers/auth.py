@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -59,6 +59,18 @@ def logout(request: Request, response: Response) -> None:
 
 @router.get("/me", response_model=Me)
 def me(user: CurrentUser) -> AppUser:
+    return user
+
+
+class LocaleIn(BaseModel):
+    locale: Literal["en", "si", "ta"]
+
+
+@router.patch("/me", response_model=Me)
+def set_locale(body: LocaleIn, user: CurrentUser, db: Db) -> AppUser:
+    """Each person's language comes back when they sign in, on any device."""
+    user.locale = body.locale
+    db.commit()
     return user
 
 

@@ -55,3 +55,5 @@ class DemoState(Schema):
     rate: float
     moments: list[MomentOut]
     next: MomentOut | None
+    played: list[str] = []
+    """Story steps the last jump played because nobody had taken them."""

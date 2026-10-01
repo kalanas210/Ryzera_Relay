@@ -151,10 +151,11 @@
 }
 
 @layer base {
+  /* The root stays at 16px so every rem-based size (touch targets of 48, 56 and 64) is what the design says;
+     body text is set to the design's 15px on body. */
   html {
     font-family: var(--font-sans);
-    font-size: 15px;
-    line-height: 22px;
+    font-size: 16px;
     color: var(--relay-asphalt-900);
     background: var(--relay-asphalt-50);
     -webkit-text-size-adjust: 100%;
@@ -163,13 +164,17 @@
   body {
     margin: 0;
     min-height: 100dvh;
+    font-size: 15px;
+    line-height: 22px;
     background: var(--relay-asphalt-50);
   }
+  /* Atkinson first: it has no Sinhala or Tamil letters, so those fall through to Yaldevi or Noto Sans Tamil
+     glyph by glyph, while IDs, names and digits stay in Atkinson in every language. */
   :lang(si) {
-    font-family: "Yaldevi", "Atkinson Hyperlegible Next", sans-serif;
+    font-family: "Atkinson Hyperlegible Next", "Yaldevi", sans-serif;
   }
   :lang(ta) {
-    font-family: "Noto Sans Tamil", "Atkinson Hyperlegible Next", sans-serif;
+    font-family: "Atkinson Hyperlegible Next", "Noto Sans Tamil", sans-serif;
   }
   button {
     cursor: pointer;

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Clock, CopyPlus, FastForward, RotateCcw, Users } from "lucide-react";
+import { ChevronRight, Clock, CopyPlus, FastForward, ListChecks, RotateCcw, Users, X } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/api/client";
 import type { DemoState } from "@/api/types";
@@ -17,10 +17,12 @@ export function DemoBar({ tone = "light" }: { tone?: "light" | "dark" }) {
   const now = useSimNow(15_000);
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [played, setPlayed] = useState<string[]>([]);
 
   const act = useMutation({
     mutationFn: (input: { path: string; body?: unknown }) => api.post<DemoState>(input.path, input.body),
     onSuccess: (state) => {
+      setPlayed(state.played ?? []);
       client.setQueryData(["demo"], state);
       // everything on screen depends on the clock or the copy of the day
       void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "demo" && q.queryKey[0] !== "me" });
@@ -63,7 +65,7 @@ export function DemoBar({ tone = "light" }: { tone?: "light" | "dark" }) {
               )}
             >
               <FastForward size={16} strokeWidth={1.75} aria-hidden />
-              {formatTime(next.at)}: {next.label}
+              {act.isPending ? "Moving the clock" : `${formatTime(next.at)}: ${next.label}`}
             </button>
           ) : null}
           <button
@@ -80,6 +82,33 @@ export function DemoBar({ tone = "light" }: { tone?: "light" | "dark" }) {
         </span>
       </div>
 
+      {played.length ? (
+        <div
+          role="status"
+          className={cx(
+            "flex items-start gap-3 px-4 py-2 t-label",
+            tone === "dark" ? "bg-asphalt-700 text-white" : "border-b border-asphalt-200 bg-petrol-50 text-asphalt-900",
+          )}
+        >
+          <ListChecks size={16} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="t-label-strong">
+              Relay played {played.length === 1 ? "the step" : `the ${played.length} steps`} you skipped, as the story
+              goes:
+            </p>
+            <p>{played.join(". ")}.</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setPlayed([])}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-button hover:bg-black/5"
+          >
+            <X size={16} strokeWidth={1.75} aria-hidden />
+          </button>
+        </div>
+      ) : null}
+
       <Sheet
         open={open}
         onClose={() => setOpen(false)}
@@ -93,7 +122,8 @@ export function DemoBar({ tone = "light" }: { tone?: "light" | "dark" }) {
             <h3 className="t-h3">Jump to a moment in the story</h3>
             <p className="t-dense text-asphalt-700">
               The day runs on a scenario clock that starts on Tuesday 7 April 2026 at 2:05 PM. The clock only moves
-              forward; people you are not playing act on time as it passes.
+              forward; people you are not playing act on time as it passes. When you jump ahead, Relay plays the story
+              steps you skipped (the plan, the swap, the loading), so every screen matches the moment.
             </p>
             <ol className="flex flex-col">
               {data.moments.map((m) => (

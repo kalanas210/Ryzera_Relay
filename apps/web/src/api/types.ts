@@ -29,4 +29,6 @@ export type DemoState = {
   rate: number;
   moments: Moment[];
   next: Moment | null;
+  /** Story steps the last jump played because nobody had taken them. */
+  played: string[];
 };

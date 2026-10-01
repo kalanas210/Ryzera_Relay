@@ -1,6 +1,6 @@
 username,display_name,role,depot,outlet_id,vehicle_id,locale,pin,judge
 nuwan,Nuwan Perera,dispatcher,,,,en,,1
-rizwan,Mohamed Rizwan,loader,Kandy,,,ta,2580,1
+rizwan,Mohamed Rizwan,loader,Kandy,,,en,2580,1
 anjali,Anjali Wickramasinghe,loader,Kandy,,,si,1357,
 suresh,Suresh Kumar,loader,Kandy,,,ta,4826,
 dilani,Dilani Jayawardena,store_manager,,OUT117,,en,,1
@@ -48,7 +48,7 @@ driver.veh041,Thilina Karunaratne,driver,Kandy,,VEH041,si,,
 driver.veh042,Sampath Lakmal,driver,Kandy,,VEH042,si,,
 driver.veh043,Prakash Sivakumar,driver,Kandy,,VEH043,si,,
 driver.veh044,Suresh Nadarajah,driver,Kandy,,VEH044,si,,
-kasun,Kasun Bandara,driver,Kandy,,VEH045,si,3690,1
+kasun,Kasun Bandara,driver,Kandy,,VEH045,en,3690,1
 driver.veh046,Chanaka Kodithuwakku,driver,Kandy,,VEH046,si,,
 driver.veh047,Indika Ekanayake,driver,Kandy,,VEH047,si,,
 driver.veh048,Waruna Dissanayake,driver,Kandy,,VEH048,si,,

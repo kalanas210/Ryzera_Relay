@@ -309,7 +309,9 @@ def main() -> None:
     # people --------------------------------------------------------------------
     people = [
         dict(username="nuwan", display_name="Nuwan Perera", role="dispatcher", depot="", locale="en", judge="1"),
-        dict(username="rizwan", display_name="Mohamed Rizwan", role="loader", depot="Kandy", locale="ta", pin="2580", judge="1"),
+        # The four judge accounts start in English so the screens can be reviewed; Rizwan reads Tamil most easily
+        # and switches with one tap, and the tablet brings each loader's own language back at sign-in.
+        dict(username="rizwan", display_name="Mohamed Rizwan", role="loader", depot="Kandy", locale="en", pin="2580", judge="1"),
         dict(username="anjali", display_name="Anjali Wickramasinghe", role="loader", depot="Kandy", locale="si", pin="1357"),
         dict(username="suresh", display_name="Suresh Kumar", role="loader", depot="Kandy", locale="ta", pin="4826"),
         dict(username="dilani", display_name="Dilani Jayawardena", role="store_manager", outlet_id="OUT117", locale="en", judge="1"),
@@ -327,7 +329,7 @@ def main() -> None:
         used_names.add(name)
         username = "kasun" if vid == "VEH045" else f"driver.{vid.lower()}"
         people.append(dict(username=username, display_name=name, role="driver", depot=M.VEH.loc[vid, "depot"],
-                           vehicle_id=vid, locale="si", judge="1" if vid == "VEH045" else "",
+                           vehicle_id=vid, locale="en" if vid == "VEH045" else "si", judge="1" if vid == "VEH045" else "",
                            pin="3690" if vid == "VEH045" else ""))
     write(STORY / "people.csv", ["username", "display_name", "role", "depot", "outlet_id", "vehicle_id", "locale", "pin", "judge"], people)
 
@@ -338,7 +340,8 @@ def main() -> None:
     vdays = []
     for day in (WED, THU):
         for vid in sorted(M.VEH.index):
-            st = status_wed.get(vid, "running") if day == WED else ("available" if vid != "VEH058" else "workshop")
+            # Thursday: VEH039 is repaired, and VEH058 is back from its service as the hub's usual standby
+            st = status_wed.get(vid, "running") if day == WED else ("standby" if vid == "VEH058" else "available")
             status = {"workshop": "workshop", "standby": "standby"}.get(st, "available")
             if day == WED:
                 used = fuel.get(vid, round(typ.get((vid, "Mon"), 0.0) + typ.get((vid, "Tue"), 0.0), 1))

@@ -1,9 +1,13 @@
-"""The world simulator: the stores, loaders and drivers a judge is not playing.
+"""Keeping a copy of the day up to its scenario clock.
 
-Scripted events (a store placing its order at 3:40 PM) wait in scheduled_event until the scenario
-clock reaches them, then run through the same services a person would use. Catching up is
-idempotent and ordered, so jumping the clock forward by hours applies everything in between once.
-Rows are claimed with SKIP LOCKED, so several API workers never apply the same event twice.
+Three things move with the clock, applied in time order so a jump of hours lands on a consistent day:
+- scheduled events: the stores that order later in the afternoon, each run through the same service a store uses;
+- the world simulator (`world.advance`): the loaders and drivers nobody is playing;
+- when the demo bar jumps the clock, the story autopilot (`story`): the judge characters' own steps that the jump
+  skipped past.
+
+Everything is idempotent. The workspace row is locked while a copy catches up, so the background tick and a jump
+never apply the same step twice; the tick simply skips a copy that is busy.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from relay_api.clock import sim_now
 from relay_api.db import scope_to_workspace
 from relay_api.models import OrderSource, Outlet, ScheduledEvent, Workspace
 from relay_api.seed.story import parse_lines
+from relay_api.services import story, world
 from relay_api.services.ordering import LineInput, place_order
 
 log = logging.getLogger("relay.simulator")
@@ -44,15 +49,11 @@ def _place_order(db: Session, event: ScheduledEvent) -> None:
 HANDLERS = {"place_order": _place_order}
 
 
-def catch_up(db: Session, workspace: Workspace, until: datetime | None = None) -> int:
-    """Apply every scheduled event due by `until` (default: the workspace's scenario time now)."""
-    scope_to_workspace(db, workspace.id)
-    now = until or sim_now(workspace)
+def _apply_events(db: Session, until: datetime) -> None:
     events = db.scalars(
         select(ScheduledEvent)
-        .where(ScheduledEvent.done_at.is_(None), ScheduledEvent.due_at <= now)
+        .where(ScheduledEvent.done_at.is_(None), ScheduledEvent.due_at <= until)
         .order_by(ScheduledEvent.due_at)
-        .with_for_update(skip_locked=True)
     ).all()
     for event in events:
         handler = HANDLERS.get(event.kind)
@@ -62,5 +63,46 @@ def catch_up(db: Session, workspace: Workspace, until: datetime | None = None) -
             handler(db, event)
         event.done_at = event.due_at
     if events:
-        db.commit()
-    return len(events)
+        db.flush()
+
+
+def catch_up(
+    db: Session, workspace: Workspace, until: datetime | None = None, *, jumped_from: datetime | None = None
+) -> list[str]:
+    """Bring a copy of the day up to `until` (default: its scenario time now). With `jumped_from`, also play
+    the story steps the jump skipped. Returns the labels of the steps played."""
+    scope_to_workspace(db, workspace.id)
+    locked = db.scalar(
+        select(Workspace)
+        .where(Workspace.id == workspace.id)
+        .with_for_update(skip_locked=jumped_from is None)
+        .execution_options(populate_existing=True)
+    )
+    if locked is None:
+        return []  # a jump is catching this copy up; the next tick will find it current
+    now = until or sim_now(locked)
+    played: list[str] = []
+    if jumped_from is not None:
+        people = story.cast(db)
+        while people is not None:
+            due = story.pending(db, locked, now)
+            if not due:
+                break
+            moment, step = due[0]
+            stamp = max(moment, jumped_from)
+            _apply_events(db, stamp)
+            world.advance(db, stamp)
+            try:
+                with db.begin_nested():  # a step that fails leaves no half-done change behind
+                    did = step.play(db, stamp, people)
+            except Exception:
+                log.exception("Story step %s failed", step.key)
+                did = False
+            story.settle(locked, step, did)
+            if did:
+                played.append(step.label)
+            db.flush()
+    _apply_events(db, now)
+    world.advance(db, now)
+    db.commit()
+    return played

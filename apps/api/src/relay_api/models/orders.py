@@ -29,6 +29,8 @@ class OrderSource(enum.StrEnum):
     STORE = "store"
     SEED = "seed"
     SIMULATOR = "simulator"
+    CARRIED = "carried"
+    """Opened by Relay to carry cases that went short on an earlier delivery."""
 
 
 class Order(WorkspaceScoped, Base):

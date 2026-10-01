@@ -44,8 +44,8 @@ export function Meter({ measure, value, limit, label, caption, size = "compact",
           {state === "over" ? "Over · " : ""}
           {label}
         </div>
+        {/* biome-ignore lint/a11y/useSemanticElements: the native meter can't take the design's three states reliably */}
         <div
-          // biome-ignore lint/a11y/useSemanticElements: the native meter can't take the design's three states reliably
           className="h-2 overflow-hidden rounded-full bg-asphalt-100"
           role="meter"
           aria-valuenow={value}
@@ -65,8 +65,8 @@ export function Meter({ measure, value, limit, label, caption, size = "compact",
   return (
     <div className={cx("flex items-center gap-2", className)} title={title}>
       <Icon size={16} strokeWidth={1.75} aria-hidden className="shrink-0 text-asphalt-500" />
+      {/* biome-ignore lint/a11y/useSemanticElements: the native meter can't take the design's three states reliably */}
       <div
-        // biome-ignore lint/a11y/useSemanticElements: the native meter can't take the design's three states reliably
         className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-asphalt-100"
         role="meter"
         aria-valuenow={value}

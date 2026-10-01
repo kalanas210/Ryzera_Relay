@@ -175,7 +175,7 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
             select(Notification.id).where(
                 Notification.outlet_id == outlet.outlet_id,
                 Notification.read_at.is_(None),
-                Notification.show_after <= now,
+                Notification.created_at <= now,
             )
         ).all()
     )
@@ -245,7 +245,7 @@ def notices(scope: ScopeDep, user: StoreUser) -> list[Notification]:
     return list(
         scope.db.scalars(
             select(Notification)
-            .where(Notification.outlet_id == outlet.outlet_id, Notification.show_after <= scope.now)
+            .where(Notification.outlet_id == outlet.outlet_id, Notification.created_at <= scope.now)
             .order_by(Notification.created_at.desc())
         )
     )

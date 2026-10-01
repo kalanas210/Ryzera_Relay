@@ -9,12 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from relay_api.clock import MOMENTS, next_moment, set_clock, sim_now
+from relay_api.clock import set_clock, sim_now
 from relay_api.config import get_settings
-from relay_api.db import get_db
+from relay_api.db import get_db, scope_to_workspace
 from relay_api.models import Workspace
 from relay_api.schemas.common import DemoState, MomentOut, WorkspaceOut
 from relay_api.seed.story import create_workspace, reset_workspace
+from relay_api.services import story
 from relay_api.services.simulator import catch_up
 from relay_api.workspaces import ScopeDep, find_workspace, new_code, remember_workspace
 
@@ -28,23 +29,25 @@ def _demo_only() -> None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Demo mode is off")
 
 
-def state_of(workspace: Workspace) -> DemoState:
+def state_of(db: Session, workspace: Workspace, played: list[str] | None = None) -> DemoState:
     now = sim_now(workspace)
-    nxt = next_moment(now)
+    moments = story.moments(db)
+    nxt = next((m for m in moments if m.at > now + timedelta(seconds=30)), None)
     return DemoState(
         demo_mode=get_settings().demo_mode,
         workspace=WorkspaceOut.model_validate(workspace),
         now=now,
         rate=workspace.clock_rate,
-        moments=[MomentOut(key=m.key, label=m.label, at=m.at, passed=m.at <= now) for m in MOMENTS],
+        moments=[MomentOut(key=m.key, label=m.label, at=m.at, passed=m.at <= now) for m in moments],
         next=MomentOut(key=nxt.key, label=nxt.label, at=nxt.at, passed=False) if nxt else None,
+        played=played or [],
     )
 
 
 @router.get("/state", response_model=DemoState)
 def get_state(scope: ScopeDep) -> DemoState:
     catch_up(scope.db, scope.workspace)
-    return state_of(scope.workspace)
+    return state_of(scope.db, scope.workspace)
 
 
 class ClockCommand(BaseModel):
@@ -58,7 +61,7 @@ def move_clock(body: ClockCommand, scope: ScopeDep) -> DemoState:
     ws = scope.workspace
     now = sim_now(ws)
     if body.action == "jump":
-        moment = next((m for m in MOMENTS if m.key == body.to), None)
+        moment = next((m for m in story.moments(scope.db) if m.key == body.to), None)
         target = moment.at if moment else datetime.fromisoformat(body.to or "")
         if target < now - timedelta(minutes=1):
             raise HTTPException(status.HTTP_409_CONFLICT, "The clock only moves forward. Reset the day to start again.")
@@ -70,15 +73,15 @@ def move_clock(body: ClockCommand, scope: ScopeDep) -> DemoState:
     else:
         set_clock(ws, now, rate=1.0)
     scope.db.commit()
-    catch_up(scope.db, ws)
-    return state_of(ws)
+    played = catch_up(scope.db, ws, jumped_from=now) if body.action in ("jump", "advance") else []
+    return state_of(scope.db, ws, played)
 
 
 @router.post("/reset", response_model=DemoState, dependencies=[Depends(_demo_only)])
 def reset(scope: ScopeDep) -> DemoState:
     reset_workspace(scope.db, get_settings().seed_dir, scope.workspace)
     scope.db.commit()
-    return state_of(scope.workspace)
+    return state_of(scope.db, scope.workspace)
 
 
 @router.post("/workspaces", response_model=DemoState, dependencies=[Depends(_demo_only)])
@@ -89,7 +92,7 @@ def new_private_copy(response: Response, db: Db) -> DemoState:
     ws = create_workspace(db, get_settings().seed_dir, code, "Private walkthrough")
     db.commit()
     remember_workspace(response, ws)
-    return state_of(ws)
+    return state_of(db, ws)
 
 
 class JoinRequest(BaseModel):
@@ -102,4 +105,5 @@ def join(body: JoinRequest, response: Response, db: Db) -> DemoState:
     if ws is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No walkthrough with that code.")
     remember_workspace(response, ws)
-    return state_of(ws)
+    scope_to_workspace(db, ws.id)
+    return state_of(db, ws)

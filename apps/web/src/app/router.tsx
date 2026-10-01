@@ -1,8 +1,13 @@
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { SignIn } from "@/auth/SignIn";
 import { DispatcherShell } from "@/roles/dispatcher/DispatcherShell";
+import { LivePage } from "@/roles/dispatcher/live/LivePage";
 import { PlanPage } from "@/roles/dispatcher/plan/PlanPage";
 import { QueuePage } from "@/roles/dispatcher/Queue";
+import { HandoverPage } from "@/roles/loader/Handover";
+import { LoaderShell } from "@/roles/loader/LoaderShell";
+import { LoadVehiclePage } from "@/roles/loader/LoadVehicle";
+import { TonightPage } from "@/roles/loader/Tonight";
 import { Placeholder } from "@/roles/Placeholder";
 import { MyOrders } from "@/roles/store/MyOrders";
 import { PlaceOrder } from "@/roles/store/PlaceOrder";
@@ -21,10 +26,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <QueuePage /> },
       { path: "plan", element: <PlanPage /> },
-      {
-        path: "live",
-        element: <Placeholder title="Live runs">Runs appear here once the plan is published.</Placeholder>,
-      },
+      { path: "live", element: <LivePage /> },
       {
         path: "outlook",
         element: <Placeholder title="Capacity outlook">The six-week outlook for each depot.</Placeholder>,
@@ -35,18 +37,13 @@ export const router = createBrowserRouter([
     path: "/loader",
     element: (
       <RoleLayout appRole="loader">
-        <Outlet />
+        <LoaderShell />
       </RoleLayout>
     ),
     children: [
-      {
-        index: true,
-        element: (
-          <Placeholder title="Tonight's loads">
-            Loading lists appear when the dispatcher publishes the plan.
-          </Placeholder>
-        ),
-      },
+      { index: true, element: <TonightPage /> },
+      { path: "trips/:tripId", element: <LoadVehiclePage /> },
+      { path: "trips/:tripId/handover", element: <HandoverPage /> },
     ],
   },
   {

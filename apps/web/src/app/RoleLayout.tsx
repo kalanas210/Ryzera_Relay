@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Navigate, useLocation } from "react-router";
+import { Navigate, ScrollRestoration, useLocation } from "react-router";
 import type { Role } from "@/api/client";
 import { DemoBar } from "@/demo/DemoBar";
 import { RoleProvider, useMe } from "./session";
@@ -24,6 +24,7 @@ export function RoleLayout({ appRole: role, children }: { appRole: Role; childre
   }
   return (
     <RoleProvider role={role}>
+      <ScrollRestoration />
       <DemoBar />
       {children}
     </RoleProvider>

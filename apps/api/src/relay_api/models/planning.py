@@ -101,6 +101,11 @@ class Trip(WorkspaceScoped, Base):
     finished_at: Mapped[datetime | None]
     expected_back: Mapped[datetime | None]
     note: Mapped[str] = mapped_column(Text, default="")
+    loader_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    """Who is loading it now, or loaded it."""
+    loading_started_at: Mapped[datetime | None]
+    claimed_at: Mapped[datetime | None]
+    """When a person first worked on this load. From then on the world simulator leaves it alone."""
 
     plan: Mapped[Plan] = relationship(back_populates="trips")
     stops: Mapped[list[Stop]] = relationship(back_populates="trip", cascade="all, delete-orphan", order_by="Stop.seq")
@@ -164,3 +169,15 @@ class PlanChange(WorkspaceScoped, Base):
     detail: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime]
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+
+
+class EngineCache(Base):
+    """The engine's answer for one exact set of inputs (see relay_api.services.engine_cache). Shared by every copy
+    of the day, since the answer depends only on what the engine reads."""
+
+    __tablename__ = "engine_cache"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    depot: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime]
+    result: Mapped[dict[str, Any]]

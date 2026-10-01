@@ -69,7 +69,7 @@ class LineInput:
     qty: int
 
 
-def _order_ref(db: Session, requested: date, outlet_id: str, temp: str) -> str:
+def order_ref_for(db: Session, requested: date, outlet_id: str, temp: str) -> str:
     """Use the number the order book reserves for this store's stream on that day, so the story's orders keep
     their scenario ids; otherwise the next free number."""
     taken = set(db.scalars(select(Order.order_ref)))
@@ -112,7 +112,7 @@ def place_order(
     run_date = next_operating_day(db, requested_date) if late else requested_date
     order = Order(
         id=uuid.uuid4(),
-        order_ref=order_ref or _order_ref(db, requested_date, outlet.outlet_id, temp),
+        order_ref=order_ref or order_ref_for(db, requested_date, outlet.outlet_id, temp),
         outlet_id=outlet.outlet_id,
         brand=outlet.brand,
         temp=temp,

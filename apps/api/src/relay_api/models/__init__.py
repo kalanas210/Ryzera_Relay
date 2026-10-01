@@ -27,6 +27,7 @@ from relay_api.models.people import AppUser, Role
 from relay_api.models.planning import (
     Deferral,
     DeferralKind,
+    EngineCache,
     Plan,
     PlanChange,
     PlanStatus,
@@ -67,6 +68,7 @@ __all__ = [
     "DeferralKind",
     "DeviceContact",
     "District",
+    "EngineCache",
     "FeedItem",
     "FeedKind",
     "FieldEvent",

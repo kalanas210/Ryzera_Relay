@@ -45,7 +45,8 @@ class ShortfallKind(enum.StrEnum):
 class ShortfallDecision(enum.StrEnum):
     SEND_SHORT = "send_short"
     """Leave without the cases and add them to the store's next order."""
-    WAIT_FOR_STOCK = "wait_for_stock"
+    NO_REPLACEMENT = "no_replacement"
+    """Leave without the cases; the store is told and nothing is added."""
 
 
 class Shortfall(WorkspaceScoped, Base):
@@ -80,3 +81,5 @@ class Handover(WorkspaceScoped, Base):
     accepted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     accepted_on: Mapped[str | None] = mapped_column(String(8))
     """'phone' or 'tablet' (the driver's own PIN on the dock tablet)."""
+    difference: Mapped[str] = mapped_column(Text, default="")
+    """What the driver said does not match, if he reported a difference instead of accepting."""
