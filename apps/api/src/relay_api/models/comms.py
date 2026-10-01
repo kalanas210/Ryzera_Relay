@@ -29,6 +29,8 @@ class Notification(WorkspaceScoped, Base):
     the app, and rings at 5:00 AM."""
     read_at: Mapped[datetime | None]
     acknowledged_at: Mapped[datetime | None]
+    delivered_at: Mapped[datetime | None]
+    """When a phone picked it up: a message to a silent driver waits for the next contact."""
 
 
 class FeedKind(enum.StrEnum):
@@ -39,6 +41,10 @@ class FeedKind(enum.StrEnum):
     DISPUTE = "dispute"
     SILENCE = "silence"
     CONFLICT = "conflict"
+    BACK_IN_CONTACT = "back_in_contact"
+    STOP_MOVED = "stop_moved"
+    RECEIPT = "receipt"
+    """A store confirmed receipt from a silent run while a backup is on the road."""
 
 
 class FeedItem(WorkspaceScoped, Base):

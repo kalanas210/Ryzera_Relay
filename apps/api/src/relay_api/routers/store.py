@@ -24,6 +24,7 @@ from relay_api.models import (
 )
 from relay_api.schemas.common import Schema
 from relay_api.security import require
+from relay_api.services import tracker
 from relay_api.services.ordering import (
     LineInput,
     cutoff_for,
@@ -261,3 +262,46 @@ def acknowledge(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notif
     notice.acknowledged_at = notice.acknowledged_at or scope.now
     scope.db.commit()
     return notice
+
+
+# ------------------------------------------------------------------------------------------------ on the way
+def _my_order(scope: ScopeDep, user: AppUser, order_ref: str) -> Order:
+    outlet = _outlet(scope, user)
+    order = scope.db.scalar(select(Order).where(Order.order_ref == order_ref, Order.outlet_id == outlet.outlet_id))
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such order at your store")
+    return order
+
+
+@router.get("/orders/{order_ref}/tracker")
+def track(order_ref: str, scope: ScopeDep, user: StoreUser) -> dict[str, object]:
+    """STM-04: where the delivery is and when it is expected, from the driver's own records. While the driver's
+    phone is silent, a likely range; once the estimate has passed, the store can confirm receipt itself."""
+    return tracker.tracker(scope.db, scope.now, _my_order(scope, user, order_ref)).as_dict()
+
+
+class IssueIn(BaseModel):
+    case_type: str = Field(max_length=24)
+    kind: Literal["missing", "damaged", "not_cold"]
+    qty: int = Field(ge=1, le=9999)
+    note: str = Field(default="", max_length=300)
+
+
+class ReceiptIn(BaseModel):
+    client_ref: str | None = Field(default=None, max_length=64)
+    issues: list[IssueIn] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/orders/{order_ref}/receipt")
+def confirm(order_ref: str, body: ReceiptIn, scope: ScopeDep, user: StoreUser) -> dict[str, object]:
+    """STM-05: everything arrived, or what did not. It counts as the delivery for Relay's estimates even before the
+    driver's proof arrives."""
+    order = _my_order(scope, user, order_ref)
+    try:
+        tracker.confirm_receipt(
+            scope.db, scope.now, user, order, [i.model_dump() for i in body.issues], body.client_ref
+        )
+    except tracker.TrackerError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    scope.db.commit()
+    return tracker.tracker(scope.db, scope.now, order).as_dict()

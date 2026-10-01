@@ -28,6 +28,8 @@ class TripStatus(enum.StrEnum):
     LOADED = "loaded"
     """Handed over and accepted by the driver."""
     DEPARTED = "departed"
+    RETURNING = "returning"
+    """A backup turned back on the road: its stop was delivered after all."""
     FINISHED = "finished"
     CANCELLED = "cancelled"
 
@@ -106,6 +108,7 @@ class Trip(WorkspaceScoped, Base):
     loading_started_at: Mapped[datetime | None]
     claimed_at: Mapped[datetime | None]
     """When a person first worked on this load. From then on the world simulator leaves it alone."""
+    turned_back_at: Mapped[datetime | None]
 
     plan: Mapped[Plan] = relationship(back_populates="trips")
     stops: Mapped[list[Stop]] = relationship(back_populates="trip", cascade="all, delete-orphan", order_by="Stop.seq")

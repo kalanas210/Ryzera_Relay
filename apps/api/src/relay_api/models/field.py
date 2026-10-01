@@ -22,6 +22,10 @@ class FieldEventKind(enum.StrEnum):
     PROBLEM = "problem"
     TRIP_FINISHED = "trip_finished"
     CHECKIN = "checkin"
+    LOAD_DIFFERENCE = "load_difference"
+    """The driver says the load does not match the handover."""
+    CONFLICT_ANSWER = "conflict_answer"
+    """The driver's answer to the one question about a stop with two copies."""
 
 
 class FieldEventOutcome(enum.StrEnum):
@@ -52,6 +56,9 @@ class FieldEvent(WorkspaceScoped, Base):
     accuracy_m: Mapped[float | None] = mapped_column(Numeric(7, 1, asdecimal=False))
     payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
     outcome: Mapped[FieldEventOutcome] = mapped_column(str_enum(FieldEventOutcome))
+    applied_at: Mapped[datetime | None]
+    """When it took effect: on arrival, or when the question it raised was settled."""
+    reject_reason: Mapped[str] = mapped_column(Text, default="")
 
 
 class Photo(WorkspaceScoped, Base):
@@ -65,6 +72,9 @@ class Photo(WorkspaceScoped, Base):
     taken_at: Mapped[datetime]
     uploaded_at: Mapped[datetime]
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    stop_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("stop.id", ondelete="CASCADE"), index=True)
+    event_id: Mapped[uuid.UUID | None]
+    """The delivery record it belongs to; the photo is sent after it."""
 
 
 class Proof(WorkspaceScoped, Base):
@@ -104,10 +114,16 @@ class ProblemReport(WorkspaceScoped, Base):
     delay_min: Mapped[int | None]
     note: Mapped[str] = mapped_column(Text, default="")
     reported_at: Mapped[datetime]
+    lines: Mapped[list[Any]] = mapped_column(default=list)
+    """Case type and count, for goods refused or damaged in transit."""
+    urgent: Mapped[bool] = mapped_column(default=False)
+    """The vehicle cannot move."""
 
 
 class ConflictStatus(enum.StrEnum):
     WAITING_FOR_DRIVER = "waiting_for_driver"
+    ESCALATED = "escalated"
+    """The driver said no, or nobody answered in 10 minutes: the dispatcher decides."""
     RESOLVED = "resolved"
 
 
@@ -126,6 +142,12 @@ class Conflict(WorkspaceScoped, Base):
     opened_at: Mapped[datetime]
     answered_at: Mapped[datetime | None]
     resolution: Mapped[str] = mapped_column(Text, default="")
+    """Who settled it: the driver, or the dispatcher cancelling the backup's copy."""
+    event_id: Mapped[uuid.UUID | None]
+    """The record that clashed."""
+    resolved_at: Mapped[datetime | None]
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    escalated_at: Mapped[datetime | None]
 
 
 class DeviceContact(WorkspaceScoped, Base):
@@ -138,3 +160,7 @@ class DeviceContact(WorkspaceScoped, Base):
     last_contact_at: Mapped[datetime]
     last_record_at: Mapped[datetime | None]
     pending_records: Mapped[int] = mapped_column(default=0)
+    device_id: Mapped[str | None] = mapped_column(String(64))
+    gap_from: Mapped[datetime | None]
+    """The last silence on a running trip, for "Offline 5:41 to 7:14"."""
+    gap_to: Mapped[datetime | None]

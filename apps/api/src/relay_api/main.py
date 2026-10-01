@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 
 from relay_api.db import SessionLocal
 from relay_api.models import Workspace
-from relay_api.routers import auth, demo, dispatch, dock, live, plan, store
+from relay_api.routers import auth, demo, dispatch, dock, driver, live, photos, plan, runs, store
 from relay_api.security import require_client_header
 from relay_api.services.simulator import catch_up
 
@@ -62,6 +62,9 @@ app.include_router(dispatch.router)
 app.include_router(plan.router)
 app.include_router(live.router)
 app.include_router(dock.router)
+app.include_router(runs.router)
+app.include_router(driver.router)
+app.include_router(photos.router)
 
 
 @app.get("/api/health", tags=["health"])
