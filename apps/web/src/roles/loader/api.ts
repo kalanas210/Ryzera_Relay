@@ -165,7 +165,7 @@ export function useTripLoad(tripId: string | undefined) {
 }
 
 /** Counts a trip shows everywhere, recomputed after an optimistic change to its lines. */
-function recount(load: TripLoad): TripLoad {
+export function recount(load: TripLoad): TripLoad {
   const lines = load.groups.flatMap((g) => g.lines);
   const done = (l: LoadLine) => l.status === "checked" || l.status === "decided";
   const shortOf = (l: LoadLine) => (l.status === "decided" ? l.qty - l.loaded : 0);
