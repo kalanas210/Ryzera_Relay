@@ -12,13 +12,14 @@ import {
   Van,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useNavigate } from "react-router";
 import { IconButton } from "@/design/Button";
 import { StatusChip } from "@/design/StatusChip";
-import { useLoaderText, weekdayIn } from "@/i18n";
+import { useLoaderText } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { type DockNotice, type LoadCard, loadKindKey, type Tonight, useTonight, vehicleKindKey } from "./api";
+import { weekdayName } from "./days";
 import { DockHeader, LoaderBar, useDepotDay } from "./LoaderShell";
 import { LoadProgress } from "./parts";
 
@@ -79,7 +80,7 @@ function TonightBody({
   dismissed: string[];
   onDismiss: (id: string) => void;
 }) {
-  const { t, lang, clock } = useLoaderText();
+  const { t, clock } = useLoaderText();
   const notices = data.notices.filter((n) => !dismissed.includes(n.id));
   const counts = [
     data.loading.length ? t("tonight.loadingN", { count: data.loading.length }) : null,
@@ -108,17 +109,17 @@ function TonightBody({
       {data.left.length ? (
         <section className="flex flex-col gap-3">
           <h2 className="t-label text-asphalt-500">{t("tonight.groups.left")}</h2>
-          <div className="flex flex-col gap-3 rounded-card border border-asphalt-200 bg-white p-4">
+          {/* One grid, so every row's place starts after the widest time: a 10:05 never pushes its district a digit
+              further than a 2:00. The time column is 64 wide at the least. */}
+          <div className="grid grid-cols-[minmax(4rem,max-content)_minmax(0,1fr)] gap-x-3 gap-y-3 rounded-card border border-asphalt-200 bg-white p-4">
             {data.left.map((row) => (
-              <div key={`${row.district}-${row.at}`} className="flex gap-3">
-                <span className="num t-body-strong min-w-16 shrink-0 whitespace-nowrap text-asphalt-900">
-                  {clock(row.at)}
-                </span>
+              <Fragment key={`${row.district}-${row.at}`}>
+                <span className="num t-body-strong whitespace-nowrap text-asphalt-900">{clock(row.at)}</span>
                 <span className="flex min-w-0 flex-col">
                   <span className="latin t-body-strong text-asphalt-900">{row.district}</span>
                   <span className="latin t-label text-asphalt-700">{row.vehicles.join(", ")}</span>
                 </span>
-              </div>
+              </Fragment>
             ))}
           </div>
         </section>
@@ -141,7 +142,7 @@ function TonightBody({
                 </div>
                 <p className="t-body">
                   {t(`vehicles.${vehicleKindKey(w.vehicle_kind)}`)}
-                  {w.back_on ? ` · ${t("tonight.backOn", { day: weekdayIn(lang, w.back_on) })}` : ""}
+                  {w.back_on ? ` · ${t("tonight.backOn", { day: weekdayName(t, w.back_on) })}` : ""}
                 </p>
                 <div>
                   <StatusChip icon={Info} tone="waiting">
@@ -251,13 +252,16 @@ function VehicleLoadCard({ card, highlighted }: { card: LoadCard; highlighted: b
     >
       <div className="flex w-full items-center gap-2">
         <VehicleIcon size={24} strokeWidth={1.75} aria-hidden className="shrink-0 text-asphalt-900" />
-        <span className="latin t-h2 text-asphalt-900">{card.vehicle_id}</span>
-        {card.temp === "chilled" ? (
-          <StatusChip icon={Snowflake} tone="chilled">
-            {t("chips.chilled")}
-          </StatusChip>
-        ) : null}
-        <span className="ml-auto flex flex-col items-end">
+        {/* the Chilled chip drops under the vehicle before the departure time would be pushed off the card */}
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="latin t-h2 text-asphalt-900">{card.vehicle_id}</span>
+          {card.temp === "chilled" ? (
+            <StatusChip icon={Snowflake} tone="chilled">
+              {t("chips.chilled")}
+            </StatusChip>
+          ) : null}
+        </span>
+        <span className="flex shrink-0 flex-col items-end">
           <span className="t-caption text-asphalt-500">{t("tonight.leaves")}</span>
           <span className="num t-h2 whitespace-nowrap text-asphalt-900">{clock(card.planned_depart)}</span>
         </span>

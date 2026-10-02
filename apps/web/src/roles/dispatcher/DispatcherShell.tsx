@@ -1,4 +1,4 @@
-import { ChartColumn, ClipboardList, Layers, LogOut, type LucideIcon, Route } from "lucide-react";
+import { CalendarClock, ChartColumn, ClipboardList, Layers, LogOut, type LucideIcon, Route } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { useMe, useSignOut } from "@/app/session";
@@ -146,6 +146,7 @@ export function DeskHeader({
   depot,
   onDepot,
   allowAll = true,
+  allTitle = "Plans are made one depot at a time, because each vehicle serves only its home depot.",
   children,
 }: {
   title: ReactNode;
@@ -153,6 +154,8 @@ export function DeskHeader({
   depot?: Depot;
   onDepot?: (d: Depot) => void;
   allowAll?: boolean;
+  /** Why "All" is off on this page. */
+  allTitle?: string;
   children?: ReactNode;
 }) {
   const now = useSimNow(15_000);
@@ -163,7 +166,12 @@ export function DeskHeader({
         {meta ? <div className="flex items-center gap-1.5 t-dense text-asphalt-700">{meta}</div> : null}
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        {now ? <span className="num t-label text-asphalt-700 max-md:hidden">{formatStamp(now)}</span> : null}
+        {now ? (
+          <span className="inline-flex items-center gap-1.5 max-md:hidden">
+            <CalendarClock size={20} strokeWidth={1.75} aria-hidden className="text-asphalt-500" />
+            <span className="num t-label text-asphalt-700">{formatStamp(now)}</span>
+          </span>
+        ) : null}
         {depot && onDepot ? (
           <Segmented<Depot>
             size="desk"
@@ -175,9 +183,7 @@ export function DeskHeader({
                 value: "All",
                 label: "All",
                 disabled: !allowAll,
-                title: allowAll
-                  ? undefined
-                  : "Plans are made one depot at a time, because each vehicle serves only its home depot.",
+                title: allowAll ? undefined : allTitle,
               },
               { value: "Peliyagoda", label: "Peliyagoda" },
               { value: "Kandy", label: "Kandy hub" },

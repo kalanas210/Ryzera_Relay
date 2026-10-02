@@ -20,7 +20,8 @@ export function LanguageSheet({
   onChange: (lang: Lang) => void;
   title: string;
   helper: string;
-  note: string;
+  /** A caption under the choices, where the screen has one. */
+  note?: string;
   /** The close button's name in the reader's language. */
   closeLabel?: string;
 }) {
@@ -58,7 +59,7 @@ export function LanguageSheet({
             );
           })}
         </div>
-        <p className="t-caption text-asphalt-500">{note}</p>
+        {note ? <p className="t-caption text-asphalt-500">{note}</p> : null}
       </div>
     </Sheet>
   );

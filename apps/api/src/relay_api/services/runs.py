@@ -16,8 +16,13 @@ from sqlalchemy.orm import Session
 from relay_api.models import (
     Conflict,
     ConflictStatus,
+    FieldEvent,
+    FieldEventKind,
+    FieldEventOutcome,
     Plan,
     PlanStatus,
+    ProblemReason,
+    ProblemReport,
     Stop,
     StopStatus,
     Trip,
@@ -43,6 +48,7 @@ class Marker:
     planned: datetime
     closes: datetime
     recorded: datetime | None = None
+    arrived: datetime | None = None
     estimate: datetime | None = None
     range: tuple[datetime, datetime] | None = None
     passed: bool = False
@@ -50,6 +56,8 @@ class Marker:
     receipt_at: datetime | None = None
     moved_to: str | None = None
     backup_of: str | None = None
+    held: datetime | None = None
+    """While the stop has two copies: when the driver's phone says it was delivered, held until it is settled."""
 
 
 @dataclass
@@ -199,6 +207,7 @@ def _row(
             planned=stop.planned_arrival,
             closes=closes,
             recorded=stop.completed_at or stop.arrived_at,
+            arrived=stop.arrived_at,
             estimate=e.estimate if e else None,
             range=e.range if e else None,
             passed=bool(e and e.passed),
@@ -209,6 +218,17 @@ def _row(
         if marker.estimate is not None and marker.estimate > closes and state in ("next", "pending"):
             marker.late_risk = True
             late = True
+        if state == "conflict":
+            marker.held = db.scalar(
+                select(FieldEvent.occurred_at)
+                .where(
+                    FieldEvent.stop_id == stop.id,
+                    FieldEvent.kind == FieldEventKind.DELIVERED,
+                    FieldEvent.outcome == FieldEventOutcome.CONFLICT,
+                )
+                .order_by(FieldEvent.occurred_at.desc())
+                .limit(1)
+            )
         markers.append(marker)
     delivered = sum(1 for m in markers if m.state == "delivered")
     countable = sum(1 for m in markers if m.state not in ("cancelled",))
@@ -266,20 +286,37 @@ def _caption(
     if estimate.out_of_contact and estimate.last_contact_at is not None:
         since = words.clock(estimate.last_contact_at)
         return f"No contact from {who} since {since}. {_position_text(look, estimate)}".strip()
-    risky = [m for m in markers if m.late_risk]
+    to_come = [m for m in markers if m.state in ("next", "pending")]
+    hub = DEPOT_LABEL.get(plan.depot, plan.depot)
+    clash = next((m for m in markers if m.state == "conflict"), None)
+    if clash is not None:
+        return f"Stop {clash.seq}, {clash.place}, has two copies until it is settled."
+    if not to_come:
+        return f"Every stop is done. {who} is on the way back to the {hub}."
+    risky = [m for m in to_come if m.late_risk]
     windows = (
         f"{risky[0].place} is expected after its {words.clock(risky[0].closes)} close."
         if risky
-        else "Every stop is expected inside its window."
+        else "Every stop still to come is expected inside its window."
     )
-    reached = [m for m in markers if m.recorded is not None and m.state in ("arrived", "delivered")]
+    delay = look.db.scalar(
+        select(ProblemReport)
+        .where(ProblemReport.trip_id == trip.id, ProblemReport.reason == ProblemReason.DELAYED)
+        .order_by(ProblemReport.reported_at.desc())
+        .limit(1)
+    )
+    if delay is not None and delay.delay_min:
+        places = ", ".join(m.place for m in to_come)
+        stay = "stays inside its window" if len(to_come) == 1 else "stay inside their windows"
+        tail = windows if risky else f"{places} {stay}."
+        return f"{who} reported a {delay.delay_min} min delay at {words.clock(delay.reported_at)}. {tail}"
+    reached = [m for m in markers if m.arrived is not None and m.state in ("arrived", "delivered")]
     if not reached:
         return f"Left at {words.clock(trip.departed_at)}. {windows}"
-    first = reached[-1]
-    behind = round((first.recorded - first.planned).total_seconds() / 60)  # type: ignore[operator]
+    last = reached[-1]
+    behind = round((last.arrived - last.planned).total_seconds() / 60)  # type: ignore[operator]
     against = f"{behind} min behind plan" if behind > 0 else f"{-behind} min ahead of plan" if behind < 0 else "on plan"
-    verb = "Delivered at" if first.state == "delivered" else "Reached"
-    return f"{verb} {first.place} at {words.clock(first.recorded)}, {against}. {windows}"  # type: ignore[arg-type]
+    return f"Reached {last.place} at {words.clock(last.arrived)}, {against}. {windows}"  # type: ignore[arg-type]
 
 
 def trip_uuid(value: str) -> uuid.UUID:

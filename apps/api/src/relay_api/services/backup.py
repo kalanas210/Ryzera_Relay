@@ -244,7 +244,7 @@ def move_stop(db: Session, now: datetime, user: AppUser | None, stop: Stop, vehi
             "stop_moved",
             f"Stop {stop.seq} moved to {vehicle_id} at {words.clock(now)}",
             f"{place} goes with {vehicle_id} now. Carry on with your other stops.",
-            {"trip_id": str(trip.id), "stop_id": str(stop.id)},
+            {"trip_id": str(trip.id), "stop_id": str(stop.id), "vehicle_id": vehicle_id},
         )
     if backup_driver is not None:
         _tell_driver(

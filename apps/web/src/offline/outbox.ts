@@ -1,20 +1,23 @@
 /** The driver's outbox: every action is written to IndexedDB first, then sent in the order it was made.
  *
- *  A record is one stop event (load accepted, arrived, delivered, a problem, trip finished) or one photo. Each
- *  carries the id the phone gave it when it was made, so a resend after a dropped connection is harmless: the server
- *  answers "duplicate". Records go before photos, so on a weak signal the stop reaches the dispatcher first and the
- *  heavier photo follows. Nothing is ever dropped: a record that fails stays queued and is retried when the browser
- *  says it is back online, when the app returns to the foreground, and on a timer. */
+ *  A record is one stop event (load accepted, arrived, delivered, a problem, trip finished, the answer to a question)
+ *  or one photo. Each carries the id the phone gave it when it was made, so a resend after a dropped connection is
+ *  harmless: the server answers "duplicate". Records go before photos, so on a weak signal the stop reaches the
+ *  dispatcher first and the heavier photo follows. Nothing is ever dropped: a record that fails stays queued and is
+ *  retried when the browser says it is back online, when the app returns to the foreground, and with the minute
+ *  check-in. A record Relay refuses leaves the queue with Relay's reason, so the phone can say so. */
 import Dexie, { type EntityTable } from "dexie";
 
 export type RecordKind =
   | "load_accepted"
+  | "load_difference"
   | "departed"
   | "arrived"
   | "delivered"
   | "failed"
   | "problem"
   | "trip_finished"
+  | "conflict_answer"
   | "checkin";
 
 export type FieldRecord = {
@@ -35,6 +38,8 @@ export type FieldRecord = {
 export type PhotoRecord = {
   id: string;
   stop_id: string | null;
+  /** The record the photo belongs to, when it is not a stop's proof (a problem report's photo). */
+  event_id?: string | null;
   taken_at: string;
   blob: Blob;
   width: number;
@@ -43,11 +48,38 @@ export type PhotoRecord = {
 
 export type Outcome = "applied" | "duplicate" | "conflict" | "rejected";
 
-type Queued =
-  | { seq?: number; type: "record"; id: string; body: FieldRecord; tries: number; queued_at: number; error?: string }
-  | { seq?: number; type: "photo"; id: string; body: PhotoRecord; tries: number; queued_at: number; error?: string };
+/** What Relay said about one record or photo, and when it had it on the scenario clock. */
+export type Answer = { id: string; outcome: Outcome; reason?: string; at?: string };
 
-type Sent = { id: string; type: "record" | "photo"; kind: string; outcome: Outcome; sent_at: number };
+type Common = {
+  seq?: number;
+  id: string;
+  tries: number;
+  queued_at: number;
+  error?: string;
+  /** Saved while the phone had no signal, so it waited: the trip summary says when it went. */
+  saved_offline?: boolean;
+  /** A record waits for its location fix until this wall-clock time, then goes with or without one. */
+  held_until?: number;
+};
+
+export type Queued = (Common & { type: "record"; body: FieldRecord }) | (Common & { type: "photo"; body: PhotoRecord });
+
+export type Sent = {
+  id: string;
+  type: "record" | "photo";
+  kind: string;
+  outcome: Outcome;
+  /** Wall-clock time of the answer. */
+  sent_at: number;
+  reason?: string;
+  /** Scenario time Relay had it: "Saved offline, sent 7:14 AM". */
+  at?: string;
+  saved_offline?: boolean;
+  /** What was sent, kept so the phone can still show its own record after the queue lets go of it. */
+  record?: FieldRecord;
+  photo?: Omit<PhotoRecord, "blob">;
+};
 
 class OutboxDb extends Dexie {
   queue!: EntityTable<Queued, "seq">;
@@ -60,17 +92,24 @@ class OutboxDb extends Dexie {
 }
 
 export type Transport = {
-  sendRecords: (records: FieldRecord[]) => Promise<{ id: string; outcome: Outcome }[]>;
-  sendPhoto: (photo: PhotoRecord) => Promise<Outcome>;
+  sendRecords: (records: FieldRecord[]) => Promise<Answer[]>;
+  sendPhoto: (photo: PhotoRecord) => Promise<Outcome | Omit<Answer, "id">>;
 };
 
 /** Thrown by a transport when the phone has no connection; anything else is a server answer. */
 export class Offline extends Error {}
 
+export type AddOptions = {
+  savedOffline?: boolean;
+  /** Hold the record this long for its location; release() lets it go sooner. */
+  holdMs?: number;
+};
+
 export class Outbox {
   private readonly db: OutboxDb;
   private flushing: Promise<FlushResult> | null = null;
   private readonly listeners = new Set<() => void>();
+  private moving = new Set<string>();
 
   constructor(name = "relay-outbox") {
     this.db = new OutboxDb(name);
@@ -85,13 +124,43 @@ export class Outbox {
     for (const listener of this.listeners) listener();
   }
 
-  async add(record: FieldRecord): Promise<void> {
-    await this.db.queue.add({ type: "record", id: record.id, body: record, tries: 0, queued_at: Date.now() });
+  /** Ids on their way to Relay right now. */
+  inFlight(): ReadonlySet<string> {
+    return this.moving;
+  }
+
+  async add(record: FieldRecord, options: AddOptions = {}): Promise<void> {
+    await this.db.queue.add({
+      type: "record",
+      id: record.id,
+      body: record,
+      tries: 0,
+      queued_at: Date.now(),
+      saved_offline: options.savedOffline,
+      held_until: options.holdMs ? Date.now() + options.holdMs : undefined,
+    });
     this.changed();
   }
 
-  async addPhoto(photo: PhotoRecord): Promise<void> {
-    await this.db.queue.add({ type: "photo", id: photo.id, body: photo, tries: 0, queued_at: Date.now() });
+  async addPhoto(photo: PhotoRecord, options: Omit<AddOptions, "holdMs"> = {}): Promise<void> {
+    await this.db.queue.add({
+      type: "photo",
+      id: photo.id,
+      body: photo,
+      tries: 0,
+      queued_at: Date.now(),
+      saved_offline: options.savedOffline,
+    });
+    this.changed();
+  }
+
+  /** A held record may go now, with whatever the wait found (its location, or nothing). */
+  async release(id: string, patch: Partial<Pick<FieldRecord, "lat" | "lng" | "accuracy_m">> = {}): Promise<void> {
+    await this.db.transaction("rw", this.db.queue, async () => {
+      const item = await this.db.queue.where("id").equals(id).first();
+      if (item?.type !== "record") return;
+      await this.db.queue.update(item.seq as number, { body: { ...item.body, ...patch }, held_until: undefined });
+    });
     this.changed();
   }
 
@@ -105,7 +174,7 @@ export class Outbox {
     return (await this.db.queue.orderBy("seq").toArray()).flatMap((q) => (q.type === "record" ? [q.body] : []));
   }
 
-  async sent(limit = 50): Promise<Sent[]> {
+  async sent(limit = 200): Promise<Sent[]> {
     return this.db.sent.orderBy("sent_at").reverse().limit(limit).toArray();
   }
 
@@ -114,44 +183,76 @@ export class Outbox {
     if (!this.flushing) {
       this.flushing = this.run(transport).finally(() => {
         this.flushing = null;
+        this.moving = new Set();
+        this.changed();
       });
     }
     return this.flushing;
   }
 
   private async run(transport: Transport): Promise<FlushResult> {
-    const result: FlushResult = { sent: 0, conflicts: 0, offline: false, failed: 0 };
+    const result: FlushResult = { sent: 0, conflicts: 0, offline: false, failed: 0, held: false };
     const queue = await this.waiting();
     const records = queue.filter((q): q is Extract<Queued, { type: "record" }> => q.type === "record");
-    if (records.length) {
+    // Order is kept: a record still waiting for its location holds back every record and photo after it.
+    const heldAt = records.findIndex((q) => q.held_until !== undefined && q.held_until > Date.now());
+    const ready = heldAt === -1 ? records : records.slice(0, heldAt);
+    result.held = heldAt !== -1;
+    if (ready.length) {
+      this.moving = new Set(ready.map((q) => q.id));
+      this.changed();
       try {
-        const answers = await transport.sendRecords(records.map((q) => q.body));
-        const byId = new Map(answers.map((a) => [a.id, a.outcome]));
+        const answers = await transport.sendRecords(ready.map((q) => q.body));
+        const byId = new Map(answers.map((a) => [a.id, a]));
         await this.db.transaction("rw", this.db.queue, this.db.sent, async () => {
-          for (const q of records) {
-            const outcome = byId.get(q.id);
-            if (!outcome) continue;
+          for (const q of ready) {
+            const answer = byId.get(q.id);
+            if (!answer) continue;
             await this.db.queue.delete(q.seq as number);
-            await this.db.sent.put({ id: q.id, type: "record", kind: q.body.kind, outcome, sent_at: Date.now() });
+            await this.db.sent.put({
+              id: q.id,
+              type: "record",
+              kind: q.body.kind,
+              outcome: answer.outcome,
+              sent_at: Date.now(),
+              reason: answer.reason || undefined,
+              at: answer.at,
+              saved_offline: q.saved_offline,
+              record: q.body,
+            });
             result.sent += 1;
-            if (outcome === "conflict") result.conflicts += 1;
+            if (answer.outcome === "conflict") result.conflicts += 1;
           }
         });
       } catch (error) {
-        await this.noteFailure(records, error);
+        await this.noteFailure(ready, error);
         result.offline = error instanceof Offline;
-        result.failed += records.length;
-        this.changed();
+        result.failed += ready.length;
         return result; // photos wait until their stops are through
       }
     }
+    if (result.held) return result;
     for (const q of queue) {
       if (q.type !== "photo") continue;
+      this.moving = new Set([q.id]);
+      this.changed();
       try {
-        const outcome = await transport.sendPhoto(q.body);
+        const answer = await transport.sendPhoto(q.body);
+        const { outcome, reason, at } = typeof answer === "string" ? { outcome: answer } : answer;
+        const { blob: _blob, ...photo } = q.body;
         await this.db.transaction("rw", this.db.queue, this.db.sent, async () => {
           await this.db.queue.delete(q.seq as number);
-          await this.db.sent.put({ id: q.id, type: "photo", kind: "photo", outcome, sent_at: Date.now() });
+          await this.db.sent.put({
+            id: q.id,
+            type: "photo",
+            kind: "photo",
+            outcome,
+            sent_at: Date.now(),
+            reason: reason || undefined,
+            at,
+            saved_offline: q.saved_offline,
+            photo,
+          });
         });
         result.sent += 1;
       } catch (error) {
@@ -161,7 +262,6 @@ export class Outbox {
         break;
       }
     }
-    this.changed();
     return result;
   }
 
@@ -183,7 +283,7 @@ export class Outbox {
   }
 }
 
-export type FlushResult = { sent: number; conflicts: number; offline: boolean; failed: number };
+export type FlushResult = { sent: number; conflicts: number; offline: boolean; failed: number; held: boolean };
 
 export function newRecordId(): string {
   return crypto.randomUUID();

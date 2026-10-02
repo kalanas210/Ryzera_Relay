@@ -22,6 +22,9 @@ from relay_api.models import (
     OrderStream,
     Outlet,
     OutletDwell,
+    OutlookDay,
+    OutlookForecast,
+    OutlookWeek,
     RoadCondition,
     Role,
     ServiceAllowance,
@@ -225,6 +228,60 @@ def _history(seed: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _outlook_forecasts(seed: Path) -> list[dict[str, Any]]:
+    return [
+        dict(
+            depot=r["depot"],
+            forecast_updated=date.fromisoformat(r["forecast_updated"]),
+            baseline_year=int(r["baseline_year"]),
+            baseline_first_week=int(r["baseline_first_week"]),
+            baseline_last_week=int(r["baseline_last_week"]),
+            backtest_year=int(r["backtest_year"]),
+            backtest_first_week=int(r["backtest_first_week"]),
+            backtest_last_week=int(r["backtest_last_week"]),
+            backtest_pct=float(r["backtest_pct"]),
+            last_year_pct=float(r["last_year_pct"]),
+            ordinary_week_m3=float(r["ordinary_week_m3"]),
+            record_week_m3=float(r["record_week_m3"]),
+            record_year=int(r["record_year"]),
+            record_week=int(r["record_week"]),
+            tech_order_max_m3=float(r["tech_order_max_m3"]),
+        )
+        for r in read(seed / "derived" / "outlook_meta.csv")
+    ]
+
+
+def _outlook_weeks(seed: Path) -> list[dict[str, Any]]:
+    return [
+        dict(
+            depot=r["depot"],
+            iso_year=int(r["iso_year"]),
+            iso_week=int(r["iso_week"]),
+            chilled_m3=float(r["chilled_m3"]),
+            dry_m3=float(r["dry_m3"]),
+            style_m3=float(r["style_m3"]),
+            tech_m3=float(r["tech_m3"]),
+        )
+        for r in read(seed / "derived" / "outlook_weeks.csv")
+    ]
+
+
+def _outlook_days(seed: Path) -> list[dict[str, Any]]:
+    return [
+        dict(
+            depot=r["depot"],
+            date=date.fromisoformat(r["date"]),
+            chilled_orders=int(r["chilled_orders"]),
+            chilled_kg=float(r["chilled_kg"]),
+            chilled_m3=float(r["chilled_m3"]),
+            needed=int(r["needed"]),
+            in_workshop=r["in_workshop"].split(),
+            served_one_fewer=int(r["served_one_fewer"]) if r["served_one_fewer"] else None,
+        )
+        for r in read(seed / "derived" / "outlook_days.csv")
+    ]
+
+
 def _hub_stock(seed: Path) -> list[dict[str, Any]]:
     return [
         dict(
@@ -254,6 +311,9 @@ TABLES: list[tuple[type, Rows]] = [
     (OrderStream, _streams),
     (ServiceHistory, _history),
     (HubStock, _hub_stock),
+    (OutlookForecast, _outlook_forecasts),
+    (OutlookWeek, _outlook_weeks),
+    (OutlookDay, _outlook_days),
 ]
 
 

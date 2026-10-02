@@ -17,6 +17,7 @@ import json
 import random
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -372,6 +373,8 @@ def main() -> None:
     streams = [dict(dow_name=dow, outlet_id=o, temp=t) for dow in M.DOWS for (o, t) in M.fixed_streams(dow)]
     write(DERIVED / "order_streams.csv", ["dow_name", "outlet_id", "temp"], streams)
 
+    outlook()
+
 
 def weekday_litres() -> dict[tuple[str, str], float]:
     """Each vehicle's average litres per weekday in 2026 weeks 1 to 13, counting the drive back to the depot."""
@@ -457,5 +460,97 @@ def outlet_dwell() -> list[dict]:
             for (o, m), r in q.iterrows()]
 
 
+# ---------------------------------------------------------------- capacity outlook (DSP-05)
+OUTLOOK_DEPOT = "Kandy"
+
+
+def outlook() -> None:
+    """The Kandy hub's six-week outlook, copied from the scenario appendix (relay:outlook, relay:outlook_days and
+    relay:facts "outlook"), which validate_scenario.py checks against the forecast and the exact search. Both need
+    the order history, so the app only reads their answers. What can be derived again is left out and checked here
+    instead: the week's open days and total, the busiest day from 8 April, and one load per refrigerated vehicle
+    per open day, which follows from the vehicles each day has out of service."""
+    facts = json.loads(block("facts"))
+    fo = facts["outlook"]
+    story = facts["story"]
+    fleet = {r["vehicle_id"]: r for r in rows("vehicles") if r["depot"] == OUTLOOK_DEPOT and r["temp"] == "reefer"}
+    # VEH039 (refrigeration fault) and VEH058 (booked service) are out Monday 6 to Wednesday 8 April
+    out = sorted(v for v, r in fleet.items() if r["wednesday"] == "workshop")
+    one_load = sum(float(r["volume_cap_m3"]) for r in fleet.values())
+    # five_serve_wednesdays is the exact search with one refrigerated vehicle fewer than needed. The scenario counts
+    # it for the Wednesdays ahead that need six (six_days) and for the run itself, so only those rows carry it
+    one_fewer = set(fo["six_days"]) | {WED}
+
+    days = []
+    for r in rows("outlook_days"):
+        in_workshop = out if int(r["available"]) < len(fleet) else []
+        if len(fleet) - len(in_workshop) != int(r["available"]):
+            raise SystemExit(f"{r['date']}: {r['available']} refrigerated vehicles available, the workshop says otherwise")
+        served = fo["five_serve_wednesdays"] if r["date"] in one_fewer else ""
+        if served != "" and (int(r["needed"]) - 1 != 5 or served >= int(r["chilled_orders"])):
+            raise SystemExit(f"{r['date']}: five refrigerated vehicles serving {served} says nothing about this day")
+        days.append(dict(depot=OUTLOOK_DEPOT, date=r["date"], chilled_orders=r["chilled_orders"], chilled_kg=r["chilled_kg"],
+                         chilled_m3=r["chilled_m3"], needed=r["needed"], in_workshop=" ".join(in_workshop),
+                         served_one_fewer=served))
+
+    weeks = []
+    for r in rows("outlook"):
+        week = int(r["iso_week"])
+        first, last = r["dates"].split(" to ")
+        mine = [d for d in days if first <= d["date"] <= last]
+        groups = [float(r[k]) for k in ("chilled_m3", "dry_m3", "style_m3", "tech_m3")]
+        limit = sum(one_load - sum(float(fleet[v]["volume_cap_m3"]) for v in d["in_workshop"].split()) for d in mine)
+        vehicle_days = sum(len(fleet) - len(d["in_workshop"].split()) for d in mine)
+        ahead = [d for d in mine if d["date"] >= WED]
+        top = max(ahead, key=lambda d: (int(d["needed"]), float(d["chilled_m3"])))
+        checks = {
+            "open days": (len(mine), int(r["operating_days"])),
+            "all brands m3": (f"{sum(groups):.1f}", r["all_m3"]),
+            "one load per open day": (round(limit, 1), fo["one_load_m3"][str(week)]),
+            "refrigerated vehicle-days": (vehicle_days, fo["vehicle_days"][str(week)]),
+            "busiest day from 8 April": (
+                (top["date"], top["needed"], len(fleet) - len(top["in_workshop"].split())),
+                (r["busiest_day_from_8_april"], r["needed"], int(r["available"])),
+            ),
+        }
+        for what, (got, want) in checks.items():
+            if got != want:
+                raise SystemExit(f"week {week} {what}: {got}, the scenario says {want}")
+        iso_year, iso_week, _ = date.fromisoformat(first).isocalendar()
+        if iso_week != week:
+            raise SystemExit(f"week {week} starts on {first}, which is in week {iso_week}")
+        weeks.append(dict(depot=OUTLOOK_DEPOT, iso_year=iso_year, iso_week=week, chilled_m3=r["chilled_m3"],
+                          dry_m3=r["dry_m3"], style_m3=r["style_m3"], tech_m3=r["tech_m3"]))
+
+    ordinary = story["kandy_2026_w1_13_chilled_mean"]
+    peak = max(weeks, key=lambda w: float(w["chilled_m3"]))
+    if round(float(peak["chilled_m3"]) / ordinary, 2) != fo["week15_ratio"]:
+        raise SystemExit(f"week {peak['iso_week']} is not {fo['week15_ratio']} times an ordinary week")
+    record = str(story["kandy_top_chilled_week"])
+    tech = M.DEL[(M.DEL.depot == OUTLOOK_DEPOT) & (M.DEL.brand == "Tech")].order_volume_m3.max()
+    meta = dict(
+        depot=OUTLOOK_DEPOT,
+        forecast_updated=MON,
+        # relay_model.FC forecasts from 2026 week 13 on the 13 weeks before it; the backtest forecasts 2025 weeks
+        # 14 to 23 from 2025 week 13 (relay_model.backtest_kandy_fresh)
+        baseline_year=2026, baseline_first_week=1, baseline_last_week=13,
+        backtest_year=2025, backtest_first_week=14, backtest_last_week=23,
+        backtest_pct=fo["backtest"][0], last_year_pct=fo["backtest"][1],
+        ordinary_week_m3=ordinary,
+        record_week_m3=story["kandy_top_chilled_m3"], record_year=record[:4], record_week=int(record[4:]),
+        five_serve_wednesdays=fo["five_serve_wednesdays"],
+        tech_order_max_m3=round(float(tech), 1),
+    )
+    write(DERIVED / "outlook_meta.csv", list(meta), [meta])
+    write(DERIVED / "outlook_weeks.csv", ["depot", "iso_year", "iso_week", "chilled_m3", "dry_m3", "style_m3", "tech_m3"],
+          weeks)
+    write(DERIVED / "outlook_days.csv",
+          ["depot", "date", "chilled_orders", "chilled_kg", "chilled_m3", "needed", "in_workshop", "served_one_fewer"],
+          days)
+
+
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--outlook"]:  # only the outlook files
+        outlook()
+    else:
+        main()

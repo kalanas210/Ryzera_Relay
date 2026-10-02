@@ -101,7 +101,22 @@ def _load_network(db: Session) -> Network:
     return Network(districts=districts, outlets=outlets, vehicles=vehicles, allowance=allowance)
 
 
+_conditions: dict[date, Conditions] = {}
+
+
 def conditions(db: Session, day: date) -> Conditions:
+    """A day's traffic, road and unloading tables, read once per process: they are reference data and never change
+    while Relay runs, and every estimate and every simulated record reads them."""
+    known = _conditions.get(day)
+    if known is None:
+        with _lock:
+            known = _conditions.get(day)
+            if known is None:
+                known = _conditions[day] = _load_conditions(db, day)
+    return known
+
+
+def _load_conditions(db: Session, day: date) -> Conditions:
     cal = db.get(CalendarDay, day)
     monsoon = bool(cal.monsoon) if cal else False
     speed = {

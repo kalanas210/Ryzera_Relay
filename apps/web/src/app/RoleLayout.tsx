@@ -15,7 +15,8 @@ export function RoleLayout({ appRole: role, children }: { appRole: Role; childre
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/signin?role=${role}&next=${next}`} replace />;
   }
-  if (me.isError) {
+  // a phone with no signal keeps working from who was signed in last; only a first sign-in needs Relay
+  if (me.isError && !me.data) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-6 text-center t-body text-asphalt-700">
         Relay could not be reached. {me.error.message}

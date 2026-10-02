@@ -12,18 +12,20 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { useAccounts, useDemoState, useMe } from "@/app/session";
+import { useMe } from "@/app/session";
 import { useSimNow } from "@/demo/clock";
 import { Button } from "@/design/Button";
 import { PinPad } from "@/design/PinPad";
 import { Sheet } from "@/design/Sheet";
 import { StatusChip } from "@/design/StatusChip";
 import { StopMarker } from "@/design/StopMarker";
-import { useLoaderText, weekdayIn } from "@/i18n";
+import { useLoaderText } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
 import { type LoadLine, type StopGroup, type TripLoad, useAcceptHere, useComplete, useTripLoad } from "./api";
-import { DockHeader, PersonButton, pinError } from "./LoaderShell";
+import { weekdayName } from "./days";
+import { DockHeader, PersonButton, pinError, useDemoPin } from "./LoaderShell";
+import { StopTitle } from "./parts";
 
 const PHONE_SILENT_MS = 60_000;
 
@@ -55,7 +57,7 @@ export function HandoverPage() {
 }
 
 function Handover({ load }: { load: TripLoad }) {
-  const { t, lang, clock } = useLoaderText();
+  const { t, clock } = useLoaderText();
   const navigate = useNavigate();
   const me = useMe("loader");
   const now = useSimNow(5_000);
@@ -125,7 +127,7 @@ function Handover({ load }: { load: TripLoad }) {
           <section className="flex flex-col gap-3">
             <h2 className="t-h2">{t("handover.shortfall")}</h2>
             {flagged.map(({ group, line }) => (
-              <ShortfallRecord key={line.id} group={group} line={line} lang={lang} />
+              <ShortfallRecord key={line.id} group={group} line={line} />
             ))}
           </section>
         ) : null}
@@ -136,14 +138,16 @@ function Handover({ load }: { load: TripLoad }) {
             <p className="t-caption text-asphalt-500">{t("handover.inStopOrder", { driver: first })}</p>
           </div>
           {/* One grid for the whole table, each row a subgrid, so every row shares the columns. Stop is as wide
-              as its longest place and never wider than the room left, Planned is 45, and Loaded takes the rest: a
-              40 wide number, then the check or the Short chip, which drops under the number before a place name
-              would have to give way. */}
+              as its longest place and never wider than the room left, Planned is 45, and Loaded takes the rest: 12
+              of space after Planned, a 40 wide number, then the check or the Short chip, which drops under the
+              number before a place name would have to give way. The first line of every cell is 32 high, the
+              marker's height, and cells sit at the top of the row, so a stop, its Planned and its Loaded figures
+              always share a line, and the row's lines are centered in its 64. */}
           <div className="grid grid-cols-[minmax(0,max-content)_45px_minmax(min-content,1fr)] overflow-hidden rounded-card border border-asphalt-200 bg-white">
             <div className="col-span-full grid h-10 grid-cols-subgrid items-center px-3 t-caption text-asphalt-500">
               <span>{t("handover.stop")}</span>
               <span className="text-right">{t("handover.planned")}</span>
-              <span>{t("handover.loadedCol")}</span>
+              <span className="pl-3">{t("handover.loadedCol")}</span>
             </div>
             {h.stops.map((s) => {
               const short = s.planned - s.loaded;
@@ -151,17 +155,17 @@ function Handover({ load }: { load: TripLoad }) {
                 <div
                   key={s.seq}
                   className={cx(
-                    "col-span-full grid min-h-16 grid-cols-subgrid items-center border-t border-asphalt-200 px-3 py-2",
+                    "col-span-full grid min-h-16 grid-cols-subgrid content-center items-start border-t border-asphalt-200 px-3 py-2",
                     short > 0 && "bg-attention-soft",
                   )}
                 >
-                  <span className="flex min-w-0 items-center gap-2">
+                  <span className="flex min-h-8 min-w-0 items-center gap-2">
                     <StopMarker n={s.seq} state={short > 0 ? "short" : done || allLinesDone ? "done" : "pending"} />
                     <span className="latin min-w-0 t-body-strong [overflow-wrap:anywhere]">{s.place}</span>
                   </span>
-                  <span className="num text-right t-body">{s.planned}</span>
-                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="num w-10 shrink-0 text-right t-body">{s.loaded}</span>
+                  <span className="num flex h-8 items-center justify-end t-body">{s.planned}</span>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-3">
+                    <span className="num flex h-8 w-10 shrink-0 items-center justify-end t-body">{s.loaded}</span>
                     {short > 0 ? (
                       <StatusChip icon={PackageX} tone="attention" className="bg-white whitespace-nowrap">
                         {t("chips.short", { count: short })}
@@ -176,7 +180,9 @@ function Handover({ load }: { load: TripLoad }) {
             <div className="col-span-full grid grid-cols-subgrid items-center gap-y-1 border-t border-asphalt-200 bg-asphalt-50 px-3 py-3">
               <span className="t-h3">{t("handover.total")}</span>
               <span className="num text-right t-h3">{h.planned_cases}</span>
-              <span className="num w-10 text-right t-h3">{h.loaded_cases}</span>
+              <span className="pl-3">
+                <span className="num block w-10 text-right t-h3">{h.loaded_cases}</span>
+              </span>
               <span className="num col-span-full t-caption text-asphalt-700">
                 {t("handover.weight", {
                   loaded: weight.format(h.loaded_kg),
@@ -262,7 +268,7 @@ function Handover({ load }: { load: TripLoad }) {
   );
 }
 
-function ShortfallRecord({ group, line, lang }: { group: StopGroup; line: LoadLine; lang: "en" | "si" | "ta" }) {
+function ShortfallRecord({ group, line }: { group: StopGroup; line: LoadLine }) {
   const { t, clock } = useLoaderText();
   const s = line.shortfall;
   if (!s) return null;
@@ -271,7 +277,9 @@ function ShortfallRecord({ group, line, lang }: { group: StopGroup; line: LoadLi
     <div className="flex flex-col gap-2 rounded-card border border-attention bg-white p-4">
       <div className="flex items-center gap-2">
         <PackageX size={24} strokeWidth={1.75} aria-hidden className="shrink-0 text-attention" />
-        <h3 className="min-w-0 flex-1 t-h3">{t("load.stop", { n: group.seq, place: group.place })}</h3>
+        <h3 className="min-w-0 flex-1 t-h3">
+          <StopTitle seq={group.seq} place={group.place} />
+        </h3>
         {s.decision ? (
           <StatusChip icon={PackageX} tone="attention">
             {t("chips.sendShort")}
@@ -297,7 +305,7 @@ function ShortfallRecord({ group, line, lang }: { group: StopGroup; line: LoadLi
               ? t("handover.decidedAdd", {
                   name: s.decided_by ?? "",
                   time: clock(s.decided_at),
-                  day: s.added_to_day ? weekdayIn(lang, s.added_to_day) : "",
+                  day: s.added_to_day ? weekdayName(t, s.added_to_day) : "",
                   order: s.added_to_order_ref,
                 })
               : t("handover.decidedNone", { name: s.decided_by ?? "", time: clock(s.decided_at) })}
@@ -408,8 +416,6 @@ function DriverPinSheet({
 }) {
   const { t } = useLoaderText();
   const accept = useAcceptHere(load.trip_id);
-  const accounts = useAccounts();
-  const demo = useDemoState();
   const [pin, setPin] = useState("");
   const [error, setError] = useState<{ text: string; wrongPin: boolean } | null>(null);
   const driver = load.driver ?? "";
@@ -420,8 +426,7 @@ function DriverPinSheet({
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  const account = accounts.data?.find((a) => a.role === "driver" && a.display_name === driver);
-  const demoPin = demo.data?.demo_mode ? account?.hint.match(/PIN (\d+)/)?.[1] : undefined;
+  const demo = useDemoPin((a) => a.role === "driver" && a.display_name === driver);
   return (
     <Sheet
       open={open}
@@ -436,9 +441,12 @@ function DriverPinSheet({
     >
       <div className="flex flex-col gap-5 pb-2">
         <div className="grid grid-cols-3 gap-2">
-          <PersonButton person={{ username: account?.username ?? driver, display_name: driver, initials }} selected />
+          <PersonButton person={{ username: demo.username ?? driver, display_name: driver, initials }} selected />
         </div>
         <div className="flex flex-col items-center gap-3">
+          {demo.pin ? (
+            <p className="t-caption text-center text-asphalt-500">{t("who.demoPin", { pin: demo.pin })}</p>
+          ) : null}
           <PinPad
             value={pin}
             error={Boolean(error?.wrongPin)}
@@ -466,8 +474,6 @@ function DriverPinSheet({
             <p role="alert" className="t-body-strong text-center text-problem">
               {error.text}
             </p>
-          ) : demoPin ? (
-            <p className="t-caption text-center text-asphalt-500">{t("handover.demoPin", { pin: demoPin })}</p>
           ) : null}
         </div>
       </div>

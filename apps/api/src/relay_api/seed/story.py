@@ -7,6 +7,7 @@ walkthrough. The demo bar's autopilot places them if a judge skips ahead.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
@@ -122,7 +123,7 @@ def create_workspace(db: Session, seed_dir: Path, code: str, label: str, is_defa
         clock_anchor_real=now,
         clock_anchor_sim=STORY_START,
         clock_rate=1.0,
-        state={},
+        state={"edition": uuid.uuid4().hex[:12]},
     )
     db.add(workspace)
     db.flush()
@@ -136,5 +137,5 @@ def reset_workspace(db: Session, seed_dir: Path, workspace: Workspace) -> None:
     workspace.clock_anchor_real = now
     workspace.clock_anchor_sim = STORY_START
     workspace.clock_rate = 1.0
-    workspace.state = {}
+    workspace.state = {"edition": uuid.uuid4().hex[:12]}
     seed_workspace(db, seed_dir, workspace)

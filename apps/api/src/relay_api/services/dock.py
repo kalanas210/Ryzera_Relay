@@ -434,11 +434,13 @@ def trip_load(db: Session, trip: Trip) -> TripLoadOut:
     assert plan is not None
     load = loads_for(db, [trip])[trip.id]
     changes = changes_after_publish(db, plan).get(trip.id, [])
+    # A stop's label names the place it held until its latest move: "Was stop 3 until 2:53 AM", even when an
+    # earlier change had moved it there from somewhere else.
     moved: dict[str, tuple[int, datetime]] = {}
     for change in changes:
         for move in change.detail.get("moves", []):
-            first_from = moved.get(move["order_ref"], (move["from"], change.created_at))[0]
-            moved[move["order_ref"]] = (first_from, change.created_at)
+            if move["from"] != move["to"]:
+                moved[move["order_ref"]] = (move["from"], change.created_at)
     groups = []
     in_order = sorted(trip.stops, key=lambda s: -s.seq)
     lines_of = {stop.id: [line for line in load.lines if line.stop_id == stop.id] for stop in in_order}

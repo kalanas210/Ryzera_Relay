@@ -49,6 +49,8 @@ class WorkspaceOut(Schema):
     code: str
     label: str
     is_default: bool
+    edition: str
+    """New each time the copy is made or reset."""
 
 
 class DemoState(Schema):
@@ -60,3 +62,6 @@ class DemoState(Schema):
     next: MomentOut | None
     played: list[str] = []
     """Story steps the last jump played because nobody had taken them."""
+    outages: dict[str, dict[str, datetime]] = {}
+    """The story's scripted loss of signal by driver username ({"from", "to"}), once the clock has reached it: the
+    demo bar can say why a phone is quiet, and that driver's phone obeys it."""

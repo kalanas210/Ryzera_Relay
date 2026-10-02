@@ -16,11 +16,12 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/design/Button";
 import { Sheet } from "@/design/Sheet";
 import { Stepper } from "@/design/Stepper";
-import { useLoaderText, weekdayIn } from "@/i18n";
+import { useLoaderText } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
 import { PHOTO_TYPES, shrinkPhoto } from "@/lib/photo";
 import { type FlagWrite, type LoadLine, loadKindKey, type StopGroup, type TripLoad, useWithdrawFlag } from "./api";
+import { weekdayName } from "./days";
 
 export type SendFlag = (flag: Pick<FlagWrite, "lineId" | "kind" | "qty">, photo: Blob | null) => void;
 
@@ -223,14 +224,14 @@ function FlagRecord({
   unsent: boolean;
   onClose: () => void;
 }) {
-  const { t, lang, clock } = useLoaderText();
+  const { t, clock } = useLoaderText();
   const withdraw = useWithdrawFlag(load.trip_id);
   const [showNumber, setShowNumber] = useState(false);
   const s = line.shortfall;
   if (!s) return null;
   const Icon = s.kind === "missing" ? PackageX : TriangleAlert;
-  const day = s.added_to_day ? weekdayIn(lang, s.added_to_day) : "";
-  const from = weekdayIn(lang, load.planned_depart);
+  const day = s.added_to_day ? weekdayName(t, s.added_to_day) : "";
+  const from = weekdayName(t, load.planned_depart);
   // what the stop's lines say goes off at the door: every decided short on the stop, not only this one
   const stopCases = group.cases - group.short;
   return (
@@ -262,7 +263,7 @@ function FlagRecord({
       </div>
 
       {unsent && load.dispatcher_phone ? (
-        // the tablet cannot place calls, so the number is shown large enough to dial from a phone
+        // the number is shown large enough to dial from a phone, and a phone can call it with a tap
         <div className="flex flex-col gap-2">
           <Button density="field" full icon={Phone} aria-expanded={showNumber} onClick={() => setShowNumber(true)}>
             {t("call.title", { name: calledName(load.dispatcher) })}
@@ -328,15 +329,26 @@ function FlagRecord({
   );
 }
 
-/** The dispatch number in Display size, with a word on why it is not a button. */
+/** The dispatch number in Display size. On a phone a tap calls it; the dock tablet cannot place calls, so the
+ *  number is large enough to dial from a phone, and the note says so in words that suit either device. */
 function DispatchNumber({ phone }: { phone: string }) {
   const { t } = useLoaderText();
   return (
     <div className="flex flex-col items-center gap-1 rounded-card border border-asphalt-200 bg-asphalt-50 p-4">
-      <p className="num latin t-display text-asphalt-900">{phone}</p>
+      <a
+        href={telLink(phone)}
+        className="num latin inline-flex min-h-12 items-center rounded-button px-2 t-display text-petrol-700 underline decoration-2 underline-offset-4"
+      >
+        {phone}
+      </a>
       <p className="text-center t-label text-asphalt-700">{t("call.note")}</p>
     </div>
   );
+}
+
+/** "081 000 2145" as a dialable link: digits only, and a leading + kept for an international number. */
+export function telLink(phone: string): string {
+  return `tel:${phone.trim().replace(/(?!^\+)[^\d]/g, "")}`;
 }
 
 /** "Call Nuwan at dispatch" from the bar alert row, when a flag still has no answer close to departure. */

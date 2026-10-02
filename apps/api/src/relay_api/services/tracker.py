@@ -4,17 +4,19 @@ The tracker reads the same estimate as the dispatcher: while the driver is in co
 the driver's phone is silent it adds the likely range and says plainly that the van has gone quiet, never why. Once
 the estimate has passed with no word, the store can confirm receipt itself: that counts as the delivery for every
 estimate after it, and if a backup is still on the road to a later stop, the dispatcher is asked whether to keep it.
+A store that confirmed can still report a problem with the goods until 4:00 PM on the delivery day.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from relay_api.clock import COLOMBO
 from relay_api.models import (
     AppUser,
     AuditLog,
@@ -26,6 +28,7 @@ from relay_api.models import (
     OrderStatus,
     Photo,
     Plan,
+    PlanStatus,
     Proof,
     Receipt,
     ReceiptIssue,
@@ -38,6 +41,10 @@ from relay_api.models import (
 from relay_api.services import backup, words
 from relay_api.services.dock import Lookup
 from relay_api.services.estimates import run_estimate
+from relay_api.services.notify import add_feed_item
+
+ISSUES_UNTIL = time(16, 0)
+"""A store can report a problem with a delivery until this time on the delivery day."""
 
 
 class TrackerError(Exception):
@@ -72,6 +79,13 @@ class Tracker:
     position: str
     window: str
     can_confirm: bool
+    planned: datetime | None = None
+    """The plan's time for the store's stop: "Planned 5:19 AM"."""
+    departed_at: datetime | None = None
+    arrived_at: datetime | None = None
+    """When the driver recorded arriving at the store."""
+    issues_until: datetime | None = None
+    """Until when the store can still report a problem with this delivery."""
     on_board: list[dict[str, Any]] = field(default_factory=list)
     stops: list[TrackerStop] = field(default_factory=list)
     proof: dict[str, Any] | None = None
@@ -82,10 +96,22 @@ class Tracker:
 
 
 def _stop_for(db: Session, order: Order) -> Stop | None:
-    """The stop carrying this order: a live backup copy wins over the moved original."""
-    stops = list(db.scalars(select(Stop).where(Stop.order_id == order.id, Stop.status != StopStatus.CANCELLED)))
+    """The stop carrying this order on a published plan, so a store never sees a draft: a live backup copy wins over
+    the moved original."""
+    stops = list(
+        db.scalars(
+            select(Stop)
+            .join(Trip, Trip.id == Stop.trip_id)
+            .join(Plan, Plan.id == Trip.plan_id)
+            .where(Stop.order_id == order.id, Stop.status != StopStatus.CANCELLED, Plan.status == PlanStatus.PUBLISHED)
+        )
+    )
     live = [s for s in stops if s.backup_of is not None]
     return live[0] if live else (stops[0] if stops else None)
+
+
+def issues_until(plan: Plan) -> datetime:
+    return datetime.combine(plan.run_date, ISSUES_UNTIL, tzinfo=COLOMBO)
 
 
 def tracker(db: Session, now: datetime, order: Order) -> Tracker:
@@ -126,10 +152,17 @@ def tracker(db: Session, now: datetime, order: Order) -> Tracker:
     out.vehicle_kind = words.vehicle_kind(vehicle.type, vehicle.temp)
     out.driver = driver.display_name if driver else None
     out.stop_seq = stop.seq
+    out.planned = stop.planned_arrival
+    out.departed_at = trip.departed_at
+    out.arrived_at = stop.arrived_at
+    out.issues_until = issues_until(plan)
     out.out_of_contact = estimate.out_of_contact
     out.last_heard = estimate.last_contact_at
     kind_, where = estimate.position
-    if kind_ == "unloading" and where:
+    to_come = [r for r in sorted(estimate.stops, key=lambda r: r.seq) if not r.done and r.arrived_at is None]
+    if kind_ == "unloading" and where and to_come and to_come[0].stop_id == stop.id:
+        out.position = "Your store is probably the next stop."  # what the store needs, not where the truck stands
+    elif kind_ == "unloading" and where:
         out.position = f"Probably still unloading at {look.outlets[where].short_name}."
     elif kind_ == "on_the_road" and where:
         out.position = (
@@ -199,6 +232,7 @@ def tracker(db: Session, now: datetime, order: Order) -> Tracker:
                 {"case_type": i.case_type, "kind": i.kind.value, "qty": i.qty, "note": i.note}
                 for i in db.scalars(select(ReceiptIssue).where(ReceiptIssue.receipt_id == receipt.id))
             ],
+            "reported_at": max((line["at"] for line in receipt.lines if line.get("at")), default=None),
         }
     if receipt is not None:
         out.status = "confirmed" if receipt.status is ReceiptStatus.CONFIRMED else "disputed"
@@ -244,19 +278,7 @@ def confirm_receipt(
     if trip is None or trip.departed_at is None:
         raise TrackerError("The delivery has not left the hub yet.")
     types = {c.code: c for c in db.scalars(select(CaseType))}
-    clean = []
-    for issue in issues:
-        code = str(issue.get("case_type"))
-        if code not in types:
-            raise TrackerError("Choose the case type for each issue.")
-        try:
-            kind = IssueKind(str(issue.get("kind")))
-        except ValueError as exc:
-            raise TrackerError("Say what is wrong with each line.") from exc
-        qty = int(issue.get("qty", 0))
-        if qty < 1:
-            raise TrackerError("Say how many cases each issue covers.")
-        clean.append((code, kind, qty, str(issue.get("note", ""))[:300]))
+    clean = _issues(types, issues)
     proof = db.scalar(select(Proof).where(Proof.stop_id == stop.id))
     receipt = Receipt(
         order_id=order.id,
@@ -275,22 +297,7 @@ def confirm_receipt(
     if proof is None:
         backup.receipt_question(db, now, stop, now)
     if clean:
-        from relay_api.models import FeedKind, Plan
-        from relay_api.services.notify import add_feed_item
-
-        plan = db.get(Plan, trip.plan_id)
-        add_feed_item(
-            db,
-            now,
-            kind=FeedKind.DISPUTE,
-            depot=plan.depot if plan else "Kandy",
-            title=f"{order.outlet_id} reports {sum(q for _, _, q, _ in clean)} cases with issues on {order.order_ref}",
-            body="; ".join(
-                f"{q} {words.short_case_name(types[c].name).lower()} {k.value.replace('_', ' ')}"
-                for c, k, q, _ in clean
-            ),
-            ref={"order_ref": order.order_ref, "receipt_id": str(receipt.id), "trip_id": str(trip.id)},
-        )
+        _dispute(db, now, order, trip, receipt, types, clean)
     db.add(
         AuditLog(
             at=now,
@@ -300,6 +307,99 @@ def confirm_receipt(
             entity="order",
             entity_id=order.order_ref,
             summary=f"{order.order_ref} receipt confirmed" + (f" with {len(clean)} issues" if clean else ""),
+        )
+    )
+    return receipt
+
+
+Issue = tuple[str, IssueKind, int, str]
+
+
+def _issues(types: dict[str, CaseType], issues: list[dict[str, Any]]) -> list[Issue]:
+    clean = []
+    for issue in issues:
+        code = str(issue.get("case_type"))
+        if code not in types:
+            raise TrackerError("Choose the case type for each issue.")
+        try:
+            kind = IssueKind(str(issue.get("kind")))
+        except ValueError as exc:
+            raise TrackerError("Say what is wrong with each line.") from exc
+        qty = int(issue.get("qty", 0))
+        if qty < 1:
+            raise TrackerError("Say how many cases each issue covers.")
+        clean.append((code, kind, qty, str(issue.get("note", ""))[:300]))
+    return clean
+
+
+def _dispute(
+    db: Session,
+    now: datetime,
+    order: Order,
+    trip: Trip,
+    receipt: Receipt,
+    types: dict[str, CaseType],
+    clean: list[Issue],
+) -> None:
+    from relay_api.models import FeedKind
+
+    plan = db.get(Plan, trip.plan_id)
+    add_feed_item(
+        db,
+        now,
+        kind=FeedKind.DISPUTE,
+        depot=plan.depot if plan else "Kandy",
+        title=f"{order.outlet_id} reports {words.cases('case', sum(q for _, _, q, _ in clean))} with issues on "
+        f"{order.order_ref}",
+        body="; ".join(
+            f"{q} {words.short_case_name(types[c].name).lower()} {k.value.replace('_', ' ')}" for c, k, q, _ in clean
+        ),
+        ref={"order_ref": order.order_ref, "receipt_id": str(receipt.id), "trip_id": str(trip.id)},
+    )
+
+
+def report_issues(
+    db: Session, now: datetime, user: AppUser, order: Order, issues: list[dict[str, Any]], client_ref: str
+) -> Receipt:
+    """A problem the store finds after confirming receipt (a crushed case at the back of the pile), until 4:00 PM on
+    the delivery day. Idempotent by client_ref: Try again never reports it twice."""
+    receipt = db.scalar(select(Receipt).where(Receipt.order_id == order.id))
+    if receipt is None:
+        raise TrackerError("Confirm the receipt first.")
+    if any(line.get("client_ref") == client_ref for line in receipt.lines):
+        return receipt
+    stop = _stop_for(db, order)
+    trip = db.get(Trip, stop.trip_id) if stop else None
+    plan = db.get(Plan, trip.plan_id) if trip else None
+    if trip is None or plan is None:
+        raise TrackerError("This order is not on a run.")
+    if now >= issues_until(plan):
+        raise TrackerError(f"Problems with this delivery could be reported until {words.clock(issues_until(plan))}.")
+    types = {c.code: c for c in db.scalars(select(CaseType))}
+    clean = _issues(types, issues)
+    if not clean:
+        raise TrackerError("Flag at least one line.")
+    for code, kind, qty, note in clean:
+        db.add(ReceiptIssue(receipt_id=receipt.id, case_type=code, kind=kind, qty=qty, note=note))
+    receipt.lines = [
+        *receipt.lines,
+        *(
+            {"case_type": c, "kind": k.value, "qty": q, "client_ref": client_ref, "at": now.isoformat()}
+            for c, k, q, _ in clean
+        ),
+    ]
+    receipt.status = ReceiptStatus.WITH_ISSUES
+    order.status = OrderStatus.DISPUTED
+    _dispute(db, now, order, trip, receipt, types, clean)
+    db.add(
+        AuditLog(
+            at=now,
+            actor_id=user.id,
+            actor_label=user.display_name,
+            action="receipt.issues",
+            entity="order",
+            entity_id=order.order_ref,
+            summary=f"{order.order_ref}: {len(clean)} issues reported after receipt",
         )
     )
     return receipt

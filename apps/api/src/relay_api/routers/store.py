@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from relay_api.clock import COLOMBO
 from relay_api.models import (
@@ -152,9 +152,6 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
     ordering_for = delivery_day_for(db, now)
     local = now.astimezone(COLOMBO)
     today = local.date()
-    # Until midday on a delivery day, "this morning's run" is the one a store is following.
-    runs_today = next_operating_day(db, today - timedelta(days=1)) == today
-    next_run = today if local.hour < 12 and runs_today else next_operating_day(db, today)
     form_order = {code: i for i, code in enumerate(ORDER_FORM)}
     types = sorted(
         db.scalars(select(CaseType).where(CaseType.brand == outlet.brand)),
@@ -164,10 +161,16 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
     orders = list(
         db.scalars(
             select(Order)
-            .where(Order.outlet_id == outlet.outlet_id, Order.requested_date >= today)
+            .where(Order.outlet_id == outlet.outlet_id, or_(Order.requested_date >= today, Order.run_date >= today))
             .order_by(Order.requested_date, Order.order_ref)
         )
     )
+    # Until midday on a delivery day, "this morning's run" is the one a store is following; a store that had a
+    # delivery this morning keeps it in view until 4:00 PM, while it can still report a problem with it.
+    runs_today = next_operating_day(db, today - timedelta(days=1)) == today
+    delivered_today = any(o.run_date == today for o in orders)
+    keep_today = local.hour < 12 or (local.hour < tracker.ISSUES_UNTIL.hour and delivered_today)
+    next_run = today if keep_today and runs_today else next_operating_day(db, today)
     deferrals = {
         d.order_id: d for d in db.scalars(select(Deferral).where(Deferral.order_id.in_([o.id for o in orders])))
     }
@@ -260,6 +263,10 @@ def acknowledge(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notif
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such notice")
     notice.read_at = notice.read_at or scope.now
     notice.acknowledged_at = notice.acknowledged_at or scope.now
+    deferral_id = notice.data.get("deferral_id")
+    deferral = scope.db.get(Deferral, uuid.UUID(str(deferral_id))) if deferral_id else None
+    if deferral is not None and deferral.acknowledged_at is None:
+        deferral.acknowledged_at = scope.now  # the dispatcher's "Seen 6:41 PM"
     scope.db.commit()
     return notice
 
@@ -301,6 +308,24 @@ def confirm(order_ref: str, body: ReceiptIn, scope: ScopeDep, user: StoreUser) -
         tracker.confirm_receipt(
             scope.db, scope.now, user, order, [i.model_dump() for i in body.issues], body.client_ref
         )
+    except tracker.TrackerError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    scope.db.commit()
+    return tracker.tracker(scope.db, scope.now, order).as_dict()
+
+
+class IssuesIn(BaseModel):
+    client_ref: str = Field(min_length=8, max_length=64)
+    """Made on the store's phone, so Try again never reports the same problem twice."""
+    issues: list[IssueIn] = Field(min_length=1, max_length=20)
+
+
+@router.post("/orders/{order_ref}/issues")
+def report_issues(order_ref: str, body: IssuesIn, scope: ScopeDep, user: StoreUser) -> dict[str, object]:
+    """STM-05 after confirming: a problem found later with the goods, until 4:00 PM on the delivery day."""
+    order = _my_order(scope, user, order_ref)
+    try:
+        tracker.report_issues(scope.db, scope.now, user, order, [i.model_dump() for i in body.issues], body.client_ref)
     except tracker.TrackerError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     scope.db.commit()

@@ -24,11 +24,14 @@ export type Moment = { key: string; label: string; at: string; passed: boolean }
 
 export type DemoState = {
   demo_mode: boolean;
-  workspace: { code: string; label: string; is_default: boolean };
+  /** The copy of the day; `edition` is new each time the copy is made or reset. */
+  workspace: { code: string; label: string; is_default: boolean; edition: string };
   now: string;
   rate: number;
   moments: Moment[];
   next: Moment | null;
   /** Story steps the last jump played because nobody had taken them. */
   played: string[];
+  /** The story's scripted loss of signal by driver username, once the clock has reached it. */
+  outages: Record<string, { from: string; to: string }>;
 };

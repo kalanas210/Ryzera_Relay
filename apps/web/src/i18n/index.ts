@@ -3,6 +3,7 @@
  *  Latin letters and Western digits in every language. */
 import i18next from "i18next";
 import { initReactI18next, useTranslation } from "react-i18next";
+import { driver } from "./driver";
 import { loader } from "./loader";
 
 export type Lang = "en" | "si" | "ta";
@@ -17,9 +18,9 @@ void i18next.use(initReactI18next).init({
   lng: "en",
   fallbackLng: "en",
   resources: {
-    en: { loader: loader.en },
-    si: { loader: loader.si },
-    ta: { loader: loader.ta },
+    en: { loader: loader.en, driver: driver.en },
+    si: { loader: loader.si, driver: driver.si },
+    ta: { loader: loader.ta, driver: driver.ta },
   },
   interpolation: { escapeValue: false },
   returnNull: false,

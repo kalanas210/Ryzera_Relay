@@ -17,10 +17,11 @@ import { type PointerEvent, useRef, useState } from "react";
 import { Button } from "@/design/Button";
 import { Sheet } from "@/design/Sheet";
 import { Stepper } from "@/design/Stepper";
-import { useLoaderText, weekdayIn } from "@/i18n";
+import { useLoaderText } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
 import type { LoadLine } from "./api";
+import { weekdayName } from "./days";
 
 /** Load progress bar: petrol while loading, green when complete, with the short share in amber at the end. */
 export function LoadProgress({
@@ -58,6 +59,35 @@ export function LoadProgress({
   );
 }
 
+/** "Stop 3 · Hemmathagama" on one line where it fits. Where it does not, the place takes the next line and the dot
+ *  goes with the break: the place carries the dot in front of it, the row is pulled left by the dot's width, and a
+ *  dot that starts a line falls outside the clip. In Sinhala and Tamil the place always takes its own line, as the
+ *  " · " form does not fit. */
+export function StopTitle({ seq, place }: { seq: number; place: string }) {
+  const { t, lang } = useLoaderText();
+  if (lang !== "en") {
+    return (
+      <>
+        <span className="block">{t("load.stopShort", { n: seq })}</span>
+        <span className="latin block">{place}</span>
+      </>
+    );
+  }
+  return (
+    <span className="block overflow-x-clip">
+      <span className="-ml-[0.8em] flex flex-wrap">
+        <span className="pl-[0.8em]">{t("load.stopShort", { n: seq })}</span>
+        <span className="latin min-w-0 [overflow-wrap:anywhere]">
+          <span aria-hidden className="inline-block w-[0.8em] text-center">
+            ·
+          </span>
+          {place}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 const LONG_PRESS_MS = 550;
 
 type StatusLine = { text: string; className: string; icon?: LucideIcon };
@@ -92,7 +122,7 @@ export function LoadLineRow({
   /** The flag is still on this tablet a minute after it was made. */
   unsent?: boolean;
 }) {
-  const { t, lang } = useLoaderText();
+  const { t } = useLoaderText();
   const press = useRef<number | undefined>(undefined);
   const held = useRef(false);
   const flagged = line.status === "flag_waiting" || line.status === "decided";
@@ -180,7 +210,7 @@ export function LoadLineRow({
       statusLines.push({
         text:
           s.decision === "send_short" && s.added_to_day
-            ? t("load.comeOn", { count: missing, day: weekdayIn(lang, s.added_to_day) })
+            ? t("load.comeOn", { count: missing, day: weekdayName(t, s.added_to_day) })
             : t("load.notReplaced"),
         className: cx(label, "text-asphalt-700"),
       });

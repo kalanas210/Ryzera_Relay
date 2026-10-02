@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
-import { type ApiError, api, type Role } from "@/api/client";
+import { ApiError, api, type Role } from "@/api/client";
 import type { Account, DemoState, Me } from "@/api/types";
 
 const RoleContext = createContext<Role | null>(null);
@@ -16,11 +16,46 @@ export function useRole(): Role {
   return role;
 }
 
+/** The driver's phone opens with no signal too: who is signed in is kept on the phone, and checked again as soon as
+ *  Relay can be reached. Only the driver's: every other role works at a desk or a dock with a connection. */
+const KEPT_ROLES: ReadonlySet<Role> = new Set(["driver"]);
+
+function keptMe(role: Role): Me | undefined {
+  if (!KEPT_ROLES.has(role)) return undefined;
+  try {
+    const raw = localStorage.getItem(`relay.me.${role}`);
+    return raw ? (JSON.parse(raw) as Me) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function keepMe(role: Role, me: Me | null) {
+  if (!KEPT_ROLES.has(role)) return;
+  try {
+    if (me) localStorage.setItem(`relay.me.${role}`, JSON.stringify(me));
+    else localStorage.removeItem(`relay.me.${role}`);
+  } catch {
+    // nothing kept: the phone asks Relay each time
+  }
+}
+
 export function useMe(role: Role) {
   return useQuery<Me, ApiError>({
     queryKey: ["me", role],
-    queryFn: ({ signal }) => api.get<Me>("/api/auth/me", { role, signal }),
-    retry: (count, error) => error.status !== 401 && count < 2,
+    queryFn: async ({ signal }) => {
+      try {
+        const me = await api.get<Me>("/api/auth/me", { role, signal });
+        keepMe(role, me);
+        return me;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) keepMe(role, null);
+        throw error;
+      }
+    },
+    initialData: () => keptMe(role),
+    initialDataUpdatedAt: 0, // kept, never fresh: Relay is asked again at once
+    retry: (count, error) => error.status !== 401 && !error.offline && count < 2,
     staleTime: 60_000,
   });
 }
@@ -49,6 +84,7 @@ export function useSignOut(role: Role) {
   return useMutation({
     mutationFn: () => api.post<void>("/api/auth/logout", {}, { role }),
     onSuccess: () => {
+      keepMe(role, null);
       client.removeQueries({ queryKey: ["me", role] });
     },
   });

@@ -1,11 +1,11 @@
-"""The dispatcher's desk: the order queue (DSP-01). The plan board, deferrals, live runs and the
-capacity outlook join this router as they are built."""
+"""The dispatcher's desk: the order queue (DSP-01) and the capacity outlook (DSP-05). The plan board, deferrals and
+live runs have routers of their own."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -25,8 +25,10 @@ from relay_api.models import (
     VehicleDayStatus,
 )
 from relay_api.schemas.common import Schema
+from relay_api.schemas.outlook import OutlookOut
 from relay_api.security import require
 from relay_api.services.ordering import current_run, cutoff_for
+from relay_api.services.outlook import capacity_outlook
 from relay_api.workspaces import ScopeDep
 
 router = APIRouter(prefix="/api/dispatch", tags=["dispatcher"])
@@ -241,3 +243,11 @@ def queue(scope: ScopeDep, _user: Dispatcher, run_date: Annotated[date | None, Q
 
 def _day_name(d: date) -> str:
     return d.strftime("%A")
+
+
+@router.get("/outlook", response_model=OutlookOut)
+def outlook(
+    scope: ScopeDep, _user: Dispatcher, depot: Annotated[Literal["Kandy", "Peliyagoda"], Query()] = "Kandy"
+) -> OutlookOut:
+    """DSP-05: six ISO weeks from today against the depot's refrigerated fleet. Read-only."""
+    return capacity_outlook(scope.db, scope.now, depot)

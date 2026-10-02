@@ -1,6 +1,6 @@
-"""Kasun's morning through the API: he accepts the load and drives, his phone goes quiet near Mawanella, Nuwan sends
-Aranayake with the standby van, Dilani confirms receipt from her store, and when the phone comes back its offline
-records land in order, one clash raises the one question, and Kasun's "yes" settles it."""
+"""Kasun's morning through the API: the load is accepted and the truck drives, the phone goes quiet near Mawanella,
+Nuwan sends Aranayake with the standby van, Dilani confirms receipt from the store, and when the phone comes back its
+offline records land in order, one clash raises the one question, and Kasun's "yes" settles it."""
 
 from __future__ import annotations
 
@@ -40,6 +40,16 @@ def record(kind: str, trip: dict[str, Any], clock: str, stop: dict[str, Any] | N
 
 def send(copy: Copy, *records: dict) -> dict:
     return copy.post("/api/driver/records", {"device_id": DEVICE, "records": list(records)}, "driver")
+
+
+def save_offline(copy: Copy, clock: str, record: dict, kept: list[dict]) -> None:
+    """The phone saves a record with no signal: nothing reaches Relay, and the demo's stand-in for the phone's memory
+    keeps it, as the web app hands it over, so a demo jump leaves that stop to this phone."""
+    copy.jump(at(clock))
+    body = {"device_id": DEVICE, "records": [record]}
+    copy.post("/api/driver/records", body, "driver", expect=503)
+    copy.post("/api/driver/held", body, "driver", expect=204)
+    kept.append(record)
 
 
 def stop_at(run: dict, place: str) -> dict:
@@ -103,8 +113,10 @@ def test_signal_lost_backup_sent_and_the_clash_settled(new_copy: Callable[[], Co
     notices = copy.get("/api/store/notices", "store_manager")
     assert any(n["kind"] == "new_time" and "6:35 AM" in n["body"] for n in notices)
 
-    copy.jump(at("05:41"))
+    copy.jump(at("05:40"))
     copy.post("/api/driver/checkin", {"device_id": DEVICE}, "driver")  # the last contact before the storm
+    kept: list[dict] = []
+    save_offline(copy, "05:52", record("delivered", trip, "05:52", mawanella, receiver="N. Wijesinghe"), kept)
 
     copy.jump(at("06:15"))
     panel = copy.get("/api/dispatch/live/runs?depot=Kandy", "dispatcher")
@@ -125,6 +137,10 @@ def test_signal_lost_backup_sent_and_the_clash_settled(new_copy: Callable[[], Co
         "dispatcher",
     )
 
+    hemmathagama = stop_at(seen, "Hemmathagama")
+    save_offline(copy, "06:20", record("arrived", trip, "06:20", hemmathagama), kept)
+    save_offline(copy, "06:35", record("delivered", trip, "06:35", hemmathagama, receiver="W. Rathnayake"), kept)
+
     copy.jump(at("06:42"))
     tracker = copy.post("/api/store/orders/ORD0098595/receipt", {"client_ref": "test-receipt"}, "store_manager")
     assert tracker["status"] == "confirmed"
@@ -133,26 +149,31 @@ def test_signal_lost_backup_sent_and_the_clash_settled(new_copy: Callable[[], Co
     keep = {"action": "keep", "note": "Kasun is still out of contact on the hill road."}
     copy.post(f"/api/dispatch/live/feed/{question['id']}/backup", keep, "dispatcher")
 
-    copy.jump(at("07:14"))  # the signal is back: the phone sends what it saved, in order
-    hemmathagama = stop_at(seen, "Hemmathagama")
-    out = send(
-        copy,
-        record("delivered", trip, "05:59", mawanella, receiver="N. Wijesinghe"),
-        record("arrived", trip, "06:21", hemmathagama),
-        record("delivered", trip, "06:36", hemmathagama, receiver="W. Rathnayake"),
-        record("arrived", trip, "06:56", aranayake),
-        record("delivered", trip, "07:09", aranayake, receiver="K. Herath"),
-    )
-    assert [r["outcome"] for r in out["results"]] == ["applied", "applied", "applied", "conflict", "conflict"]
-    [ask] = out["run"]["questions"]
+    save_offline(copy, "06:55", record("arrived", trip, "06:55", aranayake), kept)
+    save_offline(copy, "07:08", record("delivered", trip, "07:08", aranayake, receiver="K. Herath"), kept)
+
+    state = copy.jump(at("07:14"))  # the signal is back: what the phone saved lands in order, each with its own time
+    assert not [step for step in state["played"] if step.startswith("Kasun")]  # every stop was the phone's
+    run = copy.get("/api/driver/run", "driver")
+    done = [(s["status"], local(s["completed_at"]) if s["completed_at"] else None) for s in run["trip"]["stops"]]
+    assert done == [("delivered", "05:11"), ("delivered", "05:52"), ("delivered", "06:35"), ("moved", None)]
+    [ask] = run["questions"]  # stop 4 clashed with the move and waits for the one question
     assert ask["place"] == "Aranayake"
     assert "VEH060" in ask["question"]
+    assert (local(ask["arrived_at"]), local(ask["delivered_at"]), ask["receiver"]) == ("06:55", "07:08", "K. Herath")
+    feed = copy.get("/api/dispatch/live/feed?depot=Kandy", "dispatcher")
+    back = next(i for i in feed["earlier"] if i["kind"] == "back_in_contact")
+    assert "5 records received" in back["body"]
+    # the phone's own send, now it has signal, finds every record already there
+    out = send(copy, *kept)
+    assert {r["outcome"] for r in out["results"]} == {"duplicate"}
 
     copy.jump(at("07:15"))
     answer = record("conflict_answer", trip, "07:15", conflict_id=ask["id"], answer="yes")
     out = send(copy, answer)
     assert out["results"][0]["outcome"] == "applied"
-    assert out["run"]["questions"] == []
+    [settled] = out["run"]["questions"]
+    assert (settled["status"], settled["resolution"]) == ("resolved", "driver")
     assert stop_at(out["run"], "Aranayake")["status"] == "delivered"
 
     panel = copy.get("/api/dispatch/live/runs?depot=Kandy", "dispatcher")

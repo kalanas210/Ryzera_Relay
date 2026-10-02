@@ -48,6 +48,7 @@ MOMENTS: tuple[Moment, ...] = (
     Moment("on_the_road", "On the road", at(DELIVERY_DAY, "05:20")),
     Moment("signal_lost", "Signal lost near Mawanella", at(DELIVERY_DAY, "05:41")),
     Moment("silence", "The office sees the silence", at(DELIVERY_DAY, "06:05")),
+    Moment("backup", "A backup for Aranayake", at(DELIVERY_DAY, "06:15")),
     Moment("receipt", "Hemmathagama confirms receipt", at(DELIVERY_DAY, "06:40")),
     Moment("signal_back", "Signal back at Aranayake", at(DELIVERY_DAY, "07:14")),
     Moment("settled", "Everything settled", at(DELIVERY_DAY, "07:22")),

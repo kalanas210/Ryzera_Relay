@@ -36,6 +36,7 @@ def feed(db: Session, now: datetime, depot: str) -> FeedOut:
             handled_by=look.name(item.handled_by),
             outcome=item.outcome,
             shortfall=shortfall_detail(look, item.ref.get("shortfall_id")),
+            ref=item.ref,
         )
         (out.earlier if item.handled_at else out.now).append(row)
     return out

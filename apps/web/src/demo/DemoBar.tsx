@@ -1,13 +1,16 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Clock, CopyPlus, FastForward, ListChecks, RotateCcw, Users, X } from "lucide-react";
+import { ChevronRight, Clock, CloudOff, CopyPlus, FastForward, ListChecks, RotateCcw, Users, X } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "react-router";
 import { api } from "@/api/client";
-import type { DemoState } from "@/api/types";
+import type { DemoState, Me } from "@/api/types";
 import { useDemoState } from "@/app/session";
 import { Button } from "@/design/Button";
 import { Sheet } from "@/design/Sheet";
 import { cx } from "@/lib/cx";
+import { calledName } from "@/lib/names";
 import { formatStamp, formatTime } from "@/lib/time";
+import { setForcedOffline, useForcedSignal } from "@/offline/signal";
 import { useSimNow } from "./clock";
 
 /** The judge's controls, kept apart from the product: the scenario clock, the next moment in the
@@ -18,6 +21,7 @@ export function DemoBar({ tone = "light" }: { tone?: "light" | "dark" }) {
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [played, setPlayed] = useState<string[]>([]);
+  const { pathname } = useLocation();
 
   const act = useMutation({
     mutationFn: (input: { path: string; body?: unknown }) => api.post<DemoState>(input.path, input.body),
@@ -52,6 +56,7 @@ export function DemoBar({ tone = "light" }: { tone?: "light" | "dark" }) {
           Walkthrough <strong className="latin t-label-strong">{data.workspace.code}</strong>
         </span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
+          {pathname.startsWith("/driver") ? <NoSignalSwitch tone={tone} now={now} /> : null}
           {next ? (
             <button
               type="button"
@@ -205,6 +210,47 @@ export function DemoBar({ tone = "light" }: { tone?: "light" | "dark" }) {
         </div>
       </Sheet>
     </>
+  );
+}
+
+/** For the driver only: cut this device off as if the phone had lost its signal, so a judge on a desktop browser can
+ *  walk the offline flow. The scenario clock keeps running; nothing the phone saves is sent until it is switched off. */
+function NoSignalSwitch({ tone, now }: { tone: "light" | "dark"; now: Date }) {
+  const forced = useForcedSignal();
+  const client = useQueryClient();
+  const name = calledName(client.getQueryData<Me>(["me", "driver"])?.display_name);
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={forced.on}
+      onClick={() => setForcedOffline(!forced.on, now.toISOString())}
+      className={cx(
+        "inline-flex h-8 items-center gap-1.5 rounded-button px-2.5 t-label-strong",
+        forced.on
+          ? "bg-asphalt-900 text-white"
+          : tone === "dark"
+            ? "bg-white/10 hover:bg-white/20"
+            : "border border-asphalt-300 bg-white hover:bg-asphalt-50",
+      )}
+    >
+      <CloudOff size={16} strokeWidth={1.75} aria-hidden />
+      {name ? `${name}'s phone: no signal` : "Phone: no signal"}
+      <span
+        aria-hidden
+        className={cx(
+          "relative ml-0.5 inline-flex h-4 w-7 rounded-full",
+          forced.on ? "bg-signal-400" : "bg-asphalt-300",
+        )}
+      >
+        <span
+          className={cx(
+            "absolute top-0.5 size-3 rounded-full bg-white transition-[left]",
+            forced.on ? "left-3.5" : "left-0.5",
+          )}
+        />
+      </span>
+    </button>
   );
 }
 

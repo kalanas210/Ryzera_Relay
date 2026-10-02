@@ -41,6 +41,10 @@ def state_of(db: Session, workspace: Workspace, played: list[str] | None = None)
         moments=[MomentOut(key=m.key, label=m.label, at=m.at, passed=m.at <= now) for m in moments],
         next=MomentOut(key=nxt.key, label=nxt.label, at=nxt.at, passed=False) if nxt else None,
         played=played or [],
+        outages={
+            name: {k: datetime.fromisoformat(v) for k, v in window.items()}
+            for name, window in (workspace.state.get("outages") or {}).items()
+        },
     )
 
 

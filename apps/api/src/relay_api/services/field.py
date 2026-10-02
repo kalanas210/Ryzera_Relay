@@ -84,6 +84,14 @@ class Result:
 def receive(db: Session, now: datetime, user: AppUser, device_id: str, records: list[RecordIn]) -> list[Result]:
     """Apply a batch from one phone, in the order the phone saved it."""
     back_from = touch_contact(db, now, user, device_id, records)
+    results = apply(db, now, user, device_id, records)
+    if back_from is not None:
+        back_in_contact(db, now, user, back_from, received(results))
+    return results
+
+
+def apply(db: Session, now: datetime, user: AppUser, device_id: str, records: list[RecordIn]) -> list[Result]:
+    """Each record in turn, as `receive` does once the phone's contact is noted."""
     results = []
     for record in records:
         with db.begin_nested():  # one bad record never takes the rest of the batch with it
@@ -92,11 +100,12 @@ def receive(db: Session, now: datetime, user: AppUser, device_id: str, records: 
             except FieldError as exc:
                 results.append(_reject(db, now, user, device_id, record, str(exc)))
         db.flush()
-    if back_from is not None:
-        back_in_contact(
-            db, now, user, back_from, sum(1 for r in results if r.outcome is not FieldEventOutcome.DUPLICATE)
-        )
     return results
+
+
+def received(results: list[Result]) -> int:
+    """Records that reached Relay for the first time: what "5 records received" counts."""
+    return sum(1 for r in results if r.outcome is not FieldEventOutcome.DUPLICATE)
 
 
 def touch_contact(
@@ -105,14 +114,15 @@ def touch_contact(
     """The phone reached Relay. Returns when contact was lost if this ends a silence on a running trip."""
     from relay_api.services.estimates import SILENCE_MINUTES
 
-    contact = db.scalar(select(DeviceContact).where(DeviceContact.user_id == user.id).with_for_update())
+    contact = contact_of(db, user.id, for_update=True)
     gap_from = None
     if contact is None:
         contact = DeviceContact(user_id=user.id, last_contact_at=now, pending_records=0)
         db.add(contact)
     elif now - contact.last_contact_at >= timedelta(minutes=SILENCE_MINUTES) and running_trip(db, user) is not None:
         gap_from = contact.last_contact_at
-    contact.last_contact_at = now
+    # a request that waited out a jump's lock carries the time before the jump: contact never moves back
+    contact.last_contact_at = max(contact.last_contact_at, now)
     contact.device_id = device_id
     if records:
         latest = max(r.occurred_at for r in records)
@@ -121,6 +131,17 @@ def touch_contact(
     if gap_from is not None:
         contact.gap_from, contact.gap_to = gap_from, now
     return gap_from
+
+
+def contact_of(db: Session, user_id: uuid.UUID, *, for_update: bool = False) -> DeviceContact | None:
+    """The driver's phone's contact: the freshest row, should two first check-ins at once have made two."""
+    query = (
+        select(DeviceContact)
+        .where(DeviceContact.user_id == user_id)
+        .order_by(DeviceContact.last_contact_at.desc())
+        .limit(1)
+    )
+    return db.scalar(query.with_for_update() if for_update else query)
 
 
 def running_trip(db: Session, user: AppUser) -> Trip | None:
@@ -248,6 +269,9 @@ def _open_question(
         select(Conflict).where(Conflict.stop_id == stop.id, Conflict.status != ConflictStatus.RESOLVED)
     )
     if existing is not None:
+        if event.kind is FieldEventKind.DELIVERED:
+            existing.event_id = event.id  # the question is about the delivery, which follows the arrival
+        _note_clash(db, existing, event)
         return existing
     outlet = db.get(Outlet, stop.outlet_id)
     place = outlet.short_name if outlet else stop.outlet_id
@@ -285,7 +309,30 @@ def _open_question(
         f"{backup_trip.vehicle_id if backup_trip else 'a backup'} still has it. Relay has asked the driver.",
         ref={"conflict_id": str(conflict.id), "trip_id": str(trip.id), "stop_id": str(stop.id), "place": place},
     )
+    db.flush()
+    _note_clash(db, conflict, event)
     return conflict
+
+
+def _note_clash(db: Session, conflict: Conflict, event: FieldEvent) -> None:
+    """The driver's own records for the stop, on the dispatcher's item: "Arrived 6:56 AM", "Delivered 7:09 AM,
+    received by K. Herath", and the photo when one was taken."""
+    note: dict[str, Any] = {}
+    if event.kind is FieldEventKind.ARRIVED:
+        note["arrived_at"] = event.occurred_at.isoformat()
+    elif event.kind is FieldEventKind.DELIVERED:
+        note["delivered_at"] = event.occurred_at.isoformat()
+        note["receiver"] = str(event.payload.get("receiver") or "")
+        lines = event.payload.get("lines")
+        stop = db.get(Stop, event.stop_id) if event.stop_id else None
+        if isinstance(lines, list):
+            note["cases"] = str(sum(int(line.get("qty", 0)) for line in lines))
+        elif stop is not None:  # every line as loaded, which is what "all delivered" means
+            note["cases"] = str(sum(line.loaded_qty for line in _lines(db, stop)))
+        if event.payload.get("photo_id"):
+            note["photo_id"] = str(event.payload["photo_id"])
+    for item in _items(db, FeedKind.CONFLICT, "conflict_id", conflict.id):
+        item.ref = {**item.ref, **note}
 
 
 def settle(db: Session, now: datetime, conflict: Conflict, *, by: AppUser | None, how: str) -> None:
@@ -410,9 +457,15 @@ def _departed(db: Session, now: datetime, user: AppUser, trip: Trip, _stop, reco
             order.status = OrderStatus.ON_THE_WAY
 
 
-def _arrived(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def _left_unseen(db: Session, trip: Trip, user: AppUser, record: RecordIn) -> None:
+    """A stop recorded before anyone tapped Leave the hub: the truck left, and its planned time is Relay's best word
+    for when, never the minute of the first stop."""
     if trip.departed_at is None:
-        dock.depart(db, record.occurred_at, trip, user)
+        dock.depart(db, min(trip.planned_depart, record.occurred_at), trip, user)
+
+
+def _arrived(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+    _left_unseen(db, trip, user, record)
     stop.arrived_at = stop.arrived_at or record.occurred_at
     if stop.status in (StopStatus.PENDING, StopStatus.MOVED):
         stop.status = StopStatus.ARRIVED
@@ -420,8 +473,7 @@ def _arrived(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, 
 
 
 def _delivered(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, event) -> None:  # type: ignore[no-untyped-def]
-    if trip.departed_at is None:
-        dock.depart(db, record.occurred_at, trip, user)
+    _left_unseen(db, trip, user, record)
     stop.arrived_at = stop.arrived_at or record.occurred_at
     stop.completed_at = record.occurred_at
     stop.status = StopStatus.DELIVERED
@@ -616,7 +668,12 @@ def back_in_contact(db: Session, now: datetime, user: AppUser, since: datetime, 
         depot=plan.depot if plan else "Kandy",
         title=f"{user.display_name} back in contact",
         body=f"{words.clock(now)} · offline {minutes} min · {received} record{'s' if received != 1 else ''} received",
-        ref={"user_id": str(user.id), "trip_id": str(trip.id) if trip else None},
+        ref={
+            "user_id": str(user.id),
+            "trip_id": str(trip.id) if trip else None,
+            "since": since.isoformat(),
+            "received": str(received),
+        },
     )
     item.handled_at = now
 

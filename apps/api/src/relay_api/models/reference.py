@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import Date, ForeignKey, Numeric, SmallInteger, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -182,6 +183,68 @@ class HubStock(Base):
     run_date: Mapped[date] = mapped_column(Date, primary_key=True)
     spare: Mapped[int]
     next_delivery_at: Mapped[datetime | None]
+
+
+class OutlookForecast(Base):
+    """A depot's demand forecast for the capacity outlook (DSP-05): when it was made, what an ordinary week is, and
+    how well the method did. The forecast (the Datathon's method) and the fewest-vehicles search need the order
+    history, which the app never holds, so the seed carries their answers. A depot without a row has no outlook."""
+
+    __tablename__ = "outlook_forecast"
+
+    depot: Mapped[str] = mapped_column(String(16), primary_key=True)
+    forecast_updated: Mapped[date] = mapped_column(Date)
+    baseline_year: Mapped[int] = mapped_column(SmallInteger)
+    baseline_first_week: Mapped[int] = mapped_column(SmallInteger)
+    baseline_last_week: Mapped[int] = mapped_column(SmallInteger)
+    """The ISO weeks an ordinary week is averaged over."""
+    backtest_year: Mapped[int] = mapped_column(SmallInteger)
+    backtest_first_week: Mapped[int] = mapped_column(SmallInteger)
+    backtest_last_week: Mapped[int] = mapped_column(SmallInteger)
+    backtest_pct: Mapped[float] = mapped_column(Numeric(4, 1, asdecimal=False))
+    """The method's mean weekly miss on the depot's Fresh volume over the backtest weeks, in %."""
+    last_year_pct: Mapped[float] = mapped_column(Numeric(4, 1, asdecimal=False))
+    """The same for "same week last year times growth"."""
+    ordinary_week_m3: Mapped[float] = mapped_column(Numeric(7, 1, asdecimal=False))
+    """Chilled m³ in an ordinary week of the baseline."""
+    record_week_m3: Mapped[float] = mapped_column(Numeric(7, 1, asdecimal=False))
+    record_year: Mapped[int] = mapped_column(SmallInteger)
+    record_week: Mapped[int] = mapped_column(SmallInteger)
+    """The depot's highest chilled week on record."""
+    tech_order_max_m3: Mapped[float] = mapped_column(Numeric(6, 1, asdecimal=False))
+    """The largest single Tech order in the depot's history."""
+
+
+class OutlookWeek(Base):
+    """Forecast demand at a depot for one ISO week, in m³ per group, counted over the week's open days."""
+
+    __tablename__ = "outlook_week"
+
+    depot: Mapped[str] = mapped_column(ForeignKey("outlook_forecast.depot"), primary_key=True)
+    iso_year: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    iso_week: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    chilled_m3: Mapped[float] = mapped_column(Numeric(7, 1, asdecimal=False))
+    dry_m3: Mapped[float] = mapped_column(Numeric(7, 1, asdecimal=False))
+    style_m3: Mapped[float] = mapped_column(Numeric(7, 1, asdecimal=False))
+    tech_m3: Mapped[float] = mapped_column(Numeric(7, 1, asdecimal=False))
+
+
+class OutlookDay(Base):
+    """One open day at a depot: its forecast chilled orders, the fewest refrigerated vehicles that carry them all on
+    Relay's clock (exact search under the plan's rules), and the refrigerated vehicles out of service that day."""
+
+    __tablename__ = "outlook_day"
+
+    depot: Mapped[str] = mapped_column(ForeignKey("outlook_forecast.depot"), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    chilled_orders: Mapped[int] = mapped_column(SmallInteger)
+    chilled_kg: Mapped[float] = mapped_column(Numeric(8, 1, asdecimal=False))
+    chilled_m3: Mapped[float] = mapped_column(Numeric(6, 1, asdecimal=False))
+    needed: Mapped[int] = mapped_column(SmallInteger)
+    in_workshop: Mapped[list[Any]] = mapped_column(default=list)
+    """Vehicle IDs."""
+    served_one_fewer: Mapped[int | None] = mapped_column(SmallInteger)
+    """Chilled orders that one refrigerated vehicle fewer than needed can serve, on the days the search counted it."""
 
 
 class OutletDwell(Base):

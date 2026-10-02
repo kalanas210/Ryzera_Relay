@@ -439,6 +439,9 @@ def confirm_deferral(
     if reason == "other" and not note.strip():
         raise PlanError("Add a note for the record")
     deferral.reason = REASONS[reason] if reason != "other" else note.strip()
+    if "next_run" not in deferral.explanation and deferral.kind is DeferralKind.CAPACITY:
+        # the store is told the next run has room for it, whether or not the drawer was opened first
+        deferral.explanation = {**deferral.explanation, "next_run": next_run_check(db, plan, deferral)}
     deferral.store_notice = store_notice(db, plan, order, deferral, reason)
     deferral.confirmed_at = now
     deferral.confirmed_by = user.id

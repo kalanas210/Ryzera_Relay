@@ -3,18 +3,19 @@ import { ArrowLeft, ChevronDown, Languages, Lock, User, Users } from "lucide-rea
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Outlet, useNavigate } from "react-router";
 import { ApiError, api } from "@/api/client";
-import type { Me } from "@/api/types";
-import { useMe, useSignIn } from "@/app/session";
+import type { Account, Me } from "@/api/types";
+import { useAccounts, useDemoState, useMe, useSignIn } from "@/app/session";
 import { Button, IconButton } from "@/design/Button";
 import { LanguageSheet } from "@/design/LanguageSheet";
 import { RelayMark } from "@/design/Logo";
 import { PinPad } from "@/design/PinPad";
 import { Sheet } from "@/design/Sheet";
 import { SyncPill } from "@/design/SyncPill";
-import { i18n, isLang, type Lang, shortDayIn, useLoaderText } from "@/i18n";
+import { i18n, isLang, type Lang, useLoaderText } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
 import { type Person, useLinesToSend, useTonight } from "./api";
+import { shortDate } from "./days";
 
 const IDLE_LOCK_MS = 15 * 60 * 1000;
 const LOCK_KEY = "relay.dock.locked";
@@ -148,6 +149,20 @@ export function pinError(
   return { text: otherwise(error.message), wrongPin: false };
 }
 
+/** "Password relay2026 · PIN 2580" gives "2580". */
+export function pinFromHint(hint: string | undefined): string | undefined {
+  return hint?.match(/\bPIN (\d+)/)?.[1];
+}
+
+/** A demo account's PIN, for the dock's PIN sheets to show the way the sign-in screen does, and only in a
+ *  walkthrough. The account's username comes too, for a sheet that only knows the person's name. */
+export function useDemoPin(pick: (account: Account) => boolean): { pin?: string; username?: string } {
+  const accounts = useAccounts();
+  const demo = useDemoState();
+  const account = accounts.data?.find(pick);
+  return { username: account?.username, pin: demo.data?.demo_mode ? pinFromHint(account?.hint) : undefined };
+}
+
 function SwitchSheet({
   open,
   locked,
@@ -179,6 +194,7 @@ function SwitchSheet({
   }, [open, current]);
 
   const person = loaders.find((l) => l.username === picked);
+  const demo = useDemoPin((a) => a.role === "loader" && a.username === picked);
   const enter = (next: string) => {
     setError(null);
     setPin(next);
@@ -216,7 +232,12 @@ function SwitchSheet({
         </div>
         {person ? (
           <div className="flex flex-col items-center gap-3">
-            <p className="t-h3 text-center">{t("who.enterPin", { name: calledName(person.display_name) })}</p>
+            <div className="flex flex-col items-center gap-1">
+              <p className="t-h3 text-center">{t("who.enterPin", { name: calledName(person.display_name) })}</p>
+              {demo.pin ? (
+                <p className="t-caption text-center text-asphalt-500">{t("who.demoPin", { pin: demo.pin })}</p>
+              ) : null}
+            </div>
             <PinPad
               value={pin}
               onChange={enter}
@@ -374,9 +395,9 @@ export function LoaderBar() {
 }
 
 export function useDepotDay(depot: string | undefined, runDate: string | undefined) {
-  const { t, lang } = useLoaderText();
+  const { t } = useLoaderText();
   return {
     depot: depot ? t(`depot.${depot}`, { defaultValue: depot }) : "",
-    day: runDate ? shortDayIn(lang, runDate) : "",
+    day: runDate ? shortDate(t, runDate) : "",
   };
 }

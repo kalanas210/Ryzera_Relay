@@ -46,7 +46,7 @@ import {
 } from "./api";
 import { CallSheet, FlagSheet, type SendFlag } from "./FlagSheet";
 import { DockHeader } from "./LoaderShell";
-import { CountSheet, LoadLineRow, LoadProgress } from "./parts";
+import { CountSheet, LoadLineRow, LoadProgress, StopTitle } from "./parts";
 
 const SEEN_KEY = "relay.dock.answers-seen";
 const COLLAPSE_AFTER_MS = 10_000;
@@ -327,7 +327,7 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
       <div className="flex items-center gap-2">
         <span className="num t-body-strong text-asphalt-900">{progressText}</span>
         {load.short ? (
-          <span className="inline-flex items-center gap-1 t-label-strong text-attention">
+          <span className="inline-flex shrink-0 items-center gap-1 t-label-strong whitespace-nowrap text-attention">
             <PackageX size={16} strokeWidth={1.75} aria-hidden />
             {t("chips.short", { count: load.short })}
           </span>
@@ -396,31 +396,41 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
     };
   }
 
-  const alertRow = alert ? (
-    <div
-      role="status"
-      className={cx(
-        "-mx-4 -mt-3 mb-1 flex min-h-14 items-center gap-3 border-t py-1 pr-2 pl-4",
-        alert.tone === "problem" ? "border-problem bg-problem-soft" : "border-attention bg-attention-soft",
-      )}
-    >
-      <CircleAlert
-        size={24}
-        strokeWidth={1.75}
-        aria-hidden
-        className={cx("shrink-0", alert.tone === "problem" ? "text-problem" : "text-attention")}
-      />
-      <p className="min-w-0 flex-1 t-body-strong text-asphalt-900">
-        {alert.who ? <span className="block">{alert.who}</span> : null}
-        <span className="block">{alert.what}</span>
-      </p>
-      {alert.action ? (
-        <Button density="field" compact onClick={alert.action.onClick}>
-          {alert.action.label}
-        </Button>
-      ) : null}
-    </div>
-  ) : null;
+  // The action sits beside the words while both fit and drops under them before it would squeeze them to a word a
+  // line, as a Sinhala or Tamil label can. In the tablet's control column it always takes its own full-width line.
+  const alertRow = (large: boolean) =>
+    alert ? (
+      <div
+        role="status"
+        className={cx(
+          "-mx-4 flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-t pl-4",
+          large ? "-mt-4 shrink-0 pt-3 pr-4 pb-4" : "-mt-3 mb-1 py-1 pr-2",
+          alert.tone === "problem" ? "border-problem bg-problem-soft" : "border-attention bg-attention-soft",
+        )}
+      >
+        <CircleAlert
+          size={24}
+          strokeWidth={1.75}
+          aria-hidden
+          className={cx("shrink-0", alert.tone === "problem" ? "text-problem" : "text-attention")}
+        />
+        <p className="min-w-44 flex-1 t-body-strong text-asphalt-900">
+          {alert.who ? <span className="block">{alert.who}</span> : null}
+          <span className="block">{alert.what}</span>
+        </p>
+        {alert.action ? (
+          <Button
+            density="field"
+            compact
+            full={large}
+            className={large ? undefined : "ml-auto"}
+            onClick={alert.action.onClick}
+          >
+            {alert.action.label}
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
 
   const hint = allDone ? (
     <p className="flex items-start gap-3 t-body text-asphalt-700">
@@ -507,7 +517,7 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
         <div className="px-4 py-3">{hint}</div>
         <div className="flex flex-col gap-4 px-4 pb-6 [overflow-anchor:none]">{lines(false)}</div>
         <div className="sticky bottom-0 z-20 mt-auto flex flex-col gap-2 border-t border-asphalt-200 bg-white px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
-          {alertRow}
+          {alertRow(false)}
           {progress(false)}
           {handoverButton}
         </div>
@@ -515,8 +525,11 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
 
       {/* dock tablet: a control column with the load map, and the lines set larger */}
       <div className="hidden flex-1 gap-6 p-6 md:flex">
-        <aside className="sticky top-[calc(var(--bar)_+_24px)] flex h-[calc(100dvh_-_var(--bar)_-_48px)] w-80 shrink-0 flex-col gap-4 rounded-card border border-asphalt-200 bg-white p-4">
-          {alertRow ? <div className="-mx-4 -mt-4 px-4 pt-3">{alertRow}</div> : null}
+        {/* The column keeps the viewport's height so the progress sits at its foot. When an alert, three chips and
+            the map need more than that (Sinhala and Tamil on a 768 high tablet), the column scrolls on its own and
+            nothing in it is squeezed. */}
+        <aside className="sticky top-[calc(var(--bar)_+_24px)] flex h-[calc(100dvh_-_var(--bar)_-_48px)] w-80 shrink-0 flex-col gap-4 overflow-y-auto overscroll-contain rounded-card border border-asphalt-200 bg-white p-4">
+          {alertRow(true)}
           {chips}
           <div className="flex flex-col gap-1">
             <h2 className="t-h3">{t("load.loadMap")}</h2>
@@ -566,18 +579,6 @@ function findLine(load: TripLoad, id: string): LoadLine | null {
     if (line) return line;
   }
   return null;
-}
-
-/** "Stop 3 · Hemmathagama". In Sinhala and Tamil the place takes its own line, as the " · " form does not fit. */
-function StopTitle({ group }: { group: StopGroup }) {
-  const { t, lang } = useLoaderText();
-  if (lang === "en") return <>{t("load.stop", { n: group.seq, place: group.place })}</>;
-  return (
-    <>
-      <span className="block">{t("load.stopShort", { n: group.seq })}</span>
-      <span className="latin block">{group.place}</span>
-    </>
-  );
 }
 
 /** True while the stop's header is pinned under the app bar, so the pinned copy can take its compact form. */
@@ -638,7 +639,7 @@ function StopSection({ group, position, loadingNow, open, onOpen, large, barHeig
         <StopMarker n={group.seq} state={markerState(group)} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className={large ? "t-h1" : "t-h2"}>
-            <StopTitle group={group} />
+            <StopTitle seq={group.seq} place={group.place} />
           </h3>
           {group.short ? (
             <span className="inline-flex items-center gap-1 t-label text-attention">
@@ -680,7 +681,7 @@ function StopSection({ group, position, loadingNow, open, onOpen, large, barHeig
           >
             <StopMarker n={group.seq} state={markerState(group)} />
             <span className={cx("min-w-0 flex-1", large ? "t-h2" : "t-h3")}>
-              <StopTitle group={group} />
+              <StopTitle seq={group.seq} place={group.place} />
             </span>
             <span className={cx("num shrink-0 text-asphalt-900", large ? "t-h3" : "t-body-strong")}>{count}</span>
           </div>
@@ -689,7 +690,7 @@ function StopSection({ group, position, loadingNow, open, onOpen, large, barHeig
       <div className="flex min-h-12 items-center gap-3 py-2">
         <StopMarker n={group.seq} state={markerState(group)} />
         <h3 className={cx("min-w-0 flex-1", large ? "t-h1" : "t-h2")}>
-          <StopTitle group={group} />
+          <StopTitle seq={group.seq} place={group.place} />
         </h3>
         <span className={cx("num shrink-0 text-asphalt-900", large ? "t-h3" : "t-body-strong")}>{count}</span>
         {group.state === "done" && !group.short ? (

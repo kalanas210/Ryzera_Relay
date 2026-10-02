@@ -16,7 +16,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from relay_api.models import (
-    DeviceContact,
     FieldEvent,
     FieldEventKind,
     FieldEventOutcome,
@@ -28,6 +27,7 @@ from relay_api.models import (
     VehicleDay,
 )
 from relay_api.services import network as adapters
+from relay_api.services.field import contact_of
 from relay_engine.clock import Conditions
 from relay_engine.estimate import LastEvent, estimate_after, likely_range, position, round5
 from relay_engine.network import Brand
@@ -131,7 +131,7 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
     contact = None
     driver_id = driver_of(db, trip, run_date)
     if driver_id is not None:
-        contact = db.scalar(select(DeviceContact).where(DeviceContact.user_id == driver_id))
+        contact = contact_of(db, driver_id)
     running = trip.departed_at is not None and trip.finished_at is None
     last_contact = contact.last_contact_at if contact else None
     silent = _clock_minutes(now) - _clock_minutes(last_contact) if (running and last_contact) else 0
@@ -151,8 +151,9 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
         where = position(net, conditions, brand, last, [r.outlet_id for r in remaining], now_min)
     else:
         for row, s in zip(out, stops, strict=True):
-            if not row.done and row.arrived_at is None:
-                row.estimate = s.expected_arrival
+            if not row.done and row.arrived_at is None and s.expected_arrival is not None:
+                # the plan's expected time, read like every estimate: to 5 minutes
+                row.estimate = adapters.at_minutes(run_date, round5(adapters.minutes_of(run_date, s.expected_arrival)))
         where = ("at_depot", None)
     return RunEstimate(
         trip_id=trip.id,

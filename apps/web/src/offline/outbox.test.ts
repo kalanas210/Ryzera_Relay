@@ -78,6 +78,55 @@ describe("the driver's outbox", () => {
     expect(sent).toMatchObject({ id: "stop4", outcome: "conflict", kind: "delivered" });
   });
 
+  it("holds a record for its location, and everything saved after it, until it is released", async () => {
+    const outbox = freshOutbox();
+    await outbox.add(record("arrive"), { holdMs: 15_000 });
+    await outbox.add(record("deliver", "delivered"));
+    await outbox.addPhoto(photo("p"));
+    const log: string[] = [];
+
+    const held = await outbox.flush(transport(log));
+    expect(held.held).toBe(true);
+    expect(log).toEqual([]);
+
+    await outbox.release("arrive", { lat: 7.25, lng: 80.35, accuracy_m: 12 });
+    await outbox.flush(transport(log));
+    expect(log).toEqual(["record:arrive", "record:deliver", "photo:p"]);
+    const sent = await outbox.sent();
+    expect(sent.find((s) => s.id === "arrive")?.record).toMatchObject({ lat: 7.25, lng: 80.35 });
+  });
+
+  it("lets go of a held record once its wait is over, with or without a location", async () => {
+    const outbox = freshOutbox();
+    await outbox.add(record("late"), { holdMs: -1 });
+    const log: string[] = [];
+    await outbox.flush(transport(log));
+    expect(log).toEqual(["record:late"]);
+  });
+
+  it("keeps Relay's reason for a record it refused, with when it was answered and whether it waited", async () => {
+    const outbox = freshOutbox();
+    await outbox.add(record("old"), { savedOffline: true });
+    const t: Transport = {
+      async sendRecords(records) {
+        return records.map((r) => ({
+          id: r.id,
+          outcome: "rejected",
+          reason: "No such trip.",
+          at: "2026-04-08T01:44:00Z",
+        }));
+      },
+      async sendPhoto() {
+        return "applied";
+      },
+    };
+    await outbox.flush(t);
+    const [sent] = await outbox.sent();
+    expect(sent).toMatchObject({ outcome: "rejected", reason: "No such trip.", saved_offline: true });
+    expect(sent?.at).toBe("2026-04-08T01:44:00Z");
+    expect(await outbox.waiting()).toEqual([]);
+  });
+
   it("runs one flush at a time, so a record is never sent twice at once", async () => {
     const outbox = freshOutbox();
     await outbox.add(record("only"));

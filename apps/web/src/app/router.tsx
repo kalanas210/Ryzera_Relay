@@ -1,7 +1,6 @@
 import { type ComponentType, lazy } from "react";
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { SignIn } from "@/auth/SignIn";
-import { Placeholder } from "@/roles/Placeholder";
 import { RoleLayout } from "./RoleLayout";
 
 /** Each role's screens load as their own chunk, so a driver's phone never downloads the dispatcher's board. */
@@ -37,10 +36,7 @@ export const router = createBrowserRouter([
       { index: true, element: <QueuePage /> },
       { path: "plan", element: <PlanPage /> },
       { path: "live", element: <LivePage /> },
-      {
-        path: "outlook",
-        element: <Placeholder title="Capacity outlook">The six-week outlook for each depot.</Placeholder>,
-      },
+      { path: "outlook", Component: page(dispatcher, "OutlookPage") },
     ],
   },
   {
@@ -65,10 +61,17 @@ export const router = createBrowserRouter([
     ),
     children: [
       {
-        index: true,
-        element: (
-          <Placeholder title="Today's run">Your run sheet appears when the dispatcher publishes the plan.</Placeholder>
-        ),
+        // the driver's run and its outbox wrap every driver screen
+        Component: page(() => import("@/roles/driver"), "DriverShell"),
+        children: [
+          { index: true, Component: page(() => import("@/roles/driver"), "RunPage") },
+          { path: "stops/:stopId", Component: page(() => import("@/roles/driver"), "StopPage") },
+          { path: "stops/:stopId/proof", Component: page(() => import("@/roles/driver"), "ProofPage") },
+          { path: "stops/:stopId/saved", Component: page(() => import("@/roles/driver"), "SavedPage") },
+          { path: "report", Component: page(() => import("@/roles/driver"), "ReportPage") },
+          { path: "report/:reason", Component: page(() => import("@/roles/driver"), "ReportPage") },
+          { path: "summary", Component: page(() => import("@/roles/driver"), "SummaryPage") },
+        ],
       },
     ],
   },
@@ -82,6 +85,9 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <MyOrders /> },
       { path: "order", element: <PlaceOrder /> },
+      { path: "notices/:noticeId", Component: page(store, "NoticePage") },
+      { path: "orders/:orderRef/track", Component: page(store, "TrackerPage") },
+      { path: "orders/:orderRef/receipt", Component: page(store, "ReceiptPage") },
     ],
   },
   { path: "*", element: <Navigate to="/signin" replace /> },

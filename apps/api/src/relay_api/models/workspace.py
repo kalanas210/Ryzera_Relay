@@ -28,6 +28,12 @@ class Workspace(Base):
     """Scenario seconds per real second: 1 runs in real time, 0 holds the clock still."""
     state: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
+    @property
+    def edition(self) -> str:
+        """Which start of this copy it is: new each time the copy is made or reset, so a phone can tell that what it
+        kept belongs to an earlier start of the day."""
+        return str(self.state.get("edition") or self.id)
+
 
 class ScheduledEvent(WorkspaceScoped, Base):
     """Something the world simulator does when the scenario clock reaches `due_at`: a store places an

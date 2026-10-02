@@ -45,6 +45,8 @@ class DriverStopOut(Schema):
     lines: list[DriverLineOut]
     receiver: str | None
     has_photo: bool
+    sent_at: datetime | None = None
+    """When Relay had this stop's records, if the phone saved them with no signal: "Saved offline, sent 7:14 AM"."""
 
 
 class QuestionOut(Schema):
@@ -56,8 +58,22 @@ class QuestionOut(Schema):
     status: Literal["waiting_for_driver", "escalated", "resolved"]
     answer: str | None
     opened_at: datetime
+    arrived_at: datetime | None
     delivered_at: datetime | None
+    """The phone's own records for the stop, as Relay has them: "Arrived 6:56 AM · Delivered 7:09 AM"."""
     cases: int
+    receiver: str | None
+    has_photo: bool
+    signed: bool
+    backup_vehicle: str | None
+    backup_driver: str | None
+    """Who is driving the second copy: "Stop 4 was also given to Nimal"."""
+    moved_at: datetime | None
+    moved_by: str | None
+    answered_at: datetime | None
+    resolved_at: datetime | None
+    resolution: str
+    """How it was settled: "driver" (the driver said yes) or "dispatcher" (the office cancelled the copy first)."""
 
 
 class NoticeOut(Schema):
@@ -65,6 +81,8 @@ class NoticeOut(Schema):
     kind: str
     title: str
     body: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    """What the message is about, for the screen: the stop and the vehicle of a moved stop."""
     created_at: datetime
     read_at: datetime | None
 
@@ -107,6 +125,33 @@ class DriverRunOut(Schema):
     notices: list[NoticeOut]
     outage: dict[str, datetime] | None
     """The story's scripted loss of signal for this driver, which the phone obeys in demo mode."""
+    held: HeldOut | None = None
+    """Inside that outage only: what the story's phone outbox holds, so this phone shows the stops a demo jump played
+    for its driver as saved on the phone."""
+
+
+class HeldPhotoOut(Schema):
+    id: uuid.UUID
+    stop_id: uuid.UUID | None = None
+    event_id: uuid.UUID | None = None
+    taken_at: datetime
+    width: int | None = None
+    height: int | None = None
+    stand_in: bool = False
+    """A photo the story's autopilot took: the phone fetches it from /api/driver/held/photos/{id}."""
+
+
+class HeldOut(Schema):
+    records: list[RecordIn]
+    photos: list[HeldPhotoOut]
+
+
+class HeldIn(BaseModel):
+    """What a phone saved inside the story's outage, handed to the story's phone outbox (demo mode only)."""
+
+    device_id: str = Field(min_length=1, max_length=64)
+    records: list[RecordIn] = Field(default_factory=list, max_length=200)
+    photos: list[HeldPhotoOut] = Field(default_factory=list, max_length=50)
 
 
 class RecordIn(BaseModel):
@@ -158,3 +203,8 @@ class CheckinIn(BaseModel):
 class CheckinOut(Schema):
     now: datetime
     outage: dict[str, datetime] | None
+
+
+DriverRunOut.model_rebuild()
+HeldOut.model_rebuild()
+HeldIn.model_rebuild()

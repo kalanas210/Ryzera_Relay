@@ -1,0 +1,2 @@
+depot,forecast_updated,baseline_year,baseline_first_week,baseline_last_week,backtest_year,backtest_first_week,backtest_last_week,backtest_pct,last_year_pct,ordinary_week_m3,record_week_m3,record_year,record_week,five_serve_wednesdays,tech_order_max_m3
+Kandy,2026-04-06,2026,1,13,2025,14,23,2.7,11.1,189.0,260.2,2025,15,22,15.3

@@ -31,7 +31,7 @@ def test_skipping_to_the_dock_plays_the_evening(new_copy: Callable[[], Copy]) ->
     copy = new_copy()
     state = copy.jump("loading")
     assert state["played"] == [
-        "Dilani places her chilled and dry orders",
+        "Dilani places the chilled and dry orders",
         "Relay proposes the Kandy plan",
         "Nuwan confirms the deferral with Relay's reason",
         "Nuwan publishes Peliyagoda",
@@ -313,6 +313,31 @@ def test_a_moved_stop_marks_the_lines_already_on(new_copy: Callable[[], Copy]) -
     load = copy.post(f"/api/dock/lines/{line['id']}", {"loaded": line["qty"]}, "loader")
     assert load["lines_to_check"] == len(loaded) - 1
     assert not next(x for x in load["groups"][0]["lines"] if x["id"] == line["id"])["changed_by_plan"]
+
+
+def test_a_stop_moved_twice_names_the_place_it_last_held(new_copy: Callable[[], Copy]) -> None:
+    copy = new_copy()
+    copy.jump("loading")
+    copy.sign_in("rizwan", "loader")
+    copy.sign_in("nuwan", "dispatcher")
+    before = _story_trip(copy)
+    mawanella = next(g for g in before["groups"] if g["order_ref"] == MAWANELLA_DRY)
+
+    # 9:12 PM moved Hemmathagama from stop 2 to stop 3; now Nuwan swaps stops 3 and 4 as well
+    board = copy.get("/api/dispatch/plan?depot=Kandy", "dispatcher")
+    trip = next(t for lane in board["lanes"] for t in lane["trips"] if (t["vehicle_id"], t["trip_no"]) == ("VEH045", 1))
+    refs = [s["order_ref"] for s in trip["stops"]]
+    refs[2], refs[3] = refs[3], refs[2]
+    copy.post(f"/api/dispatch/plan/{board['plan']['id']}/trips/VEH045/1/reorder", {"order_refs": refs}, "dispatcher")
+
+    load = _story_trip(copy)
+    hemmathagama = next(g for g in load["groups"] if g["order_ref"] == HEMMATHAGAMA_DRY)
+    # it was stop 3 until this change, not stop 2: that place it left at 9:12 PM
+    assert (hemmathagama["seq"], hemmathagama["moved_from"]) == (4, 3)
+    assert hemmathagama["moved_at"] == load["plan_changed_at"]
+    # a stop the second change left alone keeps its own move and time
+    still = next(g for g in load["groups"] if g["order_ref"] == MAWANELLA_DRY)
+    assert (still["moved_from"], still["moved_at"]) == (mawanella["moved_from"], mawanella["moved_at"])
 
 
 def test_a_flagged_line_waits_on_the_dispatcher_not_a_check(new_copy: Callable[[], Copy]) -> None:

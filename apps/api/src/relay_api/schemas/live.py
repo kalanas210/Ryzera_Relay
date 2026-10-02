@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from typing import Any
+
+from pydantic import Field
 
 from relay_api.schemas.common import Schema
 
@@ -65,6 +68,8 @@ class FeedItemOut(Schema):
     handled_by: str | None
     outcome: str
     shortfall: ShortfallDetailOut | None
+    ref: dict[str, Any] = Field(default_factory=dict)
+    """What the item is about (its trip, stop, conflict or backup), so the desk ties it to the right run."""
 
 
 class FeedOut(Schema):
