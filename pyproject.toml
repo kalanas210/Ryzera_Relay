@@ -34,7 +34,7 @@ filterwarnings = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"  # the version CI and the images run
 strict = true
 ignore_missing_imports = true
 exclude = ["tools/", "migrations/"]
