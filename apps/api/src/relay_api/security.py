@@ -2,8 +2,8 @@
 
 A judge usually keeps several roles open side by side in one browser. Each role therefore has its
 own session cookie, and the web app names the role it is acting as in the X-Relay-Role header
-(EventSource, which cannot send headers, uses ?as=). Signing in as the store manager in one tab
-leaves the dispatcher signed in in the next.
+(a proof photo, loaded by an image tag that cannot send headers, uses ?as=). Signing in as the store
+manager in one tab leaves the dispatcher signed in in the next.
 
 Cookies are httpOnly and SameSite=Lax. Every state-changing request must also carry
 X-Relay-Client, a custom header that a cross-site form or image cannot send.

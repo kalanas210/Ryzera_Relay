@@ -1,5 +1,5 @@
 import { ArrowLeft, Check, CircleCheck, Clock, Info, ListChecks, Send, TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/design/Button";
 import { Sheet } from "@/design/Sheet";
 import { dayOf, formatDayLong, formatTime } from "@/lib/time";
@@ -18,6 +18,8 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
   const running = board.lanes.filter((l) => l.trips.length).length;
   const standby = board.lanes.filter((l) => l.status === "standby");
   const waits = board.waiting;
+  const headingId = useId();
+  const resultId = useId();
 
   // Ctrl Enter, which brought the dispatcher here from the board, now opens the Publish dialog
   const ready = useRef(false);
@@ -34,11 +36,16 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
   }, []);
 
   return (
-    <section className="flex flex-col gap-3 rounded-card border border-asphalt-200 bg-white px-5 py-4">
+    <section
+      aria-labelledby={headingId}
+      className="flex flex-col gap-3 rounded-card border border-asphalt-200 bg-white px-5 py-4"
+    >
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <ListChecks size={20} strokeWidth={1.75} aria-hidden />
-          <h2 className="t-h2">Publish check</h2>
+          <h2 id={headingId} className="t-h2">
+            Publish check
+          </h2>
           {data ? <span className="t-caption text-asphalt-500">{data.fresh_stops} Fresh stops</span> : null}
         </div>
         <Button density="desk" variant="link" icon={ArrowLeft} onClick={onBack}>
@@ -50,7 +57,7 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
       ) : (
         <>
           {data.broken.length ? (
-            <p className="flex items-start gap-2 rounded-button bg-problem-soft px-3 py-2 t-dense">
+            <p id={resultId} className="flex items-start gap-2 rounded-button bg-problem-soft px-3 py-2 t-dense">
               <TriangleAlert size={16} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0 text-problem" />
               <span>
                 <strong>
@@ -60,7 +67,7 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
               </span>
             </p>
           ) : (
-            <p className="flex items-start gap-2 rounded-button bg-done-soft px-3 py-2 t-dense">
+            <p id={resultId} className="flex items-start gap-2 rounded-button bg-done-soft px-3 py-2 t-dense">
               <CircleCheck size={16} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0 text-done" />
               <span>
                 <strong>No planned arrival is after its window closes.</strong> Early arrivals wait for the store to
@@ -137,6 +144,8 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
                 onClick={() => setDialog(true)}
                 title="Publish plan (Ctrl Enter)"
                 aria-keyshortcuts="Control+Enter"
+                // described by the check's result, which also tells it from the plan bar's Publish plan
+                aria-describedby={resultId}
               >
                 Publish plan
               </Button>

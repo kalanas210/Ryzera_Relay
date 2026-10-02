@@ -13,15 +13,15 @@ Every account is seeded on first start. The password is `relay2026` (set by `REL
 
 | Role | Username | Password | PIN | What to look at | Screen size |
 |---|---|---|---|---|---|
-| Store manager: Dilani Jayawardena, OUT117 Waypoint Fresh Hemmathagama | `dilani` | `relay2026` | | My orders, Place an order, the Delivery update notice, Track delivery, Confirm receipt | Phone, 375 x 812 |
-| Dispatcher: Nuwan Perera, Peliyagoda planning office | `nuwan` | `relay2026` | | Queue, Plan (board, Review deferral, Publish check), Live (runs and Exceptions), Outlook. Keys 1 to 4 switch screens | Desk, 1440 x 900 |
+| Store manager: Dilani Jayawardena, OUT117 Waypoint Fresh Hemmathagama | `dilani` | `relay2026` | | My orders, Place an order and Change this order (until the 4:00 PM cutoff), the Delivery update notice, Track delivery, Confirm receipt and Report a problem (until 4:00 PM on the delivery day) | Phone, 375 x 812 |
+| Dispatcher: Nuwan Perera, Peliyagoda planning office | `nuwan` | `relay2026` | | Queue (Remind, Remind all), Plan (board, each vehicle's status for the run, Review deferral, Publish check), Live (runs and Exceptions), Outlook. Keys 1 to 4 switch screens, and ? lists the other keys | Desk, 1440 x 900 |
 | Loader: Mohamed Rizwan, Kandy hub dock | `rizwan` | PIN sign-in | `2580` | Tonight's loads, VEH045 trip 1 in reverse stop order, Flag, Handover | Phone, 375 x 812 (the same screens serve the dock tablet) |
 | Driver: Kasun Bandara, VEH045 | `kasun` | `relay2026` | `3690`, to accept a load on the dock tablet | Today's run, Stop, Proof of delivery, Report a problem, Trip summary, the question after the silence | Phone, 375 x 812 |
 
-The loader role signs in on a PIN pad: tap a name, enter the PIN. Suresh Kumar (`suresh`, PIN `4826`) and Anjali
-Wickramasinghe (`anjali`, PIN `1357`) share the Kandy hub tablet with Rizwan; **Switch** changes loader, and Suresh's
-screens come up in Tamil, Anjali's in Sinhala. With demo mode on, the sign-in page shows each account's password or
-PIN under the field.
+The loader role signs in on a PIN pad: tap a name, then enter the PIN (the keys work once a name is picked). Suresh
+Kumar (`suresh`, PIN `4826`) and Anjali Wickramasinghe (`anjali`, PIN `1357`) share the Kandy hub tablet with Rizwan;
+**Switch** changes loader, and Suresh's screens come up in Tamil, Anjali's in Sinhala. With demo mode on, the sign-in
+page shows each account's password or PIN under the field.
 
 Each role keeps its own session cookie, so one browser can stay signed in as all four roles, one tab each.
 
@@ -52,11 +52,15 @@ No `.env` is needed. To change a setting, copy `.env.example` to `.env`:
 | `SITE_ADDRESS` | `:80` | Production only: the domain Caddy gets an HTTPS certificate for |
 | `RELAY_COOKIE_SECURE` | `false` | Production only: cookies are sent over HTTPS only |
 
-The first proposal for a depot on a new database runs the solver, which takes about half a minute; after that Relay
-answers the same question from its engine cache in under a second.
+A proposal the engine has not seen before runs the solver, which takes half a minute or more; after that Relay answers
+the same question from its engine cache in under a second. As it starts, the API fills the cache with the story day's
+first plans, the Kandy hub's and Peliyagoda's: about a minute on a new database, while `/api/health` reports
+`"warming": true`. A **Propose plan** pressed in that minute waits for the warm-up's answer rather than searching
+beside it, and the plan board says the planner is still warming up.
 
-**Reset.** One copy of the day: **Demo controls**, **Reset this copy** puts it back to Tuesday 2:05 PM. Everything:
-`docker compose down -v`, then `docker compose up`, drops the database volume and seeds again.
+**Reset.** One copy of the day: **Demo controls**, **Reset this copy** puts it back to Tuesday 2:05 PM. The shared
+walkthrough has no Reset: its clock stays at 2:05 PM, and what people change there is undone an hour after the last of
+them leaves. Everything: `docker compose down -v`, then `docker compose up`, drops the database volume and seeds again.
 
 ## Judge walkthrough
 
@@ -65,30 +69,37 @@ between jumps. The demo bar at the top of every screen shows the scenario time, 
 next story moment and **Demo controls**, which lists every moment with **Go**. When you jump, Relay plays the steps of
 the four characters that you skipped (the story autopilot) and names them under the bar; a step you already took is
 never played again. The other stores, loaders and drivers act on their own as the clock passes (the world simulator).
+So does a judge character nobody is playing: when no one signed in as Nuwan has used the copy for a few minutes, Relay
+answers a dock flag in Nuwan's place five minutes after it is raised. A character someone is playing waits for them.
 Moments that depend on Kasun's truck move with it: once the Kandy plan is published, Handover at the dock reads 3:16 AM.
 
-1. **Any role, desk, sign-in page, Tuesday 2:05 PM.** Open **Demo controls** and choose **Start a private copy**.
-   Notice the new code beside "Walkthrough": this copy and its clock are yours alone, and a phone can join it with
-   **Join** and the code.
+1. **Any role, desk, sign-in page, Tuesday 2:05 PM.** The bar reads "Shared walkthrough, clock held": every browser
+   without a code lands in this copy, so its clock stays at 2:05 PM, and a jump there first asks "Start your own copy
+   to jump the clock?" with **Start my copy**. Open **Demo controls** and choose **Start a private copy**. Notice the
+   new code beside "Walkthrough": this copy and its clock are yours alone, and a phone can join it with **Join** and
+   the code.
 2. **Store manager (`dilani`), My orders, phone, 2:05 PM.** Tap **Place an order**. Chilled is selected: enter
    Dairy crate 40, Produce crate 32, Meat and fish box 20, then **Send order**. Tap **Place your dry order**: Rice and
    dhal case 36, Packet foods case 44, Tea and biscuit case 22, **Send order**. Notice "Received by Waypoint" with the
    order number (ORD0098596 and ORD0098595), weight and volume worked out as you type, the cutoff countdown, and that
-   chilled and dry goods go as separate orders. These are the story's quantities; other numbers give a different plan.
+   chilled and dry goods go as separate orders. Until the 4:00 PM cutoff each order on My orders has **Change this
+   order**. These are the story's quantities; other numbers give a different plan.
 3. **Dispatcher (`nuwan`), Queue, desk.** Choose **Kandy hub**, then jump **3:12 PM: Chasing the last orders** and
-   **4:00 PM: Cutoff: the queue locks**. Notice orders arriving as other stores order, the Not ordered yet list,
-   "VEH039 and VEH058 are in the workshop", the **Waited Monday** flag on Kegalle's chilled order, and at 4:00 PM
-   "Locked at 4:00 PM" with 57 Kandy hub orders and 5 of 7 refrigerated vehicles free.
+   **4:00 PM: Cutoff: the queue locks**. Notice orders arriving as other stores order, the Not ordered yet list
+   (**Remind** puts a reminder with the 4:00 PM cutoff in that store's Relay app, and **Remind all** does it for every
+   store on the list), "VEH039 and VEH058 are in the workshop", the **Waited Monday** flag on Kegalle's chilled order,
+   and at 4:00 PM "Locked at 4:00 PM" with 57 Kandy hub orders and 5 of 7 refrigerated vehicles free.
 4. **Dispatcher, Plan, desk, 4:00 PM.** Choose **Go to plan board**, then **Propose plan**. Notice "Kandy hub: 57
    orders, 56 on 18 trips, 1 waits", the Not placed card for OUT117 Hemmathagama's chilled order, and VEH045 trip 1 to
    Kegalle leaving 3:29 AM. Filter **Refrigerated** and drag the Hemmathagama card onto VEH057 Trip 2. Notice "3 rules
-   broken" (1,460.8 of 1,040 kg, 7.676 of 7.0 m³, Aranayake at 8:01 AM after its 7:30 close) and "Fix 3 broken rules
-   to publish". Press Ctrl Z to undo. (If you jump to 4:35 PM without proposing, Relay proposes for you.)
+   broken", "Weight: 1,460.8 of 1,040 kg. Volume: 7.676 of 7.0 m³. Window: OUT117 at 8:01 AM, closes 7:45." (on that
+   trip Hemmathagama itself would arrive after its own close) and "Fix 3 broken rules to publish." Press Ctrl Z to
+   undo. (If you jump to 4:35 PM without proposing, Relay proposes for you.)
 5. **Dispatcher, Review deferral (the deferrals drawer).** Read **Unavoidable: one chilled order waits** (5
    refrigerated vehicles can serve 22 of the 23 chilled orders) and **Relay's choice: which order waits**: rule 1
-   leaves only OUT117 and OUT119, and rule 2 protects OUT119 Kegalle because its Monday order waited. Read what the
-   choice costs, "Thursday checked: VEH039 has room", and "What OUT117 will see". Choose **Use Relay's reason**, then
-   **Confirm deferral**. Relay opens the Publish check.
+   leaves only OUT117 and OUT119, and rule 2 protects OUT119 Kegalle because its Monday order waited. Read **What the
+   choice costs**, "Thursday checked: VEH039's Kegalle run has room, planned 4:00 AM." and "What OUT117 will see".
+   Choose **Use Relay's reason**, then **Confirm deferral**. Relay opens the Publish check.
 6. **Dispatcher, Publish check, moment 6:39 PM: Publishing the plan.** Jump with **Go** in Demo controls (Relay
    publishes Peliyagoda at 6:31 PM on the way). The Publish check (also opened by the plan bar's **Publish plan**) says
    no planned arrival is after its window, and "Relay expects 6 of the 53 Fresh stops to arrive after their window",
@@ -134,11 +145,13 @@ Moments that depend on Kasun's truck move with it: once the Kandy plan is publis
     VEH060, the hub's standby van, beside Kasun's own estimate, says it arrives around 8:05 AM after the close and why
     it is still worth sending, and marks refrigerated vehicles **Not suitable**. Write a reason and press **Move stop 4
     to VEH060**. Notice "Nimal, the Kandy hub dock and the store have been told" and "Kasun hasn't seen this yet".
-17. **Store manager, Track delivery, phone, during the silence.** The tracker keeps Planned and Expected, says when
-    Kasun was last heard and gives the likely range. Once the estimated time has passed, it offers **Confirm receipt**
-    for goods already at the dock. Jump to **6:40 AM: Hemmathagama confirms receipt**, tap **Confirm receipt**, check
-    the lines (rice and dhal reads "6 short. You were told at" the time of Nuwan's decision) and tap **Everything
-    arrived**. Notice "Driver's proof: waiting for Kasun's phone".
+17. **Store manager, Track delivery, phone, during the silence.** My orders reads "Arriving around 6:35 AM" and "Last
+    heard from Kasun 5:41 AM". Tap **Track delivery**: "No word since 5:41 AM", "Arriving around" 6:35 AM with the
+    window and "Planned 5:19 AM", "Likely between" two times, and when to have someone at the rear dock. Jump to
+    **6:40 AM: Hemmathagama confirms receipt**: "The estimate has passed", and the tracker asks "Goods already at your
+    store?" with **Confirm receipt**. Tap it, here or on My orders, check the lines (rice and dhal reads "6 short. You
+    were told at" the time of Nuwan's decision) and tap **Everything arrived**. Notice "Driver's proof: waiting for
+    Kasun's phone", and that a problem can still be reported until 4:00 PM.
 18. **Dispatcher, Live, desk.** Exceptions shows "Hemmathagama confirmed receipt": "The store confirmed receipt, so
     Kasun has been there", Relay moves Aranayake's estimate from the receipt, and asks **Keep backup** or **Cancel
     backup**. Keep it: Kasun is still out of contact.
@@ -147,22 +160,29 @@ Moments that depend on Kasun's truck move with it: once the Kandy plan is publis
     at the top of the screen you are on: "Stop 4 was also given to Nimal", with Kasun's record and "Is your record
     right?". Tap **Yes, I delivered it**: "Stop 4 is settled" and VEH060's visit is cancelled. Open the trip summary:
     each stop saved with no signal reads "Saved offline, sent 7:14 AM". Tap **Finish trip**.
-20. **Dispatcher and store manager, moment 7:22 AM: Everything settled.** On Live, VEH045 reads "Run finished",
-    "Offline 5:41 to 7:14" and the records received; VEH060 "Turned back to the Kandy hub"; Exceptions lists "Kasun
-    Bandara back in contact" and "Stop 4 conflict resolved". On Dilani's My orders, tap **See the receipt and Kasun's
-    proof**: "Proof of delivery from Kasun Bandara" has joined the receipt, with the photo, the delivery time, the
-    receiver's name and "Saved on Kasun's phone ... and sent at 7:14 AM". The 6 rice and dhal cases and the chilled
-    order are listed for Thursday.
+20. **Dispatcher and store manager, moment 7:22 AM: Everything settled.** On Live, VEH045 reads "Trip finished at"
+    the time Kasun tapped **Finish trip**, with when Relay expects the truck back at the hub, "Offline 5:41 to 7:14"
+    and the records received; VEH060 "Turned back to the Kandy hub"; Exceptions lists "Kasun Bandara back in contact"
+    and "Stop 4 conflict resolved". On Dilani's My orders, tap **See the receipt and Kasun's proof**: "Proof of
+    delivery from Kasun Bandara" has joined the receipt, with the photo, the delivery time, the receiver's name and
+    "Saved on Kasun's phone ... and sent at 7:14 AM". The 6 rice and dhal cases and the chilled order are listed for
+    Thursday.
 21. **Dispatcher, Outlook, desk.** The Kandy hub's six weeks: forecast demand by brand, chilled space against the
     refrigerated fleet, the vehicles needed on each week's busiest day, Wednesday 29 April as the heaviest (6 of 7
     needed), and what to arrange. Choose **Peliyagoda**: it says plainly that no forecast is set up there yet.
 22. **Dispatcher, Plan, desk: try the engine.** Start another private copy, jump to **4:00 PM: Cutoff: the queue
     locks** and press **Propose plan**. While you drag the waiting chilled order, the dry-box trips say "Needs a
-    refrigerated vehicle"; drop it on VEH045 anyway and read "Chilled goods need a refrigerated vehicle". Press
-    **Propose again** and confirm: Relay re-plans every order, your moves included. Then open **Review deferral**,
-    press **Defer anyway** on the protected OUT119 Kegalle, give a reason and press **Defer OUT119**: Relay re-plans
-    so Kegalle waits with your reason and Hemmathagama rides. Choose **Peliyagoda** and **Propose plan**: 79 orders on
-    26 trips, nothing waits.
+    refrigerated vehicle"; drop it on VEH045 anyway and read "Chilled goods need a refrigerated vehicle". Now take a
+    refrigerated truck off the run: press the wrench on VEH043's lane (**Change VEH043's status for this run**),
+    choose **In the workshop** and **Save**. Its trip breaks "VEH043 is in the workshop today" and the plan bar reads
+    "Fleet changed. Propose again to re-plan." Press **Propose again** and confirm: Relay plans every order again with
+    four refrigerated vehicles, your drop included, and reads "Kandy hub: 57 orders, 54 on 18 trips, 3 wait."
+    Hemmathagama rides now. Open **Review deferrals**: "4 refrigerated vehicles can serve 20 of the 23 chilled
+    orders", rule 2 still protects OUT119 Kegalle, and rule 3 keeps the most goods moving, so Nuwara Eliya's, Badulla
+    Town's and Hali-Ela's chilled orders wait. Press **Defer anyway** on OUT119 Kegalle, give a reason and press
+    **Defer OUT119**: Relay plans again so Kegalle waits with your reason and Nuwara Eliya rides. Choose
+    **Peliyagoda** and **Propose plan**: 79 orders on 26 trips, nothing waits. The first time anyone plans with VEH043
+    in the workshop the engine searches afresh, which can take up to a minute; the plan bar shows the wait.
 
 ## Try to break it
 
@@ -178,7 +198,8 @@ Moments that depend on Kasun's truck move with it: once the Kandy plan is publis
 - **Rule-breaking drags.** Drop any order on any trip: the drop is checked against all eleven rules, the trip says
   which broke and why, and **Publish plan** stays off until they are fixed or undone.
 - **Wrong PIN.** The dock tablet answers "That PIN did not match. Try again." and stays on the PIN pad.
-- **The clock.** Moments already passed show **Passed**; the clock only moves forward, and Reset is the way back.
+- **The clock.** Moments already passed show **Passed**; the clock only moves forward, and Reset is the way back. In
+  the shared walkthrough nothing moves it: a jump there offers a copy of your own.
 
 ## Departures from the Designathon design
 
@@ -209,11 +230,11 @@ Moments that depend on Kasun's truck move with it: once the Kandy plan is publis
 - **No location stamps or distances on the office and store screens.** The driver's phone saves a location reading
   with each arrival, delivery and report when the browser allows it, but outlets have no coordinates in the data,
   so there is nothing to show it against.
-- **The driver has no Call the store or Call dispatch button.** The outlet data has no phone numbers, so there is
-  nothing to dial for a store. The driver's report screen names Nuwan in words ("In an emergency, call Nuwan at
-  dispatch") instead of a dial button; the dock's flag sheet does show the dispatcher's on-call number, which is
-  invented for the story.
-- **Remind, Remind all and Call on the order queue do nothing yet.** They are drawn as designed but not wired.
+- **No Call button for a store.** The outlet data has no phone numbers, so the driver has no Call the store, and the
+  order queue shows Call only beside a store whose record has a number, which no seeded store has. Remind and Remind
+  all work as designed. Calls to dispatch do work: **Call Nuwan at dispatch** on the driver's report screen dials the
+  dispatcher's on-call number, and the dock's flag sheet shows it large enough to dial. The number is invented for the
+  story.
 - **A delay report does not move expected times.** Estimates come only from stop events and receipts; the run's line
   names the reported delay beside them.
 - **Peliyagoda has no capacity forecast.** The design draws DSP-05 for the Kandy hub only, and the seed builds no
@@ -244,17 +265,20 @@ In PowerShell, set the variable with
 `$env:RELAY_DATABASE_URL = "postgresql+psycopg://relay:relay@localhost:55432/relay"`. Vite answers on every
 loopback name, and each name under `.localhost` keeps its own cookies, so `http://a.localhost:5173` and
 `http://b.localhost:5173` are two independent browsers on one machine. Set `RELAY_API_URL` to point the proxy
-elsewhere.
+elsewhere. Uvicorn started this way does not warm the engine cache; `uv run relay-api warm` does it once, as
+`relay-api serve` does in the Docker image.
 
 Checks, as CI runs them:
 
 ```bash
 uv run ruff check .
 uv run ruff format --check apps packages
+uv run mypy apps/api/src packages/engine/src   # strict, from pyproject.toml
 uv run pytest                    # API tests need PostgreSQL at RELAY_TEST_ADMIN_URL (default: the dev database above)
 pnpm --filter @relay/web lint    # Biome
 pnpm --filter @relay/web test    # Vitest
 pnpm --filter @relay/web build   # TypeScript check and production build
+pnpm e2e                         # Playwright, against the two dev servers; see e2e/README.md
 ```
 
 `uv run python tools/data_model.py` rewrites `docs/data-model.md` from the models. `seed/scripts/build_story.py`
@@ -268,17 +292,22 @@ committed seed means `docker compose up` never needs it.
   (which chilled order waits, and why), and the estimate during a silence on the story's numbers.
 - **API** (`apps/api/tests`): against a real PostgreSQL. Each run creates a throwaway database, migrates and seeds it
   like a fresh install, and drops it at the end; with no server at `RELAY_TEST_ADMIN_URL` the API tests are skipped
-  and the engine tests still run. They cover the dock night, changes after publishing, Kasun's morning with the
-  outbox, resends and the one question, the store's side, the demo jumps (a new copy jumped to each moment of Kasun's
-  morning, and to the dock and the handover, finds what the design draws), accounts across copies, and the capacity
-  outlook.
+  and the engine tests still run. They cover the plan board's moves, fleet changes and deferrals, the queue's
+  reminders, the dock night, changes after publishing, Kasun's morning with the outbox, resends and the one question,
+  the live runs, the store's side (orders changed before the cutoff, receipts and issue reports), the demo jumps (a new
+  copy jumped to each moment of Kasun's morning, and to the dock and the handover, finds what the design draws), the
+  shared walkthrough's held clock, accounts across copies, the engine cache's warm-up, and the capacity outlook.
 - **Web** (`apps/web`, Vitest with jsdom): the driver's outbox order and resends, the sync pill, the phone's records
   over the server's run, loader counts, optimistic taps and flags, PIN sheets, the live feed and its decisions, store
   wording and Confirm receipt, the outlook grid, and clock times in three languages.
+- **Browser** (`e2e/`, Playwright in Chromium): this README's judge walkthrough at desk and phone sizes, steps 1 to 21
+  in one private copy and all of step 22 in another (the drop, VEH043 to the workshop, Defer anyway and the
+  Peliyagoda plan); the driver's phone with no network, through a reload and the storm; two copies that never see
+  each other; and each role's sign-in. See [e2e/README.md](e2e/README.md).
 
-CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request, in three jobs: Ruff lint and
-format and `pytest` with a PostgreSQL 16 service; Biome, Vitest and the TypeScript build of the web app; and
-`docker compose build` of every image. There is no browser end-to-end test yet: `e2e/` holds only its `package.json`.
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request, in four jobs: Ruff lint and
+format, mypy and `pytest` with a PostgreSQL 16 service; Biome, Vitest and the TypeScript build of the web app;
+`docker compose build` of every image; and the browser tests against `docker compose up`, the stack a judge starts.
 
 ## Repository layout
 
@@ -293,10 +322,10 @@ format and `pytest` with a PostgreSQL 16 service; Biome, Vitest and the TypeScri
 | `tools/data-check/` | The Designathon scenario check against the competition data |
 | `infra/` | Terraform for the server, the deploy script and the server's start and backup scripts |
 | `docs/` | Architecture, data model, AI tool disclosure, the build plan and the Designathon design |
-| `e2e/` | Reserved for the Playwright walkthrough; only its `package.json` so far |
+| `e2e/` | The Playwright browser tests: the judge walkthrough, the offline driver, copy isolation and each role's sign-in |
 | `docker-compose.yml`, `.env.example` | The whole stack for `docker compose up`, and its settings |
 | `docker-compose.prod.yml` | The production overlay: Caddy on 80 and 443 with its certificates in a volume |
-| `.github/workflows/ci.yml` | Lint, tests and image builds on every push |
+| `.github/workflows/ci.yml` | Lint, types, tests, image builds and the browser tests on every push |
 
 ## Deployment
 
@@ -314,8 +343,8 @@ copies of the day. See [infra/README.md](infra/README.md).
 - [docs/ai-disclosure.md](docs/ai-disclosure.md): the AI tool disclosure for the Hackathon
 - [docs/ai-usage-log.md](docs/ai-usage-log.md): the running log of AI use across the phases, which the disclosure
   draws on
-- [docs/build-plan.md](docs/build-plan.md): the build plan, stack and scope accepted on 30 September, unchanged since;
-  where the build differs, this README and the architecture page describe the build
+- [docs/build-plan.md](docs/build-plan.md): the build plan, stack and scope as accepted on 30 September; where the
+  build differs, this README and the architecture page describe the build
 - [docs/design/](docs/design/): the Designathon design documents, used as the build's specification: problem framing,
   personas, screens and flows, style guide, scenario data, core tradeoff and the per-role specs (the submission as
   handed in is the tag `designathon-submission`)

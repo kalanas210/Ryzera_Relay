@@ -13,10 +13,7 @@
 		request_body {
 			max_size 2MB
 		}
-		reverse_proxy {$API_UPSTREAM:api:8000} {
-			# live updates stream as server-sent events
-			flush_interval -1
-		}
+		reverse_proxy {$API_UPSTREAM:api:8000}
 	}
 
 	handle {

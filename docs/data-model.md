@@ -926,7 +926,7 @@ Planned against loaded, confirmed by the loader and accepted by the driver.
 | `accepted_at` | datetime | optional |
 | `accepted_by` | char | references `app_user.id`; optional |
 | `accepted_on` | varchar | optional; 'phone' or 'tablet' (the driver's own PIN on the dock tablet). |
-| `difference` | text | What the driver said does not match, if he reported a difference instead of accepting. |
+| `difference` | text | What the driver said does not match, when the driver reported a difference instead of accepting. |
 
 ### `load_line` (per copy)
 

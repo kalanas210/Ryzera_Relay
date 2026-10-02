@@ -111,7 +111,7 @@ test("a wrong PIN on the dock tablet stays on the PIN pad @phone", async ({ copy
   const errors = watchErrors(page, { allow: [/status of 401/] });
   await page.setViewportSize(PHONE);
   await page.goto("/signin?role=loader");
-  // a digit tapped before the names load is cleared with them, so wait for Rizwan's name to be picked
+  // the keys take digits once a name is picked, so wait for Rizwan's name
   await expect(page.getByRole("button", { name: "MR Rizwan", exact: true })).toHaveAttribute("aria-pressed", "true");
   for (const digit of "1111") await page.getByRole("button", { name: digit, exact: true }).click();
   await expect(page.getByText("That PIN did not match. Try again.")).toBeVisible();

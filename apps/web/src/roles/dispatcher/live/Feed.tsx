@@ -19,7 +19,7 @@ import { useSimNow } from "@/demo/clock";
 import { Button } from "@/design/Button";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
-import { dayOf, formatDayLong, formatDuration, formatTime, formatWeekday, formatWindow } from "@/lib/time";
+import { dayOf, formatDayLong, formatDuration, formatTime, formatWeekday, formatWindow, roundTo5 } from "@/lib/time";
 import {
   type Depot,
   type Feed,
@@ -549,8 +549,8 @@ function MovedEntry(props: EntryProps) {
         <p className="t-caption text-asphalt-500">{backup}'s copy was cancelled.</p>
       ) : copy?.estimate && marker ? (
         <p className={cx("t-caption", copy.late_risk ? "text-problem" : "text-asphalt-500")}>
-          {backup} arrives around {shortClock(copy.estimate)}, {copy.late_risk ? "after" : "before"} {marker.place}'s{" "}
-          {formatTime(marker.closes)} close.
+          {backup} arrives around {shortClock(roundTo5(copy.estimate))}, {copy.late_risk ? "after" : "before"}{" "}
+          {marker.place}'s {formatTime(marker.closes)} close.
         </p>
       ) : (
         <p className="t-caption text-asphalt-500">{now}</p>
@@ -616,8 +616,8 @@ function ReceiptEntry(props: EntryProps) {
       {backupRow && copy?.estimate ? (
         <Line icon={Van}>
           {backupRow.departed_at
-            ? `${backupRow.vehicle_id} is on its way, around ${formatTime(copy.estimate)}.`
-            : `${backupRow.vehicle_id} leaves the hub ${formatTime(backupRow.planned_depart)}, around ${formatTime(copy.estimate)} at ${copy.place}.`}
+            ? `${backupRow.vehicle_id} is on its way, around ${formatTime(roundTo5(copy.estimate))}.`
+            : `${backupRow.vehicle_id} leaves the hub ${formatTime(backupRow.planned_depart)}, around ${formatTime(roundTo5(copy.estimate))} at ${copy.place}.`}
         </Line>
       ) : (
         <p className="t-dense">{item.body}</p>
@@ -827,7 +827,7 @@ function ConflictEntry(props: EntryProps) {
           {copy.state === "cancelled"
             ? `${backup}'s copy is already cancelled.`
             : backupRow.departed_at && copy.estimate
-              ? `${backupDriver} is on the way to ${copy.place} with ${backup}, around ${shortClock(copy.estimate)}.`
+              ? `${backupDriver} is on the way to ${copy.place} with ${backup}, around ${shortClock(roundTo5(copy.estimate))}.`
               : `${backup} has not left the hub yet.`}
         </Line>
       ) : null}
@@ -1090,7 +1090,7 @@ function ShortfallDecision({ item, s }: { item: FeedItem; s: ShortfallDetail }) 
         {decide.error ? <p className="t-dense text-problem">{decide.error.message}</p> : null}
         {env.desk ? null : (
           <p className="text-center t-caption text-asphalt-500">
-            Sent to your phone at {formatTime(item.created_at)} because you are on call tonight.
+            Waiting in Relay since {formatTime(item.created_at)} for the dispatcher on call tonight.
           </p>
         )}
       </div>

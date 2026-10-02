@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api/client";
@@ -25,14 +25,14 @@ const accounts: Account[] = [
   },
 ];
 
-function show() {
+function show(names: Promise<Account[]> = Promise.resolve(accounts), entry = "/signin") {
   vi.spyOn(api, "get").mockImplementation((path: string) =>
-    path === "/api/auth/accounts" ? Promise.resolve(accounts as never) : Promise.reject(new Error("not in this test")),
+    path === "/api/auth/accounts" ? (names as Promise<never>) : Promise.reject(new Error("not in this test")),
   );
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/signin"]}>
+      <MemoryRouter initialEntries={[entry]}>
         <SignIn />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -61,5 +61,18 @@ describe("signing in", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Loader/ }));
     expect(scrolled).toHaveBeenCalledTimes(1);
     expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("keeps the PIN keys off, and says why, until the loaders' names are in", async () => {
+    let arrive: (list: Account[]) => void = () => {};
+    show(new Promise((resolve) => (arrive = resolve)), "/signin?role=loader");
+    expect(screen.getByText("Loading the names. The keys work once a name is picked.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2" })).toBeDisabled();
+
+    act(() => arrive(accounts));
+    expect(await screen.findByRole("button", { name: /Rizwan$/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Demo account. PIN 2580")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    expect(screen.getByRole("img", { name: "1 of 4 digits entered" })).toBeInTheDocument();
   });
 });

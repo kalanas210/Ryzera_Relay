@@ -78,8 +78,9 @@ import {
 } from "./api";
 import { ChangeOrder } from "./ChangeOrder";
 import { DeferralsDrawer } from "./Deferrals";
-import { FleetButton, FleetDialog } from "./Fleet";
+import { FleetButton, FleetDialog, statusLabel } from "./Fleet";
 import { PublishCheck } from "./PublishCheck";
+import { Replanning } from "./Replanning";
 import { type Moving, TripPicker } from "./TripPicker";
 import {
   DEPOT_LABEL,
@@ -258,40 +259,6 @@ export function PlanPage() {
         </p>
       </Sheet>
     </>
-  );
-}
-
-/** Seconds since `active` turned on, counted while it stays on. */
-function useElapsed(active: boolean): number {
-  const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    const started = Date.now();
-    setSeconds(0);
-    const tick = window.setInterval(() => setSeconds(Math.round((Date.now() - started) / 1000)), 1000);
-    return () => window.clearInterval(tick);
-  }, [active]);
-  return seconds;
-}
-
-/** While the engine searches: a proposal Relay has made before comes back at once, a new fleet or new orders take
- *  longer, and the wait is shown rather than hidden behind a button label. */
-function Replanning({ active }: { active: boolean }) {
-  const seconds = useElapsed(active);
-  if (!active) return null;
-  return (
-    <p className="flex items-center gap-2 t-caption text-asphalt-700">
-      <RefreshCw
-        size={16}
-        strokeWidth={1.75}
-        aria-hidden
-        className="shrink-0 animate-spin motion-reduce:animate-none"
-      />
-      <span role="status">Relay is checking every vehicle and every rule. A new fleet can take up to a minute.</span>
-      <span className="num text-asphalt-500" aria-hidden>
-        {seconds} s
-      </span>
-    </p>
   );
 }
 
@@ -1075,8 +1042,14 @@ function LaneRow({
 }) {
   const reefer = lane.temp === "reefer";
   const Icon = lane.type === "van" ? Van : reefer ? Snowflake : Truck;
+  // a group named for the vehicle, so a screen reader ties each trip card to the vehicle it is on
   return (
-    <div className="flex flex-col gap-3 border-b border-asphalt-200 px-4 py-2 md:flex-row">
+    // biome-ignore lint/a11y/useSemanticElements: a vehicle and its trip cards, not a set of form fields
+    <div
+      role="group"
+      aria-label={`${lane.vehicle_id}, ${vehicleKind(lane)}, ${statusLabel(lane.status).toLowerCase()}`}
+      className="flex flex-col gap-3 border-b border-asphalt-200 px-4 py-2 md:flex-row"
+    >
       <div className="flex w-[132px] shrink-0 flex-col gap-0.5">
         <div className="flex items-center justify-between gap-1">
           <p className="flex items-center gap-1.5 t-h3">

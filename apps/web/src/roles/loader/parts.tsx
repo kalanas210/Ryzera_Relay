@@ -233,7 +233,7 @@ export function LoadLineRow({
   const { t, lang } = useLoaderText();
   const press = useRef<number | undefined>(undefined);
   const held = useRef(false);
-  // Flag and View say which line they are for: "Flag", then "Rice and dhal, Stop 3 · Dry"
+  // The line's group and its Flag and View buttons say which line they are for: "Rice and dhal, Stop 3 · Dry"
   const nameId = useId();
   const whereId = useId();
   const flagged = line.status === "flag_waiting" || line.status === "decided";
@@ -362,7 +362,10 @@ export function LoadLineRow({
     flagged && lang !== "en" ? "basis-64" : "basis-53",
   );
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a load line and its buttons, not a set of form fields
     <div
+      role="group"
+      aria-labelledby={`${nameId} ${whereId}`}
       data-line={line.id}
       className={cx(
         "relative flex flex-wrap items-center gap-x-2 overflow-hidden rounded-button pr-2",

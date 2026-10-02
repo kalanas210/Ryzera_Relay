@@ -1,4 +1,4 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 
 export type CaseType = { code: string; name: string; temp: "ambient" | "chilled"; kg: number; m3: number };
@@ -221,17 +221,34 @@ export function useTrackers(orderRefs: string[]): {
   });
 }
 
+/** Relay's answer for one notice, laid over the one on the phone. Opening a notice sends the read, and Got it can
+ *  go before the read comes back, so the two answers can arrive in either order. Relay records each time once, so an
+ *  answer never takes back a time the other one brought: a read that comes back after Got it keeps "Seen". */
+export function withAnswer(list: Notice[] | undefined, notice: Notice): Notice[] | undefined {
+  return list?.map((n) =>
+    n.id === notice.id
+      ? {
+          ...notice,
+          read_at: notice.read_at ?? n.read_at,
+          acknowledged_at: notice.acknowledged_at ?? n.acknowledged_at,
+        }
+      : n,
+  );
+}
+
+function answered(client: QueryClient, notice: Notice) {
+  // a list still on its way may have left Relay before this answer: it is dropped, and the next one brings it all
+  void client.cancelQueries({ queryKey: ["store", "notices"] });
+  client.setQueryData<Notice[]>(["store", "notices"], (list) => withAnswer(list, notice));
+  void client.invalidateQueries({ queryKey: ["store", "home"] });
+}
+
 /** Opening a notice marks it read, so the dispatcher's record can say when the store read it. */
 export function useReadNotice() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (noticeId: string) => api.post<Notice>(`/api/store/notices/${noticeId}/read`, {}, { role }),
-    onSuccess: (notice) => {
-      client.setQueryData<Notice[]>(["store", "notices"], (list) =>
-        list?.map((n) => (n.id === notice.id ? notice : n)),
-      );
-      void client.invalidateQueries({ queryKey: ["store", "home"] });
-    },
+    onSuccess: (notice) => answered(client, notice),
   });
 }
 
@@ -241,12 +258,7 @@ export function useAcknowledge() {
   return useMutation({
     networkMode: "always",
     mutationFn: (noticeId: string) => api.post<Notice>(`/api/store/notices/${noticeId}/ack`, {}, { role }),
-    onSuccess: (notice) => {
-      client.setQueryData<Notice[]>(["store", "notices"], (list) =>
-        list?.map((n) => (n.id === notice.id ? notice : n)),
-      );
-      void client.invalidateQueries({ queryKey: ["store", "home"] });
-    },
+    onSuccess: (notice) => answered(client, notice),
   });
 }
 

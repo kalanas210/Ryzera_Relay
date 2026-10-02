@@ -52,10 +52,10 @@ export function SignIn() {
   const usesPin = role === "loader";
 
   useEffect(() => {
-    // pick the judge account for the role by default
+    // pick the judge account for the role by default, keeping a password typed before the names came in
     if (role && !people.some((p) => p.username === username) && people[0]) {
       setUsername(people[0].username);
-      setSecret("");
+      if (username) setSecret("");
     }
   }, [role, people, username]);
 
@@ -153,6 +153,7 @@ export function SignIn() {
                 }}
                 error={signIn.isError}
                 busy={signIn.isPending}
+                failed={accounts.isError}
               />
             ) : (
               <form
@@ -215,6 +216,7 @@ function LoaderPin({
   onPin,
   error,
   busy,
+  failed,
 }: {
   people: Account[];
   username: string;
@@ -223,8 +225,11 @@ function LoaderPin({
   onPin: (value: string) => void;
   error: boolean;
   busy: boolean;
+  /** The loaders' names could not be loaded. */
+  failed: boolean;
 }) {
   const person = people.find((p) => p.username === username);
+  // The keys wait for a name: a PIN tapped before the names come in would be sent for nobody.
   return (
     <div className="mx-auto flex max-w-[358px] flex-col gap-5">
       <div className="flex flex-col gap-2">
@@ -261,17 +266,29 @@ function LoaderPin({
       </div>
       <div className="flex flex-col items-center gap-1 text-center">
         <p className="t-h3">
-          Enter{" "}
-          <span className="latin">
-            {person?.display_name.split(" ")[person.display_name.startsWith("Mohamed") ? 1 : 0]}
-          </span>
-          's PIN
+          {person ? (
+            <>
+              Enter{" "}
+              <span className="latin">
+                {person.display_name.split(" ")[person.display_name.startsWith("Mohamed") ? 1 : 0]}
+              </span>
+              's PIN
+            </>
+          ) : (
+            "Enter your PIN"
+          )}
         </p>
-        <p className={cx("t-caption", error ? "text-problem" : "text-asphalt-500")}>
-          {error ? "That PIN did not match. Try again." : person ? `Demo account. ${person.hint}` : ""}
+        <p className={cx("t-caption", error || failed ? "text-problem" : "text-asphalt-500")}>
+          {error
+            ? "That PIN did not match. Try again."
+            : person
+              ? `Demo account. ${person.hint}`
+              : failed
+                ? "Relay could not load the names. Reload the page to try again."
+                : "Loading the names. The keys work once a name is picked."}
         </p>
       </div>
-      <PinPad value={pin} onChange={onPin} error={error && pin.length === 0} disabled={busy} />
+      <PinPad value={pin} onChange={onPin} error={error && pin.length === 0} disabled={busy || !person} />
       <p className="t-caption text-center text-asphalt-500">Each loader's language comes back when they sign in.</p>
     </div>
   );

@@ -136,3 +136,89 @@ describe("the driver's outbox", () => {
     expect(log).toEqual(["record:only"]);
   });
 });
+
+/** A transport whose first send waits until the test lets it answer, so the test can save while it is going. */
+function slowFirstSend(log: string[], offline = false) {
+  let answer = () => {};
+  const going = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  let first = true;
+  const t = transport(log, {}, offline);
+  const slow: Transport = {
+    async sendRecords(records) {
+      if (first) {
+        first = false;
+        await going;
+      }
+      return t.sendRecords(records);
+    },
+    sendPhoto: (p) => t.sendPhoto(p),
+  };
+  return { slow, answer };
+}
+
+describe("saving while the outbox is sending", () => {
+  it("sends what was saved during a send in the same run, after it, without waiting for another try", async () => {
+    const outbox = freshOutbox();
+    await outbox.add(record("first", "arrived"));
+    const log: string[] = [];
+    const { slow, answer } = slowFirstSend(log);
+
+    const running = outbox.flush(slow);
+    await expect.poll(() => outbox.inFlight().has("first")).toBe(true);
+    await outbox.add(record("second", "delivered"));
+    await outbox.addPhoto(photo("proof"));
+    // the save's own nudge joins the run already going, and the phone counts the new ones as on their way
+    const joined = outbox.flush(slow);
+    expect([...outbox.inFlight()].sort()).toEqual(["first", "proof", "second"]);
+
+    answer();
+    const result = await joined;
+    expect(await running).toBe(result);
+    expect(log).toEqual(["record:first", "record:second", "photo:proof"]);
+    expect(result).toMatchObject({ sent: 3, failed: 0, offline: false });
+    expect(await outbox.waiting()).toEqual([]);
+    expect(outbox.inFlight().size).toBe(0);
+  });
+
+  it("sends a record let go of its location wait during a send, without waiting for the wait to run out", async () => {
+    const outbox = freshOutbox();
+    await outbox.add(record("delivered", "delivered"));
+    await outbox.add(record("arrive"), { holdMs: 15_000 });
+    const log: string[] = [];
+    const { slow, answer } = slowFirstSend(log);
+
+    const running = outbox.flush(slow);
+    await expect.poll(() => outbox.inFlight().has("delivered")).toBe(true);
+    await outbox.release("arrive", { lat: 7.25, lng: 80.35, accuracy_m: 12 });
+    answer();
+
+    const result = await running;
+    expect(result.held).toBe(false);
+    expect(log).toEqual(["record:delivered", "record:arrive"]);
+  });
+
+  it("leaves what was saved during a send that found no connection for the next try, in order", async () => {
+    const outbox = freshOutbox();
+    await outbox.add(record("a"));
+    const log: string[] = [];
+    const { slow, answer } = slowFirstSend(log, true);
+
+    const running = outbox.flush(slow);
+    await expect.poll(() => outbox.inFlight().has("a")).toBe(true);
+    await outbox.add(record("b"));
+    answer();
+
+    const result = await running;
+    expect(result).toMatchObject({ offline: true, sent: 0, failed: 1 });
+    expect((await outbox.waiting()).map((q) => [q.id, q.tries])).toEqual([
+      ["a", 1],
+      ["b", 0],
+    ]);
+    expect(outbox.inFlight().size).toBe(0);
+
+    await outbox.flush(transport(log));
+    expect(log).toEqual(["record:a", "record:b"]);
+  });
+});

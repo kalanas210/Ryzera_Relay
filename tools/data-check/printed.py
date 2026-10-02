@@ -1,6 +1,6 @@
 """
 Numbers the scenario text prints, rebuilt from values validate_scenario.py has already checked against the data.
-Each string must appear word for word in docs/designathon/05-scenario-data.md, so a table row or sentence that
+Each string must appear word for word in docs/design/05-scenario-data.md, so a table row or sentence that
 drifts from the data fails the validator.
 """
 import pandas as pd

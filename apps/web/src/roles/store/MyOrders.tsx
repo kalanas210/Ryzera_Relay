@@ -33,7 +33,7 @@ import {
   useStoreNotices,
   useTrackers,
 } from "./api";
-import { AttentionRow, Contents, InfoNote, LinkRow, OfflineNotice } from "./parts";
+import { AttentionRow, ButtonLink, Contents, InfoNote, LinkRow, OfflineNotice } from "./parts";
 import {
   around,
   type CardState,
@@ -191,6 +191,7 @@ function OrderCard({
     order.run_date === order.requested_date &&
     Date.parse(order.locks_at) > now.getTime();
   const receipt = `/store/orders/${order.order_ref}/receipt`;
+  const confirm = (state === "passed" || state === "arrived" || state === "delivered") && Boolean(tracker?.can_confirm);
   const proof = tracker?.proof;
 
   let chip = <StatusChip kind="received" />;
@@ -320,17 +321,17 @@ function OrderCard({
           {shortRow(s.name, s.qty, s.day, after)}
         </AttentionRow>
       ))}
-      {state === "on_the_way" ? (
-        <Button variant="primary" icon={Navigation} full onClick={() => navigate(track)}>
-          Track delivery
-        </Button>
-      ) : null}
-      {(state === "passed" || state === "arrived" || state === "delivered") && tracker?.can_confirm ? (
+      {confirm ? (
         <Button variant="primary" icon={PackageCheck} full onClick={() => navigate(receipt)}>
           Confirm receipt
         </Button>
       ) : null}
-      {state === "passed" ? <LinkRow to={track}>Track delivery</LinkRow> : null}
+      {state === "on_the_way" || state === "passed" ? (
+        // the same link to the tracker before and after the estimate; under Confirm receipt it steps back
+        <ButtonLink to={track} icon={Navigation} variant={confirm ? "secondary" : "primary"}>
+          Track delivery
+        </ButtonLink>
+      ) : null}
       {state === "confirmed" || state === "disputed" ? (
         <LinkRow to={receipt}>{proof ? `See the receipt and ${driver}'s proof` : "See your receipt"}</LinkRow>
       ) : null}

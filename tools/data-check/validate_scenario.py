@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-validate_scenario.py: checks docs/designathon/05-scenario-data.md (v0.4, data aligned) against the competition data.
+validate_scenario.py: checks docs/design/05-scenario-data.md (v0.4, data aligned) against the competition data.
 
 It reads the CSVs in data/raw/data, imports the organizers' trip-time standard from data/raw/check_allocation.py,
 parses the machine-readable appendix at the end of the scenario (fenced ```csv relay:<name>``` and ```json relay:<name>```
@@ -29,7 +29,7 @@ import pandas as pd  # noqa: E402
 import relay_model as M  # noqa: E402
 from relay_model import hm, fmt, ampm, r5, num, OUT, VEH, CAL, DT  # noqa: E402
 
-MD_PATH = M.REPO / "docs" / "designathon" / "05-scenario-data.md"
+MD_PATH = M.REPO / "docs" / "design" / "05-scenario-data.md"
 DAY, PLAN_DAY, THU, MON, TUE = "2026-04-08", "2026-04-07", "2026-04-09", "2026-04-06", "2026-04-07"
 
 # Team knowledge (not in the data): the district each store name lies in. outlets.csv has no names.

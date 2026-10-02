@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text
+from sqlalchemy import select
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -16,6 +16,7 @@ from relay_api.db import SessionLocal
 from relay_api.models import Workspace
 from relay_api.routers import auth, demo, dispatch, dock, driver, live, photos, plan, runs, store
 from relay_api.security import require_client_header
+from relay_api.services.engine_cache import warming_up
 from relay_api.services.simulator import catch_up
 
 log = logging.getLogger("relay")
@@ -108,6 +109,8 @@ app.include_router(photos.router)
 
 @app.get("/api/health", tags=["health"])
 def health() -> JSONResponse:
+    """Up as soon as the database answers. `warming` stays true while the warm-up started by `relay-api serve` is
+    still asking the engine the story day's first proposals: a Propose meanwhile waits for that answer."""
     with SessionLocal() as db:
-        db.execute(text("select 1"))
-    return JSONResponse({"status": "ok"})
+        warming = warming_up(db)
+    return JSONResponse({"status": "ok", "warming": warming})

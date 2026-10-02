@@ -5,7 +5,8 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router/dom";
 import { ApiError } from "./api/client";
 import { router } from "./app/router";
-import "./i18n";
+// No "./i18n" here: only the driver's and the loader's screens import it, so their words in three languages, with
+// i18next, build into a chunk those two roles share, and the sign-in page, the desk and the store never download it.
 import "./styles/app.css";
 
 const queryClient = new QueryClient({

@@ -16,7 +16,7 @@ import {
   Warehouse,
   X,
 } from "lucide-react";
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useId, useState } from "react";
 import { Button, IconButton } from "@/design/Button";
 import { StatusChip } from "@/design/StatusChip";
 import { cx } from "@/lib/cx";
@@ -307,11 +307,15 @@ function RunRowView({
   const kind = dir.vehicle(row.vehicle_id, row.vehicle_kind);
   const KindIcon = row.temp === "chilled" ? Snowflake : kind.endsWith("van") ? Van : Truck;
   const caption = rowCaption(vehicle);
+  const selectId = useId();
 
-  // The row is a group with one select button. The button's cover reaches across the row, so a click anywhere picks
-  // the run, while the stop track stays a list a screen reader can walk. The menu sits above the cover.
+  // The row is a group named by its select button. The button's cover reaches across the row, so a click anywhere
+  // picks the run, while the stop track stays a list a screen reader can walk. The menu sits above the cover.
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a run and its select button, not a set of form fields
     <div
+      role="group"
+      aria-labelledby={selectId}
       className={cx(
         "relative grid grid-cols-[minmax(0,1fr)_32px] gap-x-4 border-b border-asphalt-200 px-4 lg:grid-cols-[200px_minmax(0,1fr)_128px_32px]",
         compact ? "py-2" : "py-3",
@@ -322,6 +326,7 @@ function RunRowView({
       <div className="grid min-w-0 grid-cols-subgrid gap-x-4 gap-y-2 max-lg:col-span-1 max-lg:grid-cols-1 lg:col-span-3">
         <span className="flex min-w-0 flex-col gap-0.5">
           <button
+            id={selectId}
             type="button"
             data-run-row
             aria-pressed={selected}

@@ -118,9 +118,9 @@ export function minuteOrNext(time: string): RegExp {
   return new RegExp(`(${h}:${m}\\s${half}|${next})`);
 }
 
-/** How long the driver's pill may take to read All synced. A record saved while the outbox is already sending waits
- *  for the next send, and that can be the minute check-in (apps/web/src/offline/outbox.ts, flush), so the wait allows
- *  a little over a minute. */
+/** How long the driver's pill may take to read All synced. A record saved while the outbox is already sending goes in
+ *  that same send (apps/web/src/offline/outbox.ts, flush), so the pill usually turns within seconds. A send that fails
+ *  waits for the next trigger, at the latest the minute check-in, so the wait allows a little over a minute. */
 export const SYNC_TIMEOUT_MS = 75_000;
 
 /** The driver's pill reads All synced: Relay has every record and photo the phone saved. */

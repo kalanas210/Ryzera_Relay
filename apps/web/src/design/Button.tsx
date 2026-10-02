@@ -37,6 +37,35 @@ const VARIANT: Record<Variant, string> = {
   danger: "bg-problem text-white hover:opacity-90",
 };
 
+const BASE =
+  "inline-flex items-center justify-center gap-2 rounded-button px-4 text-center transition-colors select-none";
+
+function sizeOf(density: Density, variant: Variant, compact: boolean | undefined) {
+  const size = HEIGHT[density];
+  return {
+    height: compact ? size.compact : variant === "primary" ? size.primary : size.other,
+    text: compact && density === "field" ? "t-body-strong" : size.text,
+    icon: size.icon,
+  };
+}
+
+/** A button's look for something that is not a button, such as a link that opens another screen, so the two never
+ *  drift apart. The icon size to draw beside its label comes with it. */
+export function buttonLook({
+  variant = "secondary",
+  density = "store",
+  full,
+  compact,
+}: {
+  variant?: Variant;
+  density?: Density;
+  full?: boolean;
+  compact?: boolean;
+}): { className: string; icon: number } {
+  const size = sizeOf(density, variant, compact);
+  return { className: cx(BASE, size.height, size.text, full && "w-full", VARIANT[variant]), icon: size.icon };
+}
+
 export function Button({
   variant = "secondary",
   density = "store",
@@ -51,19 +80,17 @@ export function Button({
   type = "button",
   ...rest
 }: Props) {
-  const size = HEIGHT[density];
-  const height = compact ? size.compact : variant === "primary" ? size.primary : size.other;
-  const text = compact && density === "field" ? "t-body-strong" : size.text;
+  const size = sizeOf(density, variant, compact);
   const showReason = disabled && reason && density === "field";
   return (
     <button
       type={type}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center justify-center gap-2 rounded-button px-4 text-center transition-colors select-none",
+        BASE,
         "disabled:cursor-not-allowed",
-        height,
-        text,
+        size.height,
+        size.text,
         full && "w-full",
         showReason
           ? "bg-asphalt-100 text-asphalt-700"

@@ -55,9 +55,11 @@ There is no message broker, no cache server and no socket hub: one database is t
 React 19, TypeScript, Vite 8, TanStack Query 5, React Router, Tailwind CSS 4, i18next and Dexie over IndexedDB.
 
 - **Routes and chunks.** `/dispatcher`, `/loader`, `/driver` and `/store` each load their screens as a lazy chunk
-  (`src/app/router.tsx`). In the current build the shared shell is about 163 KB gzipped and the role chunks are
-  51 KB (dispatcher), 54 KB (driver), 16 KB (loader) and 15 KB (store), so a phone draws the driver's run after the
-  shell and the driver chunk only.
+  (`src/app/router.tsx`). In the current build the shell every page loads is about 134 KB gzipped: the entry and the
+  styles. The role chunks are 63 KB (dispatcher), 56 KB (driver), 18 KB (loader) and 18 KB (store), plus a few small
+  chunks the roles share. i18next with the field roles' words in three languages, 45 KB, is one of those, and only
+  the driver's and the loader's screens import it (`src/main.tsx`), so the sign-in page, the desk and the store never
+  download it. A phone draws the driver's run after the shell, the driver chunk and the chunks it shares only.
 - **Installable and offline.** `vite-plugin-pwa` generates a Workbox service worker that precaches the whole build
   (every role's chunk, the icons and the Sinhala, Tamil and Latin fonts), so the app opens with no signal. Only the
   driver's sign-in is kept on the device (`src/app/session.tsx`), because only the driver works without a connection.
@@ -74,7 +76,7 @@ FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, psycopg 3, Argon2 and PyJWT on Pytho
 
 | Path | Holds |
 |---|---|
-| `routers/` | 57 HTTP routes under `/api` in ten routers (auth, demo, store, dispatch, plan, live, runs, dock, driver, photos), plus `/api/health`; OpenAPI at `/api/docs` |
+| `routers/` | 63 HTTP routes under `/api` in ten routers (auth, demo, store, dispatch, plan, live, runs, dock, driver, photos), plus `/api/health`, which also says whether the engine cache is still warming; OpenAPI at `/api/docs` |
 | `services/` | The domain, one module per concern: `ordering`, `planning`, `board`, `drawer`, `changes`, `dock`, `driver`, `field`, `backup`, `estimates`, `runs`, `live`, `tracker`, `notify`, `outlook`, `world`, `story`, `simulator`, `watch`, `engine_cache`, `network`, `words` |
 | `models/`, `schemas/` | 43 tables (see [data-model.md](data-model.md)) and the Pydantic response models |
 | `workspaces.py`, `db.py` | Which copy of the day a request works in, and the ORM hook that scopes every query to it |
@@ -82,16 +84,17 @@ FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, psycopg 3, Argon2 and PyJWT on Pytho
 | `clock.py` | The scenario clock and the sixteen story moments the demo bar jumps to |
 | `seed/` | Loads the network and the people once, then the story day into each copy |
 
-A request to a role's route passes the same steps every time: the global `require_client_header` dependency,
-`get_scope` (finds the workspace from the `relay_ws` cookie, falls back to the shared MAIN copy, scopes the session to
-it), then `require(Role.X)` (reads that role's cookie), then a service call and one commit. Routers translate HTTP to
+A request to a role's route passes the same steps every time: a 2 MB cap on the request body (`LimitBody` in
+`main.py`), the global `require_client_header` dependency, `get_scope` (finds the workspace from the `relay_ws`
+cookie, falls back to the shared MAIN copy, notes who is signed in and using the copy, scopes the session to it),
+then `require(Role.X)` (reads that role's cookie), then a service call and one commit. Routers translate HTTP to
 service calls and look up the rows a route names. The exceptions run their own queries: the order queue in
 `routers/dispatch.py`, the store's home view, notices and notice acknowledgement in `routers/store.py`, and the demo
 account list in `routers/auth.py`.
 
 `relay-api setup` applies the seven Alembic migrations and seeds whatever is missing; Compose runs it as the
 one-shot `migrate` service before `api` starts. `relay-api serve` runs one Uvicorn worker, whose lifespan starts the
-background tick (`main.py`).
+background tick (`main.py`), and beside it a separate process that warms the engine cache (`cli.py`, decision 8).
 
 ### packages/engine: the planning engine as a pure library
 
@@ -124,7 +127,8 @@ stored in the `photo` table as bytes, so one `pg_dump` backs up the whole demo. 
 
 The `web` image is Caddy 2 with the built app in `/srv` (`apps/web/Dockerfile`, `apps/web/Caddyfile`). It serves the
 app with a fallback to `index.html`, lets browsers cache the hashed `/assets` for a year and makes them check the
-service worker files on every load, proxies `/api` to `api:8000`, compresses with zstd or gzip, and sets
+service worker files on every load, proxies `/api` to `api:8000` and turns away an `/api` request body over 2 MB
+with 413 before the API reads it, compresses with zstd or gzip, and sets
 `X-Content-Type-Options`, `Referrer-Policy` and a `Permissions-Policy` that allows location and camera for the app
 itself only. Locally it answers on `:80`, published as port 8080. In production `SITE_ADDRESS` names the domain and
 Caddy obtains and renews the HTTPS certificate on its own, which the installable app, the camera and location need.
@@ -143,9 +147,11 @@ all through the same services a person's device uses, all idempotent, all applie
   minute and finish at the hub. A load a person has started is theirs to finish, and the judge characters' own
   trips are left to the judge.
 - **The story autopilot** (`services/story.py`): the steps Dilani, Nuwan, Rizwan and Kasun take in the story, from
-  Dilani's orders to Kasun finishing the trip at 7:17 AM. A step is played only when the demo bar jumps past it; a step
-  the judge already took, or one that no longer fits what the judge did, is left alone. When time simply runs, the
-  characters wait for the judge.
+  Dilani's orders to Kasun finishing the trip at 7:17 AM. A step is played when the demo bar jumps past it; a step
+  the judge already took, or one that no longer fits what the judge did, is left alone. When time simply runs, a
+  character someone is playing waits for them, and one nobody is playing (no one signed in as them has used the copy
+  for 5 minutes, `workspaces.py`) acts as their times come: Nuwan answers a dock flag five minutes after it is
+  raised, and Kasun accepts a load nobody accepts.
 - **Watch** (`services/watch.py`): what Relay notices by itself. A running trip's phone silent for 5 minutes puts a
   silence item on the dispatcher's feed; a question to a driver unanswered for 10 minutes goes to the dispatcher.
 
@@ -226,8 +232,9 @@ skipping ahead. Each workspace carries `clock_anchor_real`, `clock_anchor_sim` a
 the anchor plus the real time since, times the rate (`clock.py`). Everything Relay records about the day is stamped in
 scenario time, and the driver's phone stamps its records with the scenario time Relay last told it, run forward. The
 demo bar jumps to one of sixteen story moments or moves the clock 15 minutes or an hour ahead (the API can also pause
-and resume it); the clock never moves back, and Reset starts the copy again. The cost: every "now" in the code must
-come from the copy (`Scope.now`), never from the system clock.
+and resume it); the clock never moves back, and Reset starts the copy again. Only a private copy's clock moves: the
+API refuses any clock move or reset in MAIN, and the bar offers a copy of the judge's own instead. The cost: every "now" in
+the code must come from the copy (`Scope.now`), never from the system clock.
 
 ### 3. Judge copies by workspace scoping in the ORM
 
@@ -237,7 +244,9 @@ hook in `db.py` adds `workspace_id = :id` to every ORM select, update and delete
 `before_flush` hook stamps it on new rows. A forgotten filter cannot leak another copy:
 `test_a_copy_cannot_reach_another_copys_loads` asks for a load from a second copy and gets 404. A private copy is the
 story day seeded into a new workspace with a six-character code that a phone can join; Reset deletes the copy's rows
-and seeds it again under a new edition id, so a phone lets go of what it kept from the earlier start. The escape hatch
+and seeds it again under a new edition id, so a phone lets go of what it kept from the earlier start. MAIN, the shared
+copy every browser opens without a code, is held at Tuesday 2:05 PM, and `get_scope` resets it in the same way once
+someone has changed it and nobody has used it for an hour (`workspaces.py`). The escape hatch
 `execution_options(all_workspaces=True)` is used for one purpose only: to refuse a record or photo id that already
 exists in another copy. The cost is that raw SQL would bypass the hook, so services use the ORM throughout.
 
@@ -267,7 +276,8 @@ moving dot.
 
 Kasun's phone loses signal for 93 minutes in the story and keeps working. Every driver action is written to IndexedDB
 first, with a UUID made on the phone, the scenario time and the stop version the phone last saw. The sender posts
-records in saved order, then photos, one flush at a time. On the server the phone's UUID is the primary key of
+records in saved order, then photos, one send at a time, and a record saved while a send is running goes before that
+send ends (`src/offline/outbox.ts`). On the server the phone's UUID is the primary key of
 `field_event`, so a resend is answered `duplicate` and writes nothing; photos are idempotent by their own id; the
 store's order, receipt and later issue reports carry a `client_ref` for the same reason; dock writes set a count
 rather than add to it, and a second flag on a flagged line is refused. The base version detects an office change made
@@ -292,9 +302,16 @@ before now. Stores still to come are told a new time when their estimate moves b
 A proposal takes about 23 to 31 seconds (see Performance), and every new private copy asks the same first question. The
 engine is deterministic, so `services/engine_cache.py` stores each answer in the shared `engine_cache` table under a
 SHA-256 of everything the engine reads (the network, orders, vehicles, usual runs, conditions and protected stores)
-together with a hash of the engine's own source files. Change any input, or the engine, and the key changes; an
-insert that races another is dropped with `ON CONFLICT DO NOTHING`. The answer is written into the copy's own trips
-and stops, so each dispatcher edits their own plan. The cost is a table that grows by a few kilobytes per distinct
+together with a hash of the engine's own source files. Change any input, or the engine, and the key changes. One key
+is searched once at a time: the search runs on a connection of its own under a PostgreSQL advisory lock for that key,
+and stores its answer in the same transaction that lets the lock go, so a Propose that asks for a plan already being
+searched waits and reads the answer instead of searching beside it. The answer is written into the copy's own trips
+and stops, so each dispatcher edits their own plan. `relay-api serve` also warms the cache as it starts, in a
+separate process: it plays a scratch copy to the walkthrough's "plan" moment, proposes the Kandy hub and Peliyagoda
+plans there, and deletes the copy, about a minute on a new database. While it runs, `/api/health` answers
+`"warming": true`, read from a lock the warm-up holds, so the flag is right across processes and clears itself if the
+warm-up dies. A plan board still waiting on a proposal after two seconds asks it, and while the flag holds says the
+planner is still warming up (`plan/Replanning.tsx`). The cost is a table that grows by a few kilobytes per distinct
 input, with no eviction yet.
 
 ### 9. Per-role session cookies
@@ -349,33 +366,41 @@ or the API has to hold a stream open. The cost is that a change reaches another 
   characters. A driver record's payload is free JSON: `field_event` keeps it as sent, and the field service cuts the
   text it copies into the proof, the stop and the reports (receiver 64, reason 200, note 500, signature 20,000
   characters). A photo may be JPEG, WebP or PNG by its declared type and at most 1.5 MB; the API reads one byte past
-  the limit and refuses anything longer. Phones and the tablet shrink photos to 1280 px JPEG before sending.
+  the limit and refuses anything longer. Phones and the tablet shrink photos to 1280 px JPEG before sending. Caddy and
+  the API both refuse any request body over 2 MB with 413, before a route reads it.
 - **Secrets.** `.env` and Terraform state are ignored by git. On the server `up.sh` writes `/opt/relay/.env` once with
   a random database password and session key (`openssl rand`, file mode 600). Only Caddy publishes ports; the
   database and the API are reachable only inside the Compose network.
 - **Demo mode, by design.** With `RELAY_DEMO_MODE=true` (the default, and on the public demo) the accounts and their
-  shared password are listed on the sign-in page, and anyone who can reach the URL can move the clock, start a
-  private copy, or reset the copy they are in, including the shared MAIN copy. That is why the walkthrough sends
-  judges to a private copy. With demo mode off, every demo route that changes something answers 404 and the account
-  list is empty.
-- **Known gaps.** No rate limit or lockout on sign-in, no Content-Security-Policy or HSTS header, no request body limit
-  in Caddy, and the photo type is taken from the declared content type. All four are on the list below.
+  shared password are listed on the sign-in page, and anyone who can reach the URL can start a private copy, and move
+  the clock of the private copy they are in or reset it. The shared MAIN copy refuses both with 409: its clock stays at
+  Tuesday 2:05 PM, and what people change in it is undone an hour after the last of them leaves. That is why the
+  walkthrough sends judges to a private copy. With demo mode off, every demo route that changes something answers 404
+  and the account list is empty.
+- **Known gaps.** No rate limit or lockout on sign-in, no Content-Security-Policy or HSTS header, and the photo type is
+  taken from the declared content type. All three are on the list below.
 
 ## Testing
 
 | Suite | Tests | What it proves | How it runs |
 |---|---|---|---|
 | Engine, `packages/engine/tests` | 27 in 5 files | The trip-time standard reproduces the booklet's worked examples. The Planned and Expected clocks for Kasun's run. The story-day proposal for the Kandy hub: 18 trips carry 56 of 57 orders, one chilled order waits and rule two picks which. Every proposed trip keeps all eleven rules, and no workshop or standby vehicle is used. The estimate, its widening range, and a receipt counting as the delivery | `uv run pytest packages/engine/tests`, no database |
-| API, `apps/api/tests` | 53 in 8 files | Against a real PostgreSQL: each run creates a throwaway database, migrates and seeds it like a fresh install, and drives new private copies over HTTP the way the web app does. Kasun's morning at each demo moment as the autopilot and the world play it; resends answered as duplicates; signal lost, backup sent and the clash settled with one question; nothing reaching Relay inside the storm; the dock night from flag to handover; a copy unable to reach another copy's loads; changes after publishing; the capacity outlook and Peliyagoda's empty state; a language choice staying in its copy | `uv run pytest apps/api/tests` with `RELAY_TEST_ADMIN_URL` naming a PostgreSQL server |
-| Web, `apps/web/src/**/*.test.ts(x)` | 92 in 18 files | With Vitest, jsdom and fake-indexeddb: the outbox keeps order, sends records before photos, holds a record for its location, keeps Relay's reason for a refusal and never sends a record twice at once. The phone's own records over Relay's run; the sync pill's counts; the dock tablet's taps reaching the screen in the order they were made; the store's receipt keeping its `client_ref` offline; the live desk's words for a silent run; dates and times in three languages | `pnpm --filter @relay/web test` |
+| API, `apps/api/tests` | 127 in 14 files | Against a real PostgreSQL: each run creates a throwaway database, migrates and seeds it like a fresh install, and drives new private copies over HTTP the way the web app does. Kasun's morning at each demo moment as the autopilot and the world play it; a character nobody plays acting on time, and one a judge plays waiting; resends answered as duplicates; signal lost, backup sent and the clash settled with one question; nothing reaching Relay inside the storm; the dock night from flag to handover; the plan board's moves, undo, fleet changes and deferrals, and the next run checked for every waiting order together; reminders; a store's order changed before its cutoff and an issue reported after its receipt; the live runs; a copy unable to reach another copy's loads; MAIN held at the start and reset after an hour; changes after publishing; one search per engine cache key and the warm-up flag on `/api/health`; a body over 2 MB refused; the capacity outlook and Peliyagoda's empty state; a language choice staying in its copy | `uv run pytest apps/api/tests` with `RELAY_TEST_ADMIN_URL` naming a PostgreSQL server |
+| Web, `apps/web/src/**/*.test.ts(x)` | 187 in 34 files | With Vitest, jsdom and fake-indexeddb: the outbox keeps order, sends records before photos, holds a record for its location, keeps Relay's reason for a refusal, never sends a record twice at once, and sends a record saved during a send in that same send. The phone's own records over Relay's run; the sync pill's counts; the dock tablet's taps reaching the screen in the order they were made, its PIN sheets and its strings in three languages; the plan board's words, its wait for the warm-up, the deferrals drawer and the publish check; the queue's reminders; the live desk's words for a silent run and its decisions; the store's order form, notices, tracker link and receipt keeping its `client_ref` offline; the demo bar and the sign-in page; dates and times in three languages | `pnpm --filter @relay/web test` |
+| Browser, `e2e/tests` | 12 in 4 files | With Playwright in Chromium, each test in a private copy of its own: the README's judge walkthrough, steps 1 to 21 in order with the dispatcher at 1440 x 900 and the field roles in 375 x 812 tabs, and all of step 22 in another copy (the rule-breaking drop, VEH043 to the workshop, Defer anyway and the Peliyagoda plan); the driver's phone with no network, through a reload (with the service worker, so against a build) and the storm; two copies that never see each other, and a phone that joins one by its code; each role's sign-in landing at home with no console errors and nothing scrolling sideways at 375 px; a wrong PIN | `pnpm e2e` against the dev servers, or with `E2E_BASE_URL` against `docker compose up` ([e2e/README.md](../e2e/README.md)) |
 
-All 172 pass. The API suite is the slow one, about 8 minutes on a development laptop and 6 in CI, because most of
-its tests jump a new copy through the night.
+All 341 engine, API and web tests pass, and so do the browser tests: against a fresh `docker compose up`, as CI runs
+them, all 12 pass in under 3 minutes with the engine cache cold for step 22 and in about 2 minutes once it is warm.
+Against the dev servers the service worker reload is skipped, since only a build registers the worker. The API suite
+is the slow one, about 20 minutes on a busy development laptop, because most of its tests jump a new copy through the
+night.
 
-CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request, in three jobs: Ruff lint and
-format check plus `pytest` against a PostgreSQL 16 service; Biome lint, Vitest, and the TypeScript check with the
-production build; and `docker compose build` of every image. Not covered yet: there is no browser end-to-end test
-(`e2e/` holds only its `package.json`), and `mypy --strict` is configured in `pyproject.toml` but not run in CI.
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request, in four jobs: Ruff lint and
+format check, `mypy --strict` and `pytest` against a PostgreSQL 16 service; Biome lint, Vitest, and the TypeScript
+check with the production build; `docker compose build` of every image; and the browser tests. That last job starts
+the stack with `docker compose up --build --wait`, lints and type checks the suite, waits up to 3 minutes for the
+engine cache warm-up, runs `pnpm e2e` against http://localhost:8080 with one retry and an 8 minute limit, uploads the
+Playwright report and traces when it fails, and takes the stack down with its database.
 
 ## Performance
 
@@ -385,10 +410,13 @@ production build; and `docker compose build` of every image. Not covered yet: th
   waiting order by solving again without each of the 23 chilled orders in turn (about 9 seconds together), and 4 for
   the ambient orders. The slowest single step in both depots is the search that places leftover ambient orders on free
   trip slots: about 9 seconds at Kandy and 22 at Peliyagoda. Each solve is capped at 30 seconds, each explanation
-  solve at 10.
+  solve at 10. In the Docker images on that laptop every Peliyagoda solve proved its answer best well inside the cap,
+  the slowest in 9 to 13 seconds. A solve that did stop at its cap would keep the best plan found so far, and the
+  engine cache would keep that plan for those inputs, so a much slower machine could show a plan a trip off the
+  README's.
 - **The cache.** On a hit, computing the key takes about 10 ms and the lookup about 2 ms; a stored answer is 2 to
-  3 KB. Only the first copy to ask a question waits for the solver. Because the cache lives in the database, it
-  survives restarts and redeploys.
+  3 KB. Only the first copy to ask a question waits for the solver, and the warm-up asks the story day's first two
+  before any judge does. Because the cache lives in the database, it survives restarts and redeploys.
 - **The network.** Districts, outlets, vehicles and allowances are read from the database once per process and kept
   in memory (`services/network.py`); they never change while Relay runs.
 - **The clock.** One jump from Tuesday 2:05 PM to Wednesday 7:22 AM in a new copy, with the cache warm, plays every
@@ -396,8 +424,8 @@ production build; and `docker compose build` of every image. Not covered yet: th
   sign-ins and reads included. The 2 second tick does the same work in small steps and skips a copy that is busy.
 - **Requests.** Proposals run in FastAPI's thread pool, so other requests go on while one solves. Each open screen
   sends one GET per polling interval and reads its whole view model in it.
-- **The phone.** Photos are shrunk on the device before they are queued; the driver's first load is the shell plus
-  the driver chunk, about 217 KB gzipped together.
+- **The phone.** Photos are shrunk on the device before they are queued; the driver's first load is the shell, the
+  driver chunk and the chunks it shares, the words in three languages included, about 241 KB gzipped together.
 
 ## What we would do next
 
@@ -405,13 +433,11 @@ production build; and `docker compose build` of every image. Not covered yet: th
    Android so the outbox also sends while the app is closed.
 2. Generate the web app's types from the OpenAPI schema; today they are written by hand, and 11 JSON routes return
    plain dictionaries without a response model.
-3. Run the numbered judge walkthrough as a Playwright test in CI, and add `mypy --strict` to the Python job.
-4. Close the security gaps: rate limits and lockout on sign-in and PINs, a request body limit in Caddy, CSP and HSTS
-   headers, checking photo bytes instead of the declared type, and refusing to start with the default session key
-   outside demo mode.
-5. Precache each role's chunk only on the devices that use it, and load each role's strings with its own chunk.
-6. Move photos to object storage, and evict old engine cache rows.
-7. With outlet coordinates, compare a record's location reading with the store and show the distance; let a delay
+3. Close the security gaps: rate limits and lockout on sign-in and PINs, CSP and HSTS headers, checking photo bytes
+   instead of the declared type, and refusing to start with the default session key outside demo mode.
+4. Precache each role's chunk only on the devices that use it, and load each role's strings with its own chunk.
+5. Move photos to object storage, and evict old engine cache rows.
+6. With outlet coordinates, compare a record's location reading with the store and show the distance; let a delay
    report move the estimate.
-8. To run more than one server: a second API worker is already safe (the workspace lock serialises the tick), and the
+7. To run more than one server: a second API worker is already safe (the workspace lock serialises the tick), and the
    next steps are a managed PostgreSQL, the tick in its own process, and Caddy in front of several API containers.

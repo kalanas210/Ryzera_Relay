@@ -82,4 +82,4 @@ class Handover(WorkspaceScoped, Base):
     accepted_on: Mapped[str | None] = mapped_column(String(8))
     """'phone' or 'tablet' (the driver's own PIN on the dock tablet)."""
     difference: Mapped[str] = mapped_column(Text, default="")
-    """What the driver said does not match, if he reported a difference instead of accepting."""
+    """What the driver said does not match, when the driver reported a difference instead of accepting."""

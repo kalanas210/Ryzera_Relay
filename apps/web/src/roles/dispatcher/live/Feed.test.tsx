@@ -91,7 +91,7 @@ function item(over: Partial<FeedItem>): FeedItem {
 
 let client: QueryClient;
 
-function show(items: FeedItem[], rows: RunRow[] = [kasun], earlier: FeedItem[] = []) {
+function show(items: FeedItem[], rows: RunRow[] = [kasun], earlier: FeedItem[] = [], desk = true) {
   const feed: Feed = { depot: "Kandy", depot_label: "Kandy hub", run_date: "2026-04-08", now: items, earlier };
   return render(
     <QueryClientProvider client={client}>
@@ -99,7 +99,7 @@ function show(items: FeedItem[], rows: RunRow[] = [kasun], earlier: FeedItem[] =
         value={{
           depot: "Kandy",
           depotLabel: "Kandy hub",
-          desk: true,
+          desk,
           rows,
           items: [...items, ...earlier],
           dir: new Directory(undefined),
@@ -183,6 +183,29 @@ describe("decisions the feed asks for", () => {
     );
   });
 
+  it("reads the backup's arrival to 5 minutes wherever it says around, as the Move drawer does", () => {
+    const moved = item({
+      id: "moved-1",
+      kind: "stop_moved",
+      title: "Stop 4 moved to VEH060",
+      body: "Nuwan Perera moved Aranayake from VEH045 at 6:15 AM: Kasun is out of contact",
+      created_at: at("06:15"),
+      handled_at: at("06:15"),
+      ref: { trip_id: "trip-045", stop_id: "stop-4", backup_trip_id: "trip-060" },
+    });
+    // to the minute, the desk's model has VEH060 at Aranayake at 8:04
+    const loading = { ...backup, departed_at: null, markers: [{ ...backup.markers[0]!, estimate: at("08:04") }] };
+    const { unmount } = show([moved], [kasun, loading]);
+    expect(screen.getByText("VEH060 arrives around 8:05, after Aranayake's 7:30 AM close.")).toBeInTheDocument();
+    unmount();
+
+    show(
+      [item({ id: "receipt-1", kind: "receipt", title: "Hemmathagama confirmed receipt", created_at: at("06:42") })],
+      [receipted, { ...loading, departed_at: at("06:36") }],
+    );
+    expect(screen.getByText("VEH060 is on its way, around 8:05 AM.")).toBeInTheDocument();
+  });
+
   it("settles two copies from the office only with the question's reference", async () => {
     const post = vi.spyOn(api, "post").mockResolvedValue(undefined);
     const twoCopies = (ref?: Record<string, string>) =>
@@ -233,6 +256,47 @@ describe("decisions the feed asks for", () => {
   });
 });
 
+/** Rizwan's flag at 2:47 AM, decided by Nuwan at 2:52 AM. */
+const shortfall: ShortfallDetail = {
+  id: "s-1",
+  kind: "damaged",
+  qty: 2,
+  planned: 30,
+  case_type: "RD",
+  case_name: "Rice and dhal",
+  temp_label: "Dry",
+  vehicle_id: "VEH045",
+  trip_no: 1,
+  stop_seq: 3,
+  order_ref: "ORD0098595",
+  outlet_id: "OUT117",
+  place: "Hemmathagama",
+  flagged_at: at("02:47"),
+  flagged_by: "Mohamed Rizwan",
+  run_date: "2026-04-08",
+  departs: at("03:40"),
+  trip_stops: 4,
+  driver: "Kasun Bandara",
+  stop_cases: 102,
+  next_order_ref: "ORD0098747",
+  next_day: "2026-04-09",
+  window: "4:00 to 7:45 AM",
+  store_contact: "Dilani Jayawardena",
+  decision: "send_short",
+  decided_at: at("02:52"),
+  decided_by: "Nuwan Perera",
+  added_to_order_ref: "ORD0098747",
+  store_seen_at: null,
+  completed_at: null,
+  loaded_cases: 0,
+  planned_cases: 0,
+  accepted_at: null,
+  accepted_by: null,
+  hub_spare: null,
+  next_delivery_at: null,
+  photo_id: "photo-2",
+};
+
 describe("the record of what was decided", () => {
   it("names the store's manager, or the store when Relay has nobody there", () => {
     const silence = item({ title: "No contact from Kasun since 5:41 AM", ref: { trip_id: "trip-045" } });
@@ -275,46 +339,19 @@ describe("the record of what was decided", () => {
     expect(screen.queryByRole("button", { name: "Mark reviewed" })).toBeNull();
   });
 
+  it("says on the phone that a flag waits in Relay for the dispatcher on call, not that it was pushed", () => {
+    const flagged = item({
+      kind: "shortfall",
+      title: "6 rice and dhal cases missing on VEH045, stop 3",
+      created_at: at("02:47"),
+      shortfall: { ...shortfall, kind: "missing", qty: 6, decision: null, decided_at: null, decided_by: null },
+    });
+    show([flagged], [kasun], [], false);
+    expect(screen.getByText("Waiting in Relay since 2:47 AM for the dispatcher on call tonight.")).toBeInTheDocument();
+    expect(screen.queryByText(/Sent to your phone/)).toBeNull();
+  });
+
   it("shows the dock's photo of damaged cases in a decided shortfall", () => {
-    const shortfall: ShortfallDetail = {
-      id: "s-1",
-      kind: "damaged",
-      qty: 2,
-      planned: 30,
-      case_type: "RD",
-      case_name: "Rice and dhal",
-      temp_label: "Dry",
-      vehicle_id: "VEH045",
-      trip_no: 1,
-      stop_seq: 3,
-      order_ref: "ORD0098595",
-      outlet_id: "OUT117",
-      place: "Hemmathagama",
-      flagged_at: at("02:47"),
-      flagged_by: "Mohamed Rizwan",
-      run_date: "2026-04-08",
-      departs: at("03:40"),
-      trip_stops: 4,
-      driver: "Kasun Bandara",
-      stop_cases: 102,
-      next_order_ref: "ORD0098747",
-      next_day: "2026-04-09",
-      window: "4:00 to 7:45 AM",
-      store_contact: "Dilani Jayawardena",
-      decision: "send_short",
-      decided_at: at("02:52"),
-      decided_by: "Nuwan Perera",
-      added_to_order_ref: "ORD0098747",
-      store_seen_at: null,
-      completed_at: null,
-      loaded_cases: 0,
-      planned_cases: 0,
-      accepted_at: null,
-      accepted_by: null,
-      hub_spare: null,
-      next_delivery_at: null,
-      photo_id: "photo-2",
-    };
     show(
       [],
       [kasun],

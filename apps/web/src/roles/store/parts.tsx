@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { buttonLook } from "@/design/Button";
 import { Notice } from "@/design/Notice";
 import { Card, PhoneScreen } from "@/design/Phone";
 import { useOnline } from "@/design/SyncPill";
@@ -45,6 +46,27 @@ export function LinkRow({ to, children }: { to: string; children: ReactNode }) {
     >
       {children}
       <ChevronRight size={20} strokeWidth={1.75} aria-hidden className="shrink-0" />
+    </Link>
+  );
+}
+
+/** An action that opens another screen, with the store button's look: a link, so it reads and opens as one. */
+export function ButtonLink({
+  to,
+  icon: Icon,
+  variant = "secondary",
+  children,
+}: {
+  to: string;
+  icon?: LucideIcon;
+  variant?: "primary" | "secondary";
+  children: ReactNode;
+}) {
+  const look = buttonLook({ variant, density: "store", full: true });
+  return (
+    <Link to={to} className={look.className}>
+      {Icon ? <Icon size={look.icon} strokeWidth={1.75} aria-hidden /> : null}
+      {children}
     </Link>
   );
 }

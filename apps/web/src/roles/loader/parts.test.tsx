@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import type { LoadLine } from "./api";
@@ -99,6 +99,15 @@ describe("a load line", () => {
   it("names its stop with the kind after a dot that goes with the kind when it wraps", () => {
     const { container } = render(row(rice));
     expect(container.textContent).toContain("Stop 3·Dry");
+  });
+
+  it("sits in a group named by its case and stop, with its Flag button", () => {
+    render(row(rice));
+    // jsdom lays nothing out, so it reads the stop and the kind with no space between them; a browser puts one
+    const line = screen.getByRole("group", { name: /^Rice and dhal Stop 3\s?Dry$/ });
+    expect(
+      within(line).getByRole("button", { name: "Flag", description: /^Rice and dhal Stop 3\s?Dry$/ }),
+    ).toBeTruthy();
   });
 
   it("is a record once the load is marked complete: no check, no flag", () => {

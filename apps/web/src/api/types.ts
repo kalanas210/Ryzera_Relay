@@ -35,3 +35,7 @@ export type DemoState = {
   /** The story's scripted loss of signal by driver username, once the clock has reached it. */
   outages: Record<string, { from: string; to: string }>;
 };
+
+/** GET /api/health. `warming` is true while the API's warm-up is still asking the engine the story day's first
+ * proposals; a Propose started meanwhile waits for that answer, up to half a minute. */
+export type Health = { status: "ok"; warming: boolean };

@@ -7,7 +7,7 @@ Relay's Hackathon build was written largely by Claude (Anthropic, Opus 5.5) in C
 | Area | AI work |
 |---|---|
 | Code | The planning engine, the API and its migrations, the web app for all four roles, the story autopilot, the world simulator, the seed builder, Docker Compose, Caddy and the CI workflow |
-| Tests | The engine, API and web unit tests |
+| Tests | The engine, API and web unit tests, and the Playwright browser tests in `e2e/` |
 | Specs to code | Reader agents turned the driver, store, live desk and degradation specs in `docs/design/specs/` into requirement maps for the builders, and a critic agent checked the maps for gaps and contradictions |
 | Reviews | Milestone reviews by separate agents, one per concern, each finding re-checked by a skeptic agent. The dock review's 48 confirmed findings were fixed in `421ac4d` |
 | Infrastructure | The Terraform in `infra/`, the production overlay, the deploy and backup scripts. Claude ran `terraform apply` and the deploys from Kalana's PC, through the AWS profile Kalana set up |
@@ -23,7 +23,7 @@ Relay's Hackathon build was written largely by Claude (Anthropic, Opus 5.5) in C
 
 ## How the output was checked
 
-- **Automated.** `pytest` runs the engine tests (the booklet's own trip-time examples, the eleven rules, and the story day's proposal of 56 of 57 Kandy hub orders on 18 trips) and the API tests, which create, migrate and seed a throwaway PostgreSQL database and drive private copies of the day through the API. Vitest runs the web app's unit tests. GitHub Actions runs these, with Ruff, Biome, the type check, the production build and `docker compose build`, on every push to `main` (`.github/workflows/ci.yml`).
+- **Automated.** `pytest` runs the engine tests (the booklet's own trip-time examples, the eleven rules, and the story day's proposal of 56 of 57 Kandy hub orders on 18 trips) and the API tests, which create, migrate and seed a throwaway PostgreSQL database and drive private copies of the day through the API. Vitest runs the web app's unit tests. Playwright walks the README's judge walkthrough and the offline driver in Chromium, each test in a private copy of its own. GitHub Actions runs these, with Ruff, mypy, Biome, the TypeScript check, the production build and `docker compose build`, on every push to `main`, and runs the browser tests against `docker compose up` (`.github/workflows/ci.yml`).
 - **Agents.** Reviewers and checkers that had not written the code read it against the specs and used the running app in a browser, on private copies of the day, at phone and tablet sizes.
 - **People.** _To fill by the team._ Until this is filled in, no human review of the code is claimed.
 

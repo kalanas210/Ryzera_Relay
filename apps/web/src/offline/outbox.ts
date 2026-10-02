@@ -110,6 +110,10 @@ export class Outbox {
   private flushing: Promise<FlushResult> | null = null;
   private readonly listeners = new Set<() => void>();
   private moving = new Set<string>();
+  /** Saved or let go while a run is sending: that run takes them next, so they count as on their way. */
+  private joining = new Set<string>();
+  /** Something joined after the current pass read the queue, so the run reads it again before it ends. */
+  private again = false;
 
   constructor(name = "relay-outbox") {
     this.db = new OutboxDb(name);
@@ -124,9 +128,16 @@ export class Outbox {
     for (const listener of this.listeners) listener();
   }
 
-  /** Ids on their way to Relay right now. */
+  /** Ids on their way to Relay right now, with those the running send takes next. */
   inFlight(): ReadonlySet<string> {
-    return this.moving;
+    return this.joining.size ? new Set([...this.moving, ...this.joining]) : this.moving;
+  }
+
+  /** Called once the item is in the queue: a run already sending reads the queue again before it ends. */
+  private joined(id: string) {
+    if (!this.flushing) return;
+    this.again = true;
+    this.joining.add(id);
   }
 
   async add(record: FieldRecord, options: AddOptions = {}): Promise<void> {
@@ -139,6 +150,7 @@ export class Outbox {
       saved_offline: options.savedOffline,
       held_until: options.holdMs ? Date.now() + options.holdMs : undefined,
     });
+    this.joined(record.id);
     this.changed();
   }
 
@@ -151,16 +163,20 @@ export class Outbox {
       queued_at: Date.now(),
       saved_offline: options.savedOffline,
     });
+    this.joined(photo.id);
     this.changed();
   }
 
   /** A held record may go now, with whatever the wait found (its location, or nothing). */
   async release(id: string, patch: Partial<Pick<FieldRecord, "lat" | "lng" | "accuracy_m">> = {}): Promise<void> {
+    let released = false;
     await this.db.transaction("rw", this.db.queue, async () => {
       const item = await this.db.queue.where("id").equals(id).first();
       if (item?.type !== "record") return;
       await this.db.queue.update(item.seq as number, { body: { ...item.body, ...patch }, held_until: undefined });
+      released = true;
     });
+    if (released) this.joined(id);
     this.changed();
   }
 
@@ -178,16 +194,34 @@ export class Outbox {
     return this.db.sent.orderBy("sent_at").reverse().limit(limit).toArray();
   }
 
-  /** Send what is waiting. Concurrent calls share one run, so a record is never sent twice at once. */
+  /** Send what is waiting. Concurrent calls share one run, so a record is never sent twice at once. Anything saved or
+   *  let go while the run is sending goes in the same run, after what was ahead of it, unless the run found no
+   *  connection; then it waits with the rest for the next try. */
   flush(transport: Transport): Promise<FlushResult> {
-    if (!this.flushing) {
-      this.flushing = this.run(transport).finally(() => {
-        this.flushing = null;
-        this.moving = new Set();
-        this.changed();
-      });
-    }
+    this.flushing ??= this.drain(transport);
     return this.flushing;
+  }
+
+  private async drain(transport: Transport): Promise<FlushResult> {
+    const total: FlushResult = { sent: 0, conflicts: 0, offline: false, failed: 0, held: false };
+    try {
+      for (;;) {
+        this.again = false;
+        const pass = await this.run(transport);
+        total.sent += pass.sent;
+        total.conflicts += pass.conflicts;
+        total.failed += pass.failed;
+        total.offline = pass.offline;
+        total.held = pass.held;
+        if (!this.again || pass.offline) return total;
+      }
+    } finally {
+      // let go in the same step that decides there is nothing more, so a record saved just after starts a new run
+      this.flushing = null;
+      this.moving = new Set();
+      this.joining = new Set();
+      this.changed();
+    }
   }
 
   private async run(transport: Transport): Promise<FlushResult> {

@@ -40,7 +40,7 @@ class StopStatus(enum.StrEnum):
     DELIVERED = "delivered"
     FAILED = "failed"
     MOVED = "moved"
-    """Given to a backup vehicle while the driver was out of contact; settled when his records arrive."""
+    """Given to a backup vehicle while the driver was out of contact; settled when the driver's records arrive."""
     CANCELLED = "cancelled"
 
 

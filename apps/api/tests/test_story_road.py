@@ -136,8 +136,8 @@ def test_on_the_road(new_copy: Callable[[], Copy]) -> None:
     assert hm(kasun["last_contact_at"]) == "05:20"
     assert_the_world_keeps_up(panel, day.now)
 
-    # Dilani reads the same estimate Nuwan does, to 5 minutes where his desk shows the minute, and was told when
-    # it moved
+    # Dilani reads the same estimate Nuwan does, to 5 minutes where the dispatch desk shows the minute, and was told
+    # when it moved
     tracker = day.tracker()
     assert (tracker["status"], tracker["out_of_contact"]) == ("on_the_way", False)
     desk = datetime.fromisoformat(markers(kasun)["Hemmathagama"]["estimate"])

@@ -70,9 +70,9 @@ Decisions that shape the build:
 4. Deferrals: read what was unavoidable and what was Relay's choice, confirm the reason, run the publish check, publish.
 5. Dilani: read the deferral notice and acknowledge it.
 6. Rizwan, Loader, with a PIN: load VEH045 in reverse stop order and flag 6 rice and dhal cases missing for stop 3.
-7. Nuwan, on his phone: send short and add the cases to Thursday.
+7. Nuwan, on a phone: send short and add the cases to Thursday.
 8. Rizwan: finish the load and hand over. Kasun, Driver: accept the load.
-9. Kasun: deliver with proof. The signal drops; he keeps working. Nuwan sees the silence, moves stop 4 to the standby van. The signal returns and Kasun answers one question.
+9. Kasun: deliver with proof. The signal drops; Kasun keeps working. Nuwan sees the silence, moves stop 4 to the standby van. The signal returns and Kasun answers one question.
 10. Dilani: follow the arrival tracker, confirm receipt, see Kasun's proof. Nuwan: every stop on Live runs is settled.
 
 ## Team tasks

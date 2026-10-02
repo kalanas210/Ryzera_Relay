@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { api } from "@/api/client";
 import type { Board, Check } from "./api";
@@ -70,6 +70,13 @@ describe("the publish check", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
     expect(await screen.findByRole("dialog", { name: "Publish the Kandy hub plan?" })).toBeInTheDocument();
+  });
+
+  it("is a region named by its heading, and its Publish plan is described by what the check found", async () => {
+    show(check());
+    const region = await screen.findByRole("region", { name: "Publish check" });
+    const publish = await within(region).findByRole("button", { name: "Publish plan" });
+    expect(publish).toHaveAccessibleDescription(/^No planned arrival is after its window closes\./);
   });
 
   it("keeps Ctrl Enter off while a rule is broken, and says one rule in the singular", async () => {

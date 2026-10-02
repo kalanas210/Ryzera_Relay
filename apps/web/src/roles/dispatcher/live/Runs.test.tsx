@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunMarker, RunRow, RunsPanel } from "./api";
 import { Directory, feedLinks, vehicleRuns } from "./model";
@@ -130,6 +130,13 @@ describe("the runs panel", () => {
     expect(screen.getByRole("list", { name: "VEH045 stops" }).closest("button")).toBeNull();
     fireEvent.click(pick);
     expect(onSelect).toHaveBeenCalledWith("VEH045");
+  });
+
+  it("keeps each run in a group named by its select button, the stop list with it", () => {
+    show([kasun]);
+    const run = screen.getByRole("group", { name: "VEH045, Kasun Bandara" });
+    expect(within(run).getByRole("button", { name: "VEH045, Kasun Bandara" })).toBeInTheDocument();
+    expect(within(run).getByRole("list", { name: "VEH045 stops" })).toBeInTheDocument();
   });
 
   it("puts the toast at the foot of the panel, in the footnote's place", () => {

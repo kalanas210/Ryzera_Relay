@@ -234,6 +234,8 @@ export function DriverSync({ children }: { children: ReactNode }) {
   offlineRef.current = offline;
   // the story's storm, not the demo bar's switch: the phone still reads and feeds the demo's stand-in for its memory
   const storm = outageOn && !forced.on;
+  const stormRef = useRef(storm);
+  stormRef.current = storm;
 
   const query = useQuery<DriverRun, ApiError>({
     queryKey: RUN_KEY,
@@ -331,8 +333,42 @@ export function DriverSync({ children }: { children: ReactNode }) {
     [client, contact, failed, keep],
   );
 
+  // In the story's storm, what this phone saves is handed to the demo's stand-in for its memory, so a demo jump
+  // leaves those stops to it. Relay applies nothing from it until the signal returns. A hand-off that fails goes
+  // again on the sender's own triggers until Relay has it; Relay keeps each record once, by its id.
+  const handed = useRef(new Set<string>());
+  const handing = useRef(new Set<string>());
+  const hand = useCallback(async () => {
+    if (!stormRef.current || !usernameRef.current) return;
+    const queued = await outbox.waiting();
+    const ids = queued.map((q) => q.id);
+    if (ids.every((id) => handed.current.has(id) || handing.current.has(id))) return;
+    for (const id of ids) handing.current.add(id);
+    try {
+      const device_id = await phone.deviceId();
+      const records = queued.flatMap((q) => (q.type === "record" ? [q.body] : []));
+      const photos = queued.flatMap((q) => {
+        if (q.type !== "photo") return [];
+        const { blob: _blob, ...meta } = q.body;
+        return [meta];
+      });
+      await api.post("/api/driver/held", { device_id, records, photos }, { role });
+      for (const id of ids) handed.current.add(id);
+    } catch {
+      // not handed yet: it goes again when the browser is back online, the app comes to the front, a record is saved
+      // or the minute comes round
+    } finally {
+      for (const id of ids) handing.current.delete(id);
+    }
+  }, []);
+
   const kick = useCallback(async () => {
-    if (blockedRef.current || !usernameRef.current) return;
+    if (!usernameRef.current) return;
+    if (blockedRef.current) {
+      // nothing goes to Relay with no signal; in the story's storm the phone still hands what waits to the stand-in
+      await hand();
+      return;
+    }
     const waiting = await outbox.waiting();
     if (!waiting.length) return;
     const reconnecting = waiting.some((q) => q.saved_offline);
@@ -355,7 +391,7 @@ export function DriverSync({ children }: { children: ReactNode }) {
       const until = Math.max(...waiting.map((q) => q.held_until ?? 0));
       window.setTimeout(() => void kick(), Math.max(500, until - Date.now() + 100));
     }
-  }, [client, transport]);
+  }, [client, transport, hand]);
 
   // back in coverage (the outage ended, the switch went off): send, and hear the run again
   const wasBlocked = useRef(blocked);
@@ -391,7 +427,7 @@ export function DriverSync({ children }: { children: ReactNode }) {
       setSnapshot((cur) => (cur && !same(cur.run.outage) ? { ...cur, run: { ...cur.run, outage: next } } : cur));
     };
     const beat = async () => {
-      if (blockedRef.current) return;
+      if (blockedRef.current) return kick(); // no check-in with no signal, but the storm's hand-off still goes
       try {
         const device_id = await phone.deviceId();
         const waiting_records = (await outbox.waiting()).length;
@@ -475,27 +511,11 @@ export function DriverSync({ children }: { children: ReactNode }) {
     };
   }, [demoMode, username, copy, forced.on, sayAgain]);
 
-  // In the story's storm, what this phone saves is handed to the demo's stand-in for its memory, so a demo jump
-  // leaves those stops to it. Relay applies nothing from it until the signal returns.
-  const handed = useRef("");
+  // the storm begins, or the outbox changes in it (a save, or what a demo jump recorded for this phone): hand it over
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a change to the outbox is the trigger; hand reads it itself
   useEffect(() => {
-    if (!storm || !username) return;
-    const ids = box.queued.map((q) => q.id).join(",");
-    if (!ids || ids === handed.current) return;
-    void (async () => {
-      const device_id = await phone.deviceId();
-      const records = box.queued.flatMap((q) => (q.type === "record" ? [q.body] : []));
-      const photos = box.queued.flatMap((q) => {
-        if (q.type !== "photo") return [];
-        const { blob: _blob, ...meta } = q.body;
-        return [meta];
-      });
-      await api.post("/api/driver/held", { device_id, records, photos }, { role });
-      handed.current = ids;
-    })().catch(() => {
-      // tried again when the outbox next changes
-    });
-  }, [storm, username, box.queued]);
+    if (storm && username) void hand();
+  }, [storm, username, box.queued, hand]);
 
   const tick = now ? Math.floor(now.getTime() / 5_000) : 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a record's location wait runs out with the clock
