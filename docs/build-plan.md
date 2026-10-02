@@ -87,7 +87,7 @@ Decisions that shape the build:
 | Risk | What we do |
 |---|---|
 | Scope against time | Keep the cut line; deploy every day; freeze features on Saturday night |
-| The seed needs the shared datasets in the repo, and the terms say not to publish them | Keep the repository private and ask the organizers how judges should get access |
+| The seed needs part of the shared datasets in the repo | The submission asks for a public repository, so it commits only the reference tables and the story day the seed needs; the full datasets stay in `data/raw/`, which git ignores |
 | iPhone Safari has no Background Sync | The outbox also sends when the phone comes online or the app comes to the front; test on an iPhone |
 | Two judges in one deployment | Workspaces with a private copy and reset |
 | The AI disclosure | Claude Code writes most of the code; the disclosure says so, with what the team reviewed, tested and decided |
