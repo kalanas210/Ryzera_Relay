@@ -11,6 +11,7 @@ engine cache are shared by every copy.
 
 ```mermaid
 erDiagram
+    case_type ||--o{ hub_stock : "case_type"
     district ||--o{ outlet : "district"
     district ||--o{ road_condition : "district"
     district ||--o{ traffic_speed : "district"
@@ -54,6 +55,13 @@ erDiagram
         integer depot_to_district_min
         numeric inter_stop_km
         integer inter_stop_min
+    }
+    hub_stock {
+        varchar depot PK
+        varchar case_type PK
+        date run_date PK
+        integer spare
+        datetime next_delivery_at
     }
     order_stream {
         varchar dow_name PK
@@ -182,6 +190,18 @@ Base class used for declarative class definitions. The :class:`_orm.DeclarativeB
 | `depot_to_district_min` | integer |  |
 | `inter_stop_km` | numeric |  |
 | `inter_stop_min` | integer |  |
+
+### `hub_stock`
+
+What a hub's store holds of a case type for a run beyond the night's picks, and when the supplier's next drop arrives. The dispatcher reads it when the dock flags cases missing: a spare, or a delivery before the truck leaves, is worth holding the truck for.
+
+| Column | Type | Notes |
+|---|---|---|
+| `depot` | varchar | primary key |
+| `case_type` | varchar | primary key; → `case_type.code` |
+| `run_date` | date | primary key |
+| `spare` | integer |  |
+| `next_delivery_at` | datetime | optional |
 
 ### `order_stream`
 
@@ -608,6 +628,7 @@ erDiagram
         char loader_id FK
         datetime loading_started_at
         datetime claimed_at
+        datetime turned_back_at
     }
     vehicle_day {
         char id PK
@@ -729,6 +750,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `loader_id` | char | → `app_user.id`; optional; Who is loading it now, or loaded it. |
 | `loading_started_at` | datetime | optional |
 | `claimed_at` | datetime | optional; When a person first worked on this load. From then on the world simulator leaves it alone. |
+| `turned_back_at` | datetime | optional |
 
 ### `vehicle_day` (per copy)
 
@@ -859,6 +881,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 ```mermaid
 erDiagram
     app_user ||--o{ conflict : "driver_id"
+    app_user ||--o{ conflict : "resolved_by"
     app_user ||--o{ device_contact : "user_id"
     app_user ||--o{ field_event : "user_id"
     app_user ||--o{ photo : "uploaded_by"
@@ -868,6 +891,7 @@ erDiagram
     stop ||--o{ conflict : "backup_stop_id"
     stop ||--o{ conflict : "stop_id"
     stop ||--o{ field_event : "stop_id"
+    stop ||--o{ photo : "stop_id"
     stop ||--o{ problem_report : "stop_id"
     stop ||--o{ proof : "stop_id"
     trip ||--o{ field_event : "trip_id"
@@ -883,6 +907,10 @@ erDiagram
         datetime opened_at
         datetime answered_at
         text resolution
+        char event_id
+        datetime resolved_at
+        char resolved_by FK
+        datetime escalated_at
     }
     device_contact {
         char id PK
@@ -890,6 +918,9 @@ erDiagram
         datetime last_contact_at
         datetime last_record_at
         integer pending_records
+        varchar device_id
+        datetime gap_from
+        datetime gap_to
     }
     field_event {
         char id PK
@@ -906,6 +937,8 @@ erDiagram
         numeric accuracy_m
         jsonb payload
         varchar outcome
+        datetime applied_at
+        text reject_reason
     }
     photo {
         char id PK
@@ -916,6 +949,8 @@ erDiagram
         datetime taken_at
         datetime uploaded_at
         char uploaded_by FK
+        char stop_id FK
+        char event_id
     }
     problem_report {
         char id PK
@@ -926,6 +961,8 @@ erDiagram
         integer delay_min
         text note
         datetime reported_at
+        jsonb lines
+        boolean urgent
     }
     proof {
         char id PK
@@ -955,7 +992,11 @@ A driver's offline record that clashes with an office change, and the one questi
 | `answer` | varchar | optional |
 | `opened_at` | datetime |  |
 | `answered_at` | datetime | optional |
-| `resolution` | text |  |
+| `resolution` | text | Who settled it: the driver, or the dispatcher cancelling the backup's copy. |
+| `event_id` | char | optional; The record that clashed. |
+| `resolved_at` | datetime | optional |
+| `resolved_by` | char | → `app_user.id`; optional |
+| `escalated_at` | datetime | optional |
 
 ### `device_contact` (per copy)
 
@@ -968,6 +1009,9 @@ The last time each driver's phone reached Relay, and what it said was still wait
 | `last_contact_at` | datetime |  |
 | `last_record_at` | datetime | optional |
 | `pending_records` | integer |  |
+| `device_id` | varchar | optional |
+| `gap_from` | datetime | optional; The last silence on a running trip, for "Offline 5:41 to 7:14". |
+| `gap_to` | datetime | optional |
 
 ### `field_event` (per copy)
 
@@ -989,6 +1033,8 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `accuracy_m` | numeric | optional |
 | `payload` | jsonb |  |
 | `outcome` | varchar |  |
+| `applied_at` | datetime | optional; When it took effect: on arrival, or when the question it raised was settled. |
+| `reject_reason` | text |  |
 
 ### `photo` (per copy)
 
@@ -1004,6 +1050,8 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `taken_at` | datetime |  |
 | `uploaded_at` | datetime |  |
 | `uploaded_by` | char | → `app_user.id`; optional |
+| `stop_id` | char | → `stop.id`; optional |
+| `event_id` | char | optional; The delivery record it belongs to; the photo is sent after it. |
 
 ### `problem_report` (per copy)
 
@@ -1019,6 +1067,8 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `delay_min` | integer | optional |
 | `note` | text |  |
 | `reported_at` | datetime |  |
+| `lines` | jsonb | Case type and count, for goods refused or damaged in transit. |
+| `urgent` | boolean | The vehicle cannot move. |
 
 ### `proof` (per copy)
 
@@ -1126,6 +1176,7 @@ erDiagram
         datetime show_after
         datetime read_at
         datetime acknowledged_at
+        datetime delivered_at
     }
 ```
 
@@ -1163,3 +1214,4 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `show_after` | datetime | When it may ring. A notice to a store between 10:00 PM and 5:00 AM arrives silently at once, readable in the app, and rings at 5:00 AM. |
 | `read_at` | datetime | optional |
 | `acknowledged_at` | datetime | optional |
+| `delivered_at` | datetime | optional; When a phone picked it up: a message to a silent driver waits for the next contact. |

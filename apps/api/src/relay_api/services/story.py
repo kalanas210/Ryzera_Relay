@@ -369,3 +369,11 @@ def moments(db: Session) -> list[Moment]:
             m = Moment(m.key, m.label, handover)
         out.append(m)
     return sorted(out, key=lambda m: m.at)
+
+
+def moment_time(key: str) -> Callable[[Session], datetime] | None:
+    """A moment's time as the day stands, for a jump to work out again after each step it plays: before the Kandy
+    plan is published the handover only has its default time, and the steps on the way publish it."""
+    if not any(m.key == key for m in MOMENTS):
+        return None
+    return lambda db: next(m.at for m in moments(db) if m.key == key)

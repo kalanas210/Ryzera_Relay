@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import Date, ForeignKey, Numeric, SmallInteger, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -168,6 +168,20 @@ class ServiceHistory(Base):
     temp: Mapped[str] = mapped_column(String(8), primary_key=True)
     last_delivered: Mapped[date | None] = mapped_column(Date)
     deferred_on: Mapped[date | None] = mapped_column(Date)
+
+
+class HubStock(Base):
+    """What a hub's store holds of a case type for a run beyond the night's picks, and when the supplier's next
+    drop arrives. The dispatcher reads it when the dock flags cases missing: a spare, or a delivery before the
+    truck leaves, is worth holding the truck for."""
+
+    __tablename__ = "hub_stock"
+
+    depot: Mapped[str] = mapped_column(String(16), primary_key=True)
+    case_type: Mapped[str] = mapped_column(ForeignKey("case_type.code"), primary_key=True)
+    run_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    spare: Mapped[int]
+    next_delivery_at: Mapped[datetime | None]
 
 
 class OutletDwell(Base):

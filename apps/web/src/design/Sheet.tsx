@@ -20,8 +20,23 @@ type Props = {
   closeLabel?: string;
 };
 
+/** Pointers held down on the page right now. A sheet that opens during a press (a press and hold, say) must not be
+ *  light dismissed by the release of that same press: the browser saw no dialog when the press began, so it reads
+ *  the release as a tap outside. */
+const pressed = new Set<number>();
+if (typeof window !== "undefined") {
+  const release = (event: PointerEvent) => pressed.delete(event.pointerId);
+  window.addEventListener("pointerdown", (event) => pressed.add(event.pointerId), true);
+  window.addEventListener("pointerup", release, true);
+  window.addEventListener("pointercancel", release, true);
+}
+
+// Esc still closes a sheet that is not armed yet; only a tap outside waits for a fresh press.
+const closedBy = (dismissible: boolean, armed: boolean) => (dismissible ? (armed ? "any" : "closerequest") : "none");
+
 /** Sheets, drawers and dialogs, all on the native <dialog>: the browser traps focus, handles Esc and
- *  puts it in the top layer. Tapping the scrim closes it (closedby="any", with a fallback for Safari). */
+ *  puts it in the top layer. Tapping the scrim closes it (closedby="any", with a fallback for Safari), once the
+ *  press that opened it has ended. */
 export function Sheet({
   open,
   onClose,
@@ -37,23 +52,43 @@ export function Sheet({
 }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  // False from an open during a press until the next press starts.
+  const armed = useRef(true);
+
+  // closedby is set here rather than as a prop, so React never puts "any" back in the middle of a press.
+  useEffect(() => {
+    ref.current?.setAttribute("closedby", closedBy(dismissible, armed.current));
+  }, [dismissible]);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) {
+      armed.current = pressed.size === 0;
+      dialog.setAttribute("closedby", closedBy(dismissible, armed.current));
       if (modal) dialog.showModal();
       else dialog.show();
     } else if (!open && dialog.open) {
       dialog.close();
     }
-  }, [open, modal]);
+  }, [open, modal, dismissible]);
+
+  useEffect(() => {
+    if (!open) return;
+    const arm = () => {
+      if (armed.current) return;
+      armed.current = true;
+      ref.current?.setAttribute("closedby", closedBy(dismissible, true));
+    };
+    window.addEventListener("pointerdown", arm, true);
+    return () => window.removeEventListener("pointerdown", arm, true);
+  }, [open, dismissible]);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog || !dismissible || "closedBy" in HTMLDialogElement.prototype) return;
     const onClick = (event: MouseEvent) => {
-      if (event.target !== dialog) return;
+      if (event.target !== dialog || !armed.current) return;
       const r = dialog.getBoundingClientRect();
       const inside =
         r.top <= event.clientY && event.clientY <= r.bottom && r.left <= event.clientX && event.clientX <= r.right;
@@ -78,8 +113,6 @@ export function Sheet({
       onCancel={(event) => {
         if (!dismissible) event.preventDefault();
       }}
-      // closedby is newer than React's DOM types
-      {...({ closedby: dismissible ? "any" : "none" } as Record<string, string>)}
       style={width ? { width, maxWidth: "100vw" } : undefined}
       className={cx(
         "flex-col bg-white p-0 text-asphalt-900 shadow-float open:flex backdrop:bg-scrim",

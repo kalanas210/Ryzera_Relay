@@ -28,14 +28,16 @@ type Options = {
 async function request<T>(method: string, path: string, { role, body, signal }: Options = {}): Promise<T> {
   const headers: Record<string, string> = { "X-Relay-Client": "web" };
   if (role) headers["X-Relay-Role"] = role;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  // a form (a photo) goes as it is, and the browser writes its own Content-Type with the boundary
+  const form = body instanceof FormData;
+  if (body !== undefined && !form) headers["Content-Type"] = "application/json";
   let response: Response;
   try {
     response = await fetch(path, {
       method,
       headers,
       credentials: "same-origin",
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : form ? body : JSON.stringify(body),
       signal,
     });
   } catch (error) {
@@ -65,5 +67,7 @@ export const api = {
     request<T>("POST", path, { ...options, body: body ?? {} }),
   patch: <T>(path: string, body?: unknown, options?: Omit<Options, "body">) =>
     request<T>("PATCH", path, { ...options, body: body ?? {} }),
+  put: <T>(path: string, body?: unknown, options?: Omit<Options, "body">) =>
+    request<T>("PUT", path, { ...options, body: body ?? {} }),
   del: <T>(path: string, options?: Omit<Options, "body">) => request<T>("DELETE", path, options),
 };

@@ -33,6 +33,9 @@ class Account(Schema):
     uses_pin: bool
     hint: str
     """The demo credential, shown on the sign-in page because the README publishes it anyway."""
+    pin: str | None = None
+    """The seeded PIN, if the account has one: a loader's sign-in, or the driver's own PIN that accepts a load on
+    the dock tablet."""
 
 
 class MomentOut(Schema):

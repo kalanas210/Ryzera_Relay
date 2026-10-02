@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { useMe } from "@/app/session";
+import { useAccounts, useDemoState, useMe } from "@/app/session";
 import { useSimNow } from "@/demo/clock";
 import { Button } from "@/design/Button";
 import { PinPad } from "@/design/PinPad";
@@ -22,11 +22,14 @@ import { StopMarker } from "@/design/StopMarker";
 import { useLoaderText, weekdayIn } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
-import { kg, m3 } from "@/lib/time";
 import { type LoadLine, type StopGroup, type TripLoad, useAcceptHere, useComplete, useTripLoad } from "./api";
-import { DockHeader } from "./LoaderShell";
+import { DockHeader, PersonButton, pinError } from "./LoaderShell";
 
 const PHONE_SILENT_MS = 60_000;
+
+// The unit is written once, after the planned figure: "Weight 2,470.8 of 2,530.8 kg planned".
+const weight = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const volume = new Intl.NumberFormat("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
 /** LDR-04 Handover: one record of what is short and why, and planned against loaded, confirmed by the loader and
  *  accepted by the driver before the truck leaves. */
@@ -35,12 +38,15 @@ export function HandoverPage() {
   const trip = useTripLoad(tripId);
   const { t } = useLoaderText();
   const load = trip.data;
+  // Once the driver has accepted there is nothing left to load, so Back goes to tonight's loads.
+  const accepted = Boolean(load?.handover.accepted_at);
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col">
       <div className="sticky top-0 z-20">
         <DockHeader
           title={load ? t("load.title", { vehicle: load.vehicle_id, n: load.trip_no }) : ""}
-          back={`/loader/trips/${tripId}`}
+          back={accepted ? "/loader" : `/loader/trips/${tripId}`}
+          backLabel={accepted ? t("bar.back") : t("bar.backToList")}
         />
       </div>
       {load ? <Handover load={load} /> : null}
@@ -129,11 +135,15 @@ function Handover({ load }: { load: TripLoad }) {
             <h2 className="t-h2">{t("handover.plannedLoaded")}</h2>
             <p className="t-caption text-asphalt-500">{t("handover.inStopOrder", { driver: first })}</p>
           </div>
-          <div className="overflow-hidden rounded-card border border-asphalt-200 bg-white">
-            <div className="grid h-10 grid-cols-[minmax(0,1fr)_44px_auto] items-center gap-2 px-3 t-caption text-asphalt-500">
+          {/* One grid for the whole table, each row a subgrid, so every row shares the columns. Stop is as wide
+              as its longest place and never wider than the room left, Planned is 45, and Loaded takes the rest: a
+              40 wide number, then the check or the Short chip, which drops under the number before a place name
+              would have to give way. */}
+          <div className="grid grid-cols-[minmax(0,max-content)_45px_minmax(min-content,1fr)] overflow-hidden rounded-card border border-asphalt-200 bg-white">
+            <div className="col-span-full grid h-10 grid-cols-subgrid items-center px-3 t-caption text-asphalt-500">
               <span>{t("handover.stop")}</span>
               <span className="text-right">{t("handover.planned")}</span>
-              <span className="text-right">{t("handover.loadedCol")}</span>
+              <span>{t("handover.loadedCol")}</span>
             </div>
             {h.stops.map((s) => {
               const short = s.planned - s.loaded;
@@ -141,39 +151,43 @@ function Handover({ load }: { load: TripLoad }) {
                 <div
                   key={s.seq}
                   className={cx(
-                    "grid min-h-16 grid-cols-[minmax(0,1fr)_44px_auto] items-center gap-2 border-t border-asphalt-200 px-3",
+                    "col-span-full grid min-h-16 grid-cols-subgrid items-center border-t border-asphalt-200 px-3 py-2",
                     short > 0 && "bg-attention-soft",
                   )}
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <StopMarker n={s.seq} state={short > 0 ? "short" : done || allLinesDone ? "done" : "pending"} />
-                    <span className="latin min-w-0 t-body-strong">{s.place}</span>
+                    <span className="latin min-w-0 t-body-strong [overflow-wrap:anywhere]">{s.place}</span>
                   </span>
                   <span className="num text-right t-body">{s.planned}</span>
-                  <span className="flex w-[88px] flex-wrap items-center justify-end gap-x-2 gap-y-1 py-2">
-                    <span className="num t-body">{s.loaded}</span>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="num w-10 shrink-0 text-right t-body">{s.loaded}</span>
                     {short > 0 ? (
-                      <StatusChip icon={PackageX} tone="attention" className="bg-white">
+                      <StatusChip icon={PackageX} tone="attention" className="bg-white whitespace-nowrap">
                         {t("chips.short", { count: short })}
                       </StatusChip>
                     ) : s.loaded === s.planned ? (
-                      <Check size={20} strokeWidth={1.75} aria-hidden className="text-done" />
+                      <Check size={20} strokeWidth={1.75} aria-hidden className="shrink-0 text-done" />
                     ) : null}
                   </span>
                 </div>
               );
             })}
-            <div className="flex flex-col gap-1 border-t border-asphalt-200 bg-asphalt-50 px-3 py-3">
-              <div className="grid grid-cols-[minmax(0,1fr)_44px_auto] items-center gap-2">
-                <span className="t-h3">{t("handover.total")}</span>
-                <span className="num text-right t-h3">{h.planned_cases}</span>
-                <span className="num min-w-[88px] text-right t-h3">{h.loaded_cases}</span>
-              </div>
-              <span className="num t-caption text-asphalt-700">
-                {t("handover.weight", { loaded: kg(h.loaded_kg), planned: kg(h.planned_kg) })}
+            <div className="col-span-full grid grid-cols-subgrid items-center gap-y-1 border-t border-asphalt-200 bg-asphalt-50 px-3 py-3">
+              <span className="t-h3">{t("handover.total")}</span>
+              <span className="num text-right t-h3">{h.planned_cases}</span>
+              <span className="num w-10 text-right t-h3">{h.loaded_cases}</span>
+              <span className="num col-span-full t-caption text-asphalt-700">
+                {t("handover.weight", {
+                  loaded: weight.format(h.loaded_kg),
+                  planned: weight.format(h.planned_kg),
+                })}
               </span>
-              <span className="num t-caption text-asphalt-700">
-                {t("handover.volume", { loaded: m3(h.loaded_m3), planned: m3(h.planned_m3) })}
+              <span className="num col-span-full t-caption text-asphalt-700">
+                {t("handover.volume", {
+                  loaded: volume.format(h.loaded_m3),
+                  planned: volume.format(h.planned_m3),
+                })}
               </span>
             </div>
           </div>
@@ -232,7 +246,7 @@ function Handover({ load }: { load: TripLoad }) {
             {t("handover.acceptHere", { driver: first })}
           </Button>
         ) : (
-          <Button density="field" full onClick={() => navigate("/loader")}>
+          <Button variant={accepted ? "primary" : "secondary"} density="field" full onClick={() => navigate("/loader")}>
             {t("handover.backToLoads")}
           </Button>
         )}
@@ -243,7 +257,6 @@ function Handover({ load }: { load: TripLoad }) {
         onClose={() => setPinOpen(false)}
         load={load}
         loader={me.data?.display_name ?? ""}
-        weekday={weekdayIn(lang, load.planned_depart)}
       />
     </>
   );
@@ -380,6 +393,8 @@ function Banner({
   );
 }
 
+/** The driver accepts on the dock tablet with their own PIN: the PIN sheet from LDR-01, with the driver as the only
+ *  person. In a walkthrough the demo account's PIN is shown, as on the sign-in screen. */
 function DriverPinSheet({
   open,
   onClose,
@@ -390,52 +405,71 @@ function DriverPinSheet({
   onClose: () => void;
   load: TripLoad;
   loader: string;
-  weekday: string;
 }) {
   const { t } = useLoaderText();
   const accept = useAcceptHere(load.trip_id);
+  const accounts = useAccounts();
+  const demo = useDemoState();
   const [pin, setPin] = useState("");
-  const [error, setError] = useState(false);
-  const first = calledName(load.driver);
+  const [error, setError] = useState<{ text: string; wrongPin: boolean } | null>(null);
+  const driver = load.driver ?? "";
+  const first = calledName(driver);
+  const initials = driver
+    .split(/\s+/)
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const account = accounts.data?.find((a) => a.role === "driver" && a.display_name === driver);
+  const demoPin = demo.data?.demo_mode ? account?.hint.match(/PIN (\d+)/)?.[1] : undefined;
   return (
     <Sheet
       open={open}
       onClose={() => {
         setPin("");
-        setError(false);
+        setError(null);
         onClose();
       }}
       title={t("handover.pinTitle", { name: first })}
       meta={t("handover.pinNote", { loader })}
       closeLabel={t("who.close")}
     >
-      <div className="flex flex-col items-center gap-3 pb-2">
-        <PinPad
-          value={pin}
-          error={error}
-          disabled={accept.isPending}
-          onChange={(next) => {
-            setError(false);
-            setPin(next);
-            if (next.length === 4) {
-              accept.mutate(next, {
-                onSuccess: () => {
-                  setPin("");
-                  onClose();
-                },
-                onError: () => {
-                  setPin("");
-                  setError(true);
-                },
-              });
-            }
-          }}
-        />
-        {error ? (
-          <p role="alert" className="t-body-strong text-problem">
-            {t("who.wrongPin")}
-          </p>
-        ) : null}
+      <div className="flex flex-col gap-5 pb-2">
+        <div className="grid grid-cols-3 gap-2">
+          <PersonButton person={{ username: account?.username ?? driver, display_name: driver, initials }} selected />
+        </div>
+        <div className="flex flex-col items-center gap-3">
+          <PinPad
+            value={pin}
+            error={Boolean(error?.wrongPin)}
+            disabled={accept.isPending}
+            deleteLabel={t("who.deleteDigit")}
+            progressLabel={(entered, total) => t("who.pinProgress", { entered, total })}
+            onChange={(next) => {
+              setError(null);
+              setPin(next);
+              if (next.length === 4) {
+                accept.mutate(next, {
+                  onSuccess: () => {
+                    setPin("");
+                    onClose();
+                  },
+                  onError: (failure) => {
+                    setPin("");
+                    setError(pinError(t, failure, (message) => t("handover.notAccepted", { message })));
+                  },
+                });
+              }
+            }}
+          />
+          {error ? (
+            <p role="alert" className="t-body-strong text-center text-problem">
+              {error.text}
+            </p>
+          ) : demoPin ? (
+            <p className="t-caption text-center text-asphalt-500">{t("handover.demoPin", { pin: demoPin })}</p>
+          ) : null}
+        </div>
       </div>
     </Sheet>
   );

@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from relay_api.config import get_settings
 from relay_api.db import get_db
-from relay_api.models import AppUser, Outlet, Role
+from relay_api.models import AppUser, Outlet, Role, Workspace
 from relay_api.schemas.common import Account, Me
 from relay_api.security import CurrentUser, acting_role, clear_session, issue_session, verify_secret
 from relay_api.seed.reference import read
+from relay_api.workspaces import ScopeDep
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -33,23 +34,34 @@ def _find(db: Session, username: str) -> AppUser | None:
     return db.scalar(select(AppUser).where(AppUser.username == username.strip().lower()))
 
 
+LOCALES = "locales"
+"""Key in Workspace.state: each person's language in this copy of the day, by username."""
+
+
+def _me(workspace: Workspace, user: AppUser) -> Me:
+    """The person as this copy of the day knows them. A language choice belongs to the copy it was made in, so one
+    judge's choice never reaches another judge's copy, and a reset brings back the seeded language."""
+    locale = workspace.state.get(LOCALES, {}).get(user.username, user.locale)
+    return Me.model_validate(user).model_copy(update={"locale": locale})
+
+
 @router.post("/login", response_model=Me)
-def login(body: PasswordLogin, response: Response, db: Db) -> AppUser:
-    user = _find(db, body.username)
+def login(body: PasswordLogin, response: Response, scope: ScopeDep) -> Me:
+    user = _find(scope.db, body.username)
     if user is None or not verify_secret(user.password_hash, body.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "That username and password did not match.")
     issue_session(response, user)
-    return user
+    return _me(scope.workspace, user)
 
 
 @router.post("/pin", response_model=Me)
-def pin_login(body: PinLogin, response: Response, db: Db) -> AppUser:
+def pin_login(body: PinLogin, response: Response, scope: ScopeDep) -> Me:
     """The shared dock tablet: pick your name, enter your 4-digit PIN."""
-    user = _find(db, body.username)
+    user = _find(scope.db, body.username)
     if user is None or user.role not in (Role.LOADER, Role.DRIVER) or not verify_secret(user.pin_hash, body.pin):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "That PIN did not match. Try again.")
     issue_session(response, user)
-    return user
+    return _me(scope.workspace, user)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -58,8 +70,8 @@ def logout(request: Request, response: Response) -> None:
 
 
 @router.get("/me", response_model=Me)
-def me(user: CurrentUser) -> AppUser:
-    return user
+def me(user: CurrentUser, scope: ScopeDep) -> Me:
+    return _me(scope.workspace, user)
 
 
 class LocaleIn(BaseModel):
@@ -67,11 +79,19 @@ class LocaleIn(BaseModel):
 
 
 @router.patch("/me", response_model=Me)
-def set_locale(body: LocaleIn, user: CurrentUser, db: Db) -> AppUser:
-    """Each person's language comes back when they sign in, on any device."""
-    user.locale = body.locale
-    db.commit()
-    return user
+def set_locale(body: LocaleIn, user: CurrentUser, scope: ScopeDep) -> Me:
+    """Each person's language comes back when they sign in again, on any device, in this copy of the day."""
+    # the workspace row is locked as the simulator locks it, so neither writes over the other's state
+    workspace = scope.db.scalar(
+        select(Workspace)
+        .where(Workspace.id == scope.workspace.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    assert workspace is not None
+    workspace.state = {**workspace.state, LOCALES: {**workspace.state.get(LOCALES, {}), user.username: body.locale}}
+    scope.db.commit()
+    return _me(workspace, user)
 
 
 @router.get("/accounts", response_model=list[Account])
@@ -100,7 +120,12 @@ def accounts(db: Db) -> list[Account]:
             Role.STORE_MANAGER: f"{u.outlet_id} {outlets[u.outlet_id].name}" if u.outlet_id in outlets else "",
         }[u.role]
         uses_pin = u.role is Role.LOADER
-        hint = f"PIN {pins.get(u.username, '')}" if uses_pin else f"Password {settings.seed_password}"
+        pin = pins.get(u.username)
+        # a driver signs in with a password but accepts a load on the dock tablet with a PIN, so both are shown
+        if uses_pin:
+            hint = f"PIN {pin or ''}"
+        else:
+            hint = f"Password {settings.seed_password}" + (f" · PIN {pin}" if pin else "")
         out.append(
             Account(
                 username=u.username,
@@ -109,6 +134,7 @@ def accounts(db: Db) -> list[Account]:
                 detail=detail,
                 uses_pin=uses_pin,
                 hint=hint,
+                pin=pin,
             )
         )
     return out

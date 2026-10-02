@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type LoadLine, recount, type TripLoad } from "./api";
 
 function line(id: string, qty: number, loaded: number, status: LoadLine["status"]): LoadLine {
-  return { id, case_type: "rice_dhal", qty, loaded, status, shortfall: null };
+  return { id, case_type: "rice_dhal", qty, loaded, status, shortfall: null, changed_by_plan: false };
 }
 
 function load(lines: LoadLine[]): TripLoad {
@@ -25,6 +25,7 @@ function load(lines: LoadLine[]): TripLoad {
     short: 0,
     lines_total: lines.length,
     lines_done: 0,
+    lines_to_check: 0,
     flags_waiting: 0,
     groups: [
       {
@@ -58,6 +59,8 @@ function load(lines: LoadLine[]): TripLoad {
       loaded_m3: 0,
     },
     dispatcher: "Nuwan Perera",
+    dispatcher_phone: null,
+    plan_changed_by: null,
   };
 }
 

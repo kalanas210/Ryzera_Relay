@@ -9,7 +9,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from relay_api.clock import COLOMBO
-from relay_api.models import AppUser, Deferral, Order, Outlet, Plan, PlanStatus, Role, Vehicle, VehicleDay
+from relay_api.models import (
+    AppUser,
+    Deferral,
+    Handover,
+    Order,
+    Outlet,
+    Plan,
+    PlanStatus,
+    Role,
+    Trip,
+    TripStatus,
+    Vehicle,
+    VehicleDay,
+)
 from relay_api.schemas.plan import (
     BoardOut,
     DeferralOut,
@@ -39,6 +52,7 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
     drivers = {u.vehicle_id: u.display_name for u in db.scalars(select(AppUser).where(AppUser.role == Role.DRIVER))}
     days = {d.vehicle_id: d for d in db.scalars(select(VehicleDay).where(VehicleDay.run_date == plan.run_date))}
     vehicles = db.scalars(select(Vehicle).where(Vehicle.depot == plan.depot).order_by(Vehicle.vehicle_id)).all()
+    locked = _loads_locked(db, plan)
 
     lanes = []
     for v in vehicles:
@@ -60,7 +74,7 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
                 fuel_quota_l=v.weekly_fuel_quota_l,
                 fresh_minutes=total.fresh_minutes if total else 0,
                 daytime_minutes=total.daytime_minutes if total else 0,
-                trips=[_trip(plan, r, reports, ctx, outlets, by_ref, days) for r in mine],
+                trips=[_trip(plan, r, reports, ctx, outlets, by_ref, days, locked) for r in mine],
             )
         )
 
@@ -170,14 +184,33 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
         waiting=waiting,
         placed_by_type=placed_by_type,
         analyses=plan.summary.get("analyses", []),
-        can_undo=bool(plan.summary.get("undo")),
+        can_undo=plan.status is not PlanStatus.PUBLISHED and bool(plan.summary.get("undo")),
         broken=sum(len(r.broken) for r in reports),
         locked=now >= cutoff_for(plan.run_date),
         published_peers=peers,
     )
 
 
-def _trip(plan, report: TripReport, reports, ctx, outlets, by_ref, days) -> TripOut:  # type: ignore[no-untyped-def]
+def _loads_locked(db: Session, plan: Plan) -> set[tuple[str, int]]:
+    """Trips whose truck is packed or gone: the stop order is set by how the cases went on."""
+    if plan.status is not PlanStatus.PUBLISHED:
+        return set()
+    trips = db.scalars(select(Trip).where(Trip.plan_id == plan.id)).all()
+    complete = set(
+        db.scalars(
+            select(Handover.trip_id).where(
+                Handover.trip_id.in_([t.id for t in trips]), Handover.completed_at.is_not(None)
+            )
+        )
+    )
+    return {
+        (t.vehicle_id, t.trip_no)
+        for t in trips
+        if t.departed_at is not None or t.status is TripStatus.LOADED or t.id in complete
+    }
+
+
+def _trip(plan, report: TripReport, reports, ctx, outlets, by_ref, days, locked) -> TripOut:  # type: ignore[no-untyped-def]
     day = plan.run_date
     stops = []
     for p, e in zip(report.planned, report.expected, strict=True):
@@ -218,6 +251,7 @@ def _trip(plan, report: TripReport, reports, ctx, outlets, by_ref, days) -> Trip
         broken=len(report.broken),
         stops=stops,
         note=_trip_note(report, reports, ctx, days),
+        load_locked=report.trip.key in locked,
     )
 
 

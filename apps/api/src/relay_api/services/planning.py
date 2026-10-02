@@ -377,6 +377,10 @@ def _remember(plan: Plan, trips: Sequence[EngineTrip]) -> None:
 
 
 def undo(db: Session, now: datetime, plan: Plan) -> None:
+    """Put back the board as it was before the last move. Only before publishing: undo rewrites every trip, and on
+    a published plan that would wipe what the dock has loaded, flagged and handed over."""
+    if plan.status is PlanStatus.PUBLISHED:
+        raise PlanError("This plan is published, so board moves can't be undone. Change it trip by trip instead.")
     stack = list(plan.summary.get("undo", []))
     if not stack:
         raise PlanError("Nothing to undo")
@@ -610,7 +614,10 @@ def publish(db: Session, now: datetime, plan: Plan, user: AppUser | None) -> Non
     check = publish_check(db, plan)
     if not check["can_publish"]:
         if check["broken"]:
-            raise PlanError(f"{len(check['broken'])} rules are broken. Fix them to publish.")
+            n = len(check["broken"])
+            raise PlanError(
+                f"{n} {'rule is' if n == 1 else 'rules are'} broken. Fix {'it' if n == 1 else 'them'} to publish."
+            )
         raise PlanError("Give every waiting order a reason to publish.")
     orders = run_orders(db, plan.depot, plan.run_date)
     by_id = {o.id: o for o in orders}
@@ -667,6 +674,7 @@ def publish(db: Session, now: datetime, plan: Plan, user: AppUser | None) -> Non
     plan.status = PlanStatus.PUBLISHED
     plan.published_at = now
     plan.published_by = user.id if user else None
+    plan.summary = {**plan.summary, "undo": []}  # the board's moves are settled once the plan is out
     plan.version += 1
     db.add(
         AuditLog(

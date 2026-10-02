@@ -297,6 +297,24 @@ function Workspace({ board, depot, onDrawer }: { board: Board; depot: DepotName;
 
   const counts = useMemo(() => countLanes(board.lanes), [board.lanes]);
 
+  // Ctrl Z undoes the last move on the board, as the shortcuts sheet lists; never while typing, and never once the
+  // plan is published, when a change goes trip by trip instead.
+  const { mutate: undoMove, isPending: undoing } = useUndo(depot, board.plan.id);
+  const canUndo = board.can_undo && !published;
+  useEffect(() => {
+    if (!canUndo) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("input, textarea, select, [contenteditable], dialog")) return;
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (!undoing) undoMove(undefined);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canUndo, undoMove, undoing]);
+
   const onDragStart = (event: DragStartEvent) => {
     const ref = String(event.active.id);
     setDragging(ref);
@@ -489,7 +507,7 @@ function NotPlaced({
           {formatWeekday(dayOf(waiting[0]!.deferral?.to_date ?? board.plan.run_date))}. The store
           {waiting.length > 1 ? "s were" : " was"} told when the plan was published.
         </Notice>
-      ) : !waiting.length && board.broken ? (
+      ) : !waiting.length && board.broken && !published ? (
         <Notice tone="info" compact>
           Every order is placed, but {board.broken} rule{board.broken > 1 ? "s are" : " is"} broken. Undo the move and
           Relay's deferral comes back.
@@ -813,13 +831,14 @@ function TripDetail({ trip, lane, depot, board }: { trip: PlanTrip; lane: Lane; 
           compact
           title={`${broken.length} rule${broken.length > 1 ? "s" : ""} broken`}
           action={
-            board.can_undo ? (
+            board.can_undo && !published ? (
               <Button
                 density="desk"
                 variant="primary"
                 icon={Undo2}
                 onClick={() => undo.mutate(undefined)}
                 title="Undo move (Ctrl Z)"
+                aria-keyshortcuts="Control+Z"
               >
                 Undo move
               </Button>
@@ -918,7 +937,9 @@ function TripDetail({ trip, lane, depot, board }: { trip: PlanTrip; lane: Lane; 
         </div>
         {published && trip.stops.length > 1 ? (
           <p className="t-caption text-asphalt-500">
-            Published. Move a stop earlier and Relay shows the cost before the dock, the driver and the stores are told.
+            {trip.load_locked
+              ? "Loaded at the dock in this order, so the stop order stays."
+              : "Published. Move a stop earlier and Relay shows the cost before the dock, the driver and the stores are told."}
           </p>
         ) : null}
         <ol className="mt-1 flex flex-col">
@@ -949,7 +970,7 @@ function TripDetail({ trip, lane, depot, board }: { trip: PlanTrip; lane: Lane; 
                   </p>
                 </div>
                 <span className={cx("num t-label", late && "text-problem")}>{formatTime(s.planned)}</span>
-                {published && trip.stops.length > 1 ? (
+                {published && !trip.load_locked && trip.stops.length > 1 ? (
                   i > 0 ? (
                     <IconButton
                       icon={ArrowUp}

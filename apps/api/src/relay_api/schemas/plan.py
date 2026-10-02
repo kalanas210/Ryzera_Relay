@@ -48,6 +48,8 @@ class TripOut(Schema):
     broken: int
     stops: list[StopOut]
     note: str
+    load_locked: bool
+    """Packed or gone, so its stop order can no longer change: the cases went on in that order."""
 
 
 class LaneOut(Schema):

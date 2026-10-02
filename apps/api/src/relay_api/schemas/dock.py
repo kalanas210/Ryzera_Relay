@@ -47,10 +47,9 @@ class LoadCardOut(Schema):
 
 
 class DepartedOut(Schema):
-    """The loads that left for one district: the first departure, and the last when they left over a spread."""
+    """One row per departure time: the loads that left in the same minute for one district."""
 
     at: datetime
-    until: datetime | None
     district: str
     vehicles: list[str]
 
@@ -113,6 +112,8 @@ class ShortfallOut(Schema):
     added_to_order_ref: str | None
     added_to_day: date | None
     store_contact: str | None
+    photo_id: uuid.UUID | None
+    """A photo of damaged cases, added after the flag."""
 
 
 class LoadLineOut(Schema):
@@ -121,6 +122,9 @@ class LoadLineOut(Schema):
     qty: int
     loaded: int
     status: LineStatus
+    changed_by_plan: bool
+    """Already on the truck for a stop the dispatcher moved, so it may sit in the wrong place. Clears when a
+    loader checks or counts the line again."""
     shortfall: ShortfallOut | None
 
 
@@ -136,6 +140,8 @@ class StopGroupOut(Schema):
     moved_from: int | None
     moved_at: datetime | None
     state: Literal["done", "loading", "to_load"]
+    """Done: every line is checked or decided. Loading: the one stop being loaded now, the first in loading order
+    with a line still to load or in progress. Any other stop is to_load."""
     lines: list[LoadLineOut]
 
 
@@ -181,7 +187,14 @@ class TripLoadOut(Schema):
     short: int
     lines_total: int
     lines_done: int
+    lines_to_check: int
+    """Lines a plan change marked after they went on (`changed_by_plan`) that a loader can confirm: a flagged line
+    waits on the dispatcher instead."""
     flags_waiting: int
     groups: list[StopGroupOut]
     handover: HandoverOut
     dispatcher: str | None
+    dispatcher_phone: str | None
+    """The number that reaches the dispatcher on call. The tablet cannot place calls, so it shows the number."""
+    plan_changed_by: str | None
+    """Who made the latest change to this load after it was published."""

@@ -7,16 +7,30 @@ type Props = {
   error?: boolean;
   length?: number;
   disabled?: boolean;
+  /** The Delete key's name and the dots' description, in the reader's language. */
+  deleteLabel?: string;
+  progressLabel?: (entered: number, length: number) => string;
 };
 
+const enteredInEnglish = (entered: number, length: number) => `${entered} of ${length} digits entered`;
+
 /** The shared dock tablet's PIN pad: 4 rows of 3 keys, 64 high, 8 apart for gloved fingers. */
-export function PinPad({ value, onChange, error, length = 4, disabled }: Props) {
+export function PinPad({
+  value,
+  onChange,
+  error,
+  length = 4,
+  disabled,
+  deleteLabel = "Delete last digit",
+  progressLabel = enteredInEnglish,
+}: Props) {
   const press = (digit: string) => {
     if (value.length < length) onChange(value + digit);
   };
   return (
-    <div className="flex flex-col items-center gap-6">
-      <div className="flex gap-4" role="img" aria-label={`${value.length} of ${length} digits entered`}>
+    // full width, so a centred parent cannot shrink the keys below their 114 x 64
+    <div className="flex w-full flex-col items-center gap-6">
+      <div className="flex gap-4" role="img" aria-label={progressLabel(value.length, length)}>
         {Array.from({ length }, (_, i) => (
           <span
             // biome-ignore lint/suspicious/noArrayIndexKey: fixed positions
@@ -36,7 +50,7 @@ export function PinPad({ value, onChange, error, length = 4, disabled }: Props) 
         <Key label="0" onClick={() => press("0")} disabled={disabled} />
         <button
           type="button"
-          aria-label="Delete last digit"
+          aria-label={deleteLabel}
           disabled={disabled || value.length === 0}
           onClick={() => onChange(value.slice(0, -1))}
           className="flex h-16 items-center justify-center rounded-button border border-asphalt-300 bg-white text-asphalt-900 disabled:opacity-50"

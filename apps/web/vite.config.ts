@@ -42,6 +42,8 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   server: {
+    // every loopback name, so separate browser tabs on localhost and 127.0.0.1 keep separate sign-ins while testing
+    host: true,
     port: 5173,
     proxy: { "/api": { target: api, changeOrigin: false } },
   },

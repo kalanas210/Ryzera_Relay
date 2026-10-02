@@ -1,14 +1,16 @@
 """Changing a plan after it is published.
 
 Once the plan is out, the dock is loading from it, drivers have their run sheets and stores have a time. A change
-still happens (a store asks, a road closes), so Relay shows the dispatcher what it costs before he confirms, and
-then tells everyone it touches: the dock sees a banner and moved tags, the driver's run updates, and each store
-whose time moved gets the new one.
+still happens (a store asks, a road closes), so Relay shows the dispatcher what it costs before it is confirmed,
+and then tells everyone it touches: the dock sees a banner and moved tags, the driver's run updates, and each store
+whose time moved gets the new one, on the vehicle's later trip too. A new order that breaks a rule on any trip of the
+vehicle is refused, and so is one for a truck that is already loaded.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
@@ -18,13 +20,16 @@ from relay_api.models import (
     AppUser,
     AuditLog,
     CaseType,
+    Handover,
     LoadLine,
     Notification,
     Order,
     Plan,
     PlanChange,
     PlanStatus,
+    Stop,
     Trip,
+    TripStatus,
 )
 from relay_api.schemas.common import Schema
 from relay_api.services import network as adapters
@@ -33,6 +38,7 @@ from relay_api.services.dock import DEPOT_LABEL, Lookup, quiet_until
 from relay_api.services.notify import notify_store
 from relay_api.services.planning import PlanError, context, run_orders, stored_trips
 from relay_engine.model import Trip as EngineTrip
+from relay_engine.model import TripReport
 from relay_engine.rules import evaluate
 
 
@@ -58,13 +64,51 @@ class ReorderPreview(Schema):
     told: list[str]
 
 
+@dataclass(frozen=True)
+class _Retimed:
+    """A store on the vehicle's later trip: that trip leaves once this one is back, so its expected time moves."""
+
+    trip: Trip
+    stop: Stop
+    order: Order
+    place: str
+    before: datetime
+    after: datetime
+
+
+@dataclass(frozen=True)
+class _Outcome:
+    preview: ReorderPreview
+    report: TripReport
+    """The changed trip, timed in its new order."""
+    others: list[tuple[Trip, TripReport]]
+    """The vehicle's other trips, timed after the change."""
+    retimed: list[_Retimed]
+
+
 def preview_reorder(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[str]) -> ReorderPreview:
     """What a new stop order costs, with the departure kept: each store's expected time and margin, before and
-    after, the rules it would break, and who Relay will tell."""
-    if plan.status is not PlanStatus.PUBLISHED:
-        raise PlanError("Change the stop order on the board until the plan is published.")
+    after, the rules it would break on any of the vehicle's trips, and who Relay will tell."""
+    return _work_out(db, plan, trip, order_refs).preview
+
+
+def _ensure_open(db: Session, trip: Trip) -> None:
+    """The truck is packed for the stop order (the last stop goes in first), so a new order can only reach a load
+    that is still open. The dock locks a load the same way once it is marked complete."""
     if trip.departed_at is not None:
         raise PlanError(f"{trip.vehicle_id} has left the hub. Change its run from Live runs.")
+    handover = db.scalar(select(Handover).where(Handover.trip_id == trip.id))
+    if trip.status is TripStatus.LOADED or (handover is not None and handover.completed_at is not None):
+        raise PlanError(
+            f"{trip.vehicle_id} is already loaded for this stop order. A new order would mean unloading the truck, "
+            "so Relay keeps this one."
+        )
+
+
+def _work_out(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[str]) -> _Outcome:
+    if plan.status is not PlanStatus.PUBLISHED:
+        raise PlanError("Change the stop order on the board until the plan is published.")
+    _ensure_open(db, trip)
     look = Lookup(db)
     orders = run_orders(db, plan.depot, plan.run_date)
     by_id = {o.id: o for o in orders}
@@ -80,7 +124,9 @@ def preview_reorder(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[st
         for t in stored_trips(db, plan)
     ]
     reports, _ = evaluate(ctx, trips)
-    report = next(r for r in reports if (r.trip.vehicle_id, r.trip.trip_no) == (trip.vehicle_id, trip.trip_no))
+    # the vehicle's trips run one after another, so a trip that comes back later can break the next one's rules
+    mine = {r.trip.trip_no: r for r in reports if r.trip.vehicle_id == trip.vehicle_id}
+    report = mine[trip.trip_no]
     after = {e.order_id: e for e in report.expected}
     shifts = []
     for stop in stops:
@@ -103,6 +149,32 @@ def preview_reorder(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[st
                 margin_after=round(close - after_min),
             )
         )
+    others = [
+        (t, mine[t.trip_no])
+        for t in db.scalars(
+            select(Trip)
+            .where(
+                Trip.plan_id == plan.id,
+                Trip.vehicle_id == trip.vehicle_id,
+                Trip.id != trip.id,
+                Trip.is_backup.is_(False),
+            )
+            .order_by(Trip.trip_no)
+        )
+        if t.trip_no in mine
+    ]
+    retimed = []
+    for other, other_report in others:
+        if other.trip_no < trip.trip_no:
+            continue  # an earlier trip is back before this one leaves
+        expected = {e.order_id: e for e in other_report.expected}
+        for stop in sorted(other.stops, key=lambda s: s.seq):
+            order = by_id[stop.order_id]
+            was = stop.expected_arrival or stop.planned_arrival
+            will = adapters.at_minutes(plan.run_date, expected[order.order_ref].arrive)
+            if will != was:
+                retimed.append(_Retimed(other, stop, order, look.outlets[stop.outlet_id].short_name, was, will))
+
     costs = []
     dropped = [s for s in shifts if s.margin_after < s.margin_before]
     if dropped:
@@ -120,30 +192,44 @@ def preview_reorder(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[st
                 f"{s.place} becomes stop {s.to_seq}: expected {words.clock(s.expected_after)}, "
                 f"was {words.clock(s.expected_before)}."
             )
+    for r in retimed:
+        costs.append(
+            f"{r.place} on trip {r.trip.trip_no}: expected {words.clock(r.after)}, was {words.clock(r.before)}."
+        )
+
     told = []
-    for s in shifts:
-        if words.round5(s.expected_after) != words.round5(s.expected_before):
-            manager = look.store_manager(s.outlet_id)
-            who = manager.display_name if manager else f"{s.outlet_id} {s.place}"
-            told.append(f"{who} is told the new time, around {words.clock(words.round5(s.expected_after))}.")
+    if trip.brand == "Fresh":  # the night loads are the ones the dock tablet lists, banner included
+        told.append(f"The {DEPOT_LABEL.get(plan.depot, plan.depot)} dock sees the new loading order.")
     driver = look.driver_of(trip, plan.run_date)
-    told.insert(0, f"The {DEPOT_LABEL.get(plan.depot, plan.depot)} dock sees the new loading order.")
     if driver is not None:
-        told.insert(1, f"{driver.display_name}'s run sheet updates.")
-    return ReorderPreview(
+        told.append(f"{driver.display_name}'s run sheet updates.")
+    moving = [(s.outlet_id, s.place, s.expected_before, s.expected_after) for s in shifts]
+    moving += [(r.stop.outlet_id, r.place, r.before, r.after) for r in retimed]
+    for outlet_id, place, was, will in moving:
+        if words.round5(will) != words.round5(was):
+            manager = look.store_manager(outlet_id)
+            who = manager.display_name if manager else f"{outlet_id} {place}"
+            told.append(f"{who} is told the new time, around {words.clock(words.round5(will))}.")
+
+    preview = ReorderPreview(
         vehicle_id=trip.vehicle_id,
         trip_no=trip.trip_no,
         stops=sorted(shifts, key=lambda s: s.to_seq),
-        broken=[b.message for b in report.broken],
+        broken=[b.message for b in report.broken]
+        + [f"Trip {r.trip.trip_no}: {b.message}" for _, r in others for b in r.broken],
         costs=costs,
         told=told,
     )
+    return _Outcome(preview, report, others, retimed)
 
 
 def reorder(
     db: Session, now: datetime, plan: Plan, trip: Trip, order_refs: Sequence[str], user: AppUser | None, note: str
 ) -> PlanChange:
-    preview = preview_reorder(db, plan, trip, order_refs)
+    """Apply what the preview showed: the trip's new times and loading order, the later trip's expected times, and
+    a word to the driver and to every store whose time moved."""
+    outcome = _work_out(db, plan, trip, order_refs)
+    preview = outcome.preview
     if preview.broken:
         raise PlanError(f"This order breaks a rule: {preview.broken[0]}")
     moved = [s for s in preview.stops if s.from_seq != s.to_seq]
@@ -152,18 +238,7 @@ def reorder(
     look = Lookup(db)
     by_ref = {s.order_ref: s for s in preview.stops}
     orders = {o.id: o for o in db.scalars(select(Order).where(Order.id.in_([s.order_id for s in trip.stops])))}
-    ctx_orders = run_orders(db, plan.depot, plan.run_date)
-    ctx = context(db, plan, ctx_orders)
-    reports, _ = evaluate(
-        ctx,
-        [
-            t
-            if t.key != (trip.vehicle_id, trip.trip_no)
-            else EngineTrip(t.vehicle_id, t.trip_no, list(order_refs), t.depart)
-            for t in stored_trips(db, plan)
-        ],
-    )
-    report = next(r for r in reports if (r.trip.vehicle_id, r.trip.trip_no) == (trip.vehicle_id, trip.trip_no))
+    report = outcome.report
     planned = {p.order_id: p for p in report.planned}
     for stop in trip.stops:
         ref = orders[stop.order_id].order_ref
@@ -175,6 +250,11 @@ def reorder(
         stop.expected_arrival = shift.expected_after
     trip.planned_back = adapters.at_minutes(plan.run_date, report.back)
     trip.expected_back = adapters.at_minutes(plan.run_date, report.expected_back)
+    for other, other_report in outcome.others:
+        if other.trip_no > trip.trip_no:
+            other.expected_back = adapters.at_minutes(plan.run_date, other_report.expected_back)
+    for r in outcome.retimed:
+        r.stop.expected_arrival = r.after
     _reload_order(db, trip, {s.order_ref for s in moved}, orders)
 
     if len(moved) == 2:
@@ -200,6 +280,17 @@ def reorder(
                 }
                 for s in moved
             ],
+            "retimed": [
+                {
+                    "order_ref": r.order.order_ref,
+                    "outlet_id": r.stop.outlet_id,
+                    "place": r.place,
+                    "trip_no": r.trip.trip_no,
+                    "expected_before": r.before.isoformat(),
+                    "expected_after": r.after.isoformat(),
+                }
+                for r in outcome.retimed
+            ],
             "note": note,
             "costs": preview.costs,
         },
@@ -209,17 +300,19 @@ def reorder(
     db.add(change)
     plan.version += 1
 
-    for s in preview.stops:
-        old, new = words.round5(s.expected_before), words.round5(s.expected_after)
+    by_order_ref = {o.order_ref: o for o in orders.values()}
+    moving = [(by_order_ref[s.order_ref], s.expected_before, s.expected_after) for s in preview.stops]
+    moving += [(r.order, r.before, r.after) for r in outcome.retimed]
+    for order, was, will in moving:
+        old, new = words.round5(was), words.round5(will)
         if old == new:
             continue
-        order = next(o for o in orders.values() if o.order_ref == s.order_ref)
         kind = "chilled" if order.temp == "chilled" else "dry" if order.brand == "Fresh" else order.brand
         way = "earlier" if new < old else "later"
-        outlet = look.outlets[s.outlet_id]
+        outlet = look.outlets[order.outlet_id]
         notify_store(
             db,
-            s.outlet_id,
+            order.outlet_id,
             now,
             kind="order_moved",
             title=f"Your {kind} order now comes {way}",

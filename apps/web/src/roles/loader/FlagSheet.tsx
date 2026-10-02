@@ -1,4 +1,5 @@
 import {
+  Camera,
   Check,
   ClipboardList,
   Info,
@@ -6,29 +7,39 @@ import {
   MessageSquare,
   Package,
   PackageX,
+  Phone,
   Route,
   Send,
   TriangleAlert,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/design/Button";
 import { Sheet } from "@/design/Sheet";
 import { Stepper } from "@/design/Stepper";
 import { useLoaderText, weekdayIn } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
-import { type LoadLine, loadKindKey, type StopGroup, type TripLoad, useFlag, useWithdrawFlag } from "./api";
+import { PHOTO_TYPES, shrinkPhoto } from "@/lib/photo";
+import { type FlagWrite, type LoadLine, loadKindKey, type StopGroup, type TripLoad, useWithdrawFlag } from "./api";
+
+export type SendFlag = (flag: Pick<FlagWrite, "lineId" | "kind" | "qty">, photo: Blob | null) => void;
 
 type Props = {
   load: TripLoad;
   group: StopGroup | null;
   line: LoadLine | null;
+  /** The line's flag is still on this tablet a minute after it was made. */
+  unsent?: boolean;
+  /** Saves the flag on the tablet and sends it, with the photo after it. */
+  onSend: SendFlag;
   onClose: () => void;
 };
 
 /** LDR-03 Flag a shortfall: two taps for a missing line, and the dispatcher's answer in the same place. */
-export function FlagSheet({ load, group, line, onClose }: Props) {
+export function FlagSheet({ load, group: opened, line, unsent = false, onSend, onClose }: Props) {
   const { t } = useLoaderText();
+  // the stop as the load reads now, not as it was when the sheet opened
+  const group = opened ? (load.groups.find((g) => g.stop_id === opened.stop_id) ?? opened) : null;
   const open = Boolean(group && line);
   const item = line ? t(`cases.${line.case_type}`, { defaultValue: line.case_type }) : "";
   return (
@@ -47,9 +58,9 @@ export function FlagSheet({ load, group, line, onClose }: Props) {
     >
       {group && line ? (
         line.shortfall ? (
-          <FlagRecord load={load} group={group} line={line} onClose={onClose} />
+          <FlagRecord load={load} group={group} line={line} unsent={unsent} onClose={onClose} />
         ) : (
-          <NewFlag load={load} group={group} line={line} onClose={onClose} />
+          <NewFlag load={load} group={group} line={line} onSend={onSend} onClose={onClose} />
         )
       ) : null}
     </Sheet>
@@ -60,19 +71,42 @@ function NewFlag({
   load,
   group,
   line,
+  onSend,
   onClose,
 }: {
   load: TripLoad;
   group: StopGroup;
   line: LoadLine;
+  onSend: SendFlag;
   onClose: () => void;
 }) {
   const { t } = useLoaderText();
-  const flag = useFlag(load.trip_id);
   const [kind, setKind] = useState<"missing" | "damaged">("missing");
   const [qty, setQty] = useState(() => (line.loaded > 0 && line.loaded < line.qty ? line.qty - line.loaded : 1));
+  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
+  const [photoError, setPhotoError] = useState(false);
+  const camera = useRef<HTMLInputElement>(null);
   const shelf = line.qty - qty;
+  const item = t(`casesLower.${line.case_type}`, { defaultValue: line.case_type });
   const kindLabel = t(`kinds.${load.temp === "chilled" ? "chilled" : load.brand === "Fresh" ? "dry" : load.brand}`);
+
+  useEffect(() => () => (photo ? URL.revokeObjectURL(photo.url) : undefined), [photo]);
+
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    const blob = await shrinkPhoto(file);
+    const readable = PHOTO_TYPES.includes(blob.type);
+    setPhotoError(!readable);
+    setPhoto(readable ? { blob, url: URL.createObjectURL(blob) } : null);
+  };
+
+  // The flag saves on the tablet first, so the sheet closes at once and loading goes on; it reaches Relay as soon
+  // as it can, and the line says so if it has not after a minute.
+  const send = () => {
+    onSend({ lineId: line.id, kind, qty }, kind === "damaged" && photo ? photo.blob : null);
+    onClose();
+  };
+
   return (
     <div className="flex flex-col gap-4 pb-2">
       <p className="flex items-center gap-1.5 t-label text-asphalt-700">
@@ -118,7 +152,9 @@ function NewFlag({
             min={1}
             max={line.qty}
             label={kind === "missing" ? t("flag.howManyMissing") : t("flag.howManyDamaged")}
-            unit={t(`cases.${line.case_type}`, { defaultValue: line.case_type })}
+            unit={item}
+            fewerLabel={t("flag.fewer", { item })}
+            moreLabel={t("flag.more", { item })}
             size="field"
           />
           <span className="num t-label text-asphalt-700">{t("load.of", { n: line.qty })}</span>
@@ -127,23 +163,46 @@ function NewFlag({
           {kind === "missing" ? t("flag.shelf", { shelf }) : t("flag.damagedHelp")}
         </p>
       </div>
+      {kind === "damaged" ? (
+        // a photo is asked for only for damage: there is nothing to photograph when a case is not there
+        <div className="flex flex-col gap-2">
+          <input
+            ref={camera}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden
+            onChange={(event) => {
+              void pickPhoto(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+          {photo ? (
+            <div className="flex items-center gap-3">
+              <img src={photo.url} alt={t("flag.photoAlt", { item })} className="size-16 rounded-button object-cover" />
+              <span className="flex items-center gap-1.5 t-body-strong text-done">
+                <Check size={16} strokeWidth={1.75} aria-hidden />
+                {t("flag.photoAdded")}
+              </span>
+            </div>
+          ) : null}
+          <Button density="field" full icon={Camera} onClick={() => camera.current?.click()}>
+            {photo ? t("flag.photoAgain") : t("flag.addPhoto")}
+          </Button>
+          {photoError ? (
+            <p role="alert" className="t-body-strong text-problem">
+              {t("flag.photoUnreadable")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <p className="flex items-start gap-3 t-body text-asphalt-700">
         <Info size={24} strokeWidth={1.75} aria-hidden className="shrink-0" />
         {t("flag.info", { name: load.dispatcher ?? "", n: qty })}
       </p>
-      {flag.error ? (
-        <p role="alert" className="t-body-strong text-problem">
-          {t("load.notSaved", { message: flag.error.message })}
-        </p>
-      ) : null}
-      <Button
-        variant="primary"
-        density="field"
-        full
-        icon={Send}
-        disabled={flag.isPending}
-        onClick={() => flag.mutate({ lineId: line.id, kind, qty }, { onSuccess: onClose })}
-      >
+      <Button variant="primary" density="field" full icon={Send} onClick={send}>
         {kind === "missing" ? t("flag.sendMissing", { n: qty }) : t("flag.sendDamaged", { n: qty })}
       </Button>
       <span className="sr-only">{group.place}</span>
@@ -155,21 +214,25 @@ function FlagRecord({
   load,
   group,
   line,
+  unsent,
   onClose,
 }: {
   load: TripLoad;
   group: StopGroup;
   line: LoadLine;
+  unsent: boolean;
   onClose: () => void;
 }) {
   const { t, lang, clock } = useLoaderText();
   const withdraw = useWithdrawFlag(load.trip_id);
+  const [showNumber, setShowNumber] = useState(false);
   const s = line.shortfall;
   if (!s) return null;
   const Icon = s.kind === "missing" ? PackageX : TriangleAlert;
   const day = s.added_to_day ? weekdayIn(lang, s.added_to_day) : "";
   const from = weekdayIn(lang, load.planned_depart);
-  const stopCases = group.cases - (s.decision ? s.qty : 0);
+  // what the stop's lines say goes off at the door: every decided short on the stop, not only this one
+  const stopCases = group.cases - group.short;
   return (
     <div className="flex flex-col gap-4 pb-2">
       <div className="flex items-start gap-3 rounded-card border border-asphalt-200 bg-asphalt-50 p-4">
@@ -184,10 +247,29 @@ function FlagRecord({
             {s.kind === "missing" ? t("flag.yourFlagMissing", { n: s.qty }) : t("flag.yourFlagDamaged", { n: s.qty })}
           </p>
           <p className="t-label text-asphalt-700">
-            {t("flag.sentBy", { name: s.flagged_by ?? "", time: clock(s.flagged_at) })}
+            {unsent
+              ? t("flag.notSentBy", { name: s.flagged_by ?? "", time: clock(s.flagged_at) })
+              : t("flag.sentBy", { name: s.flagged_by ?? "", time: clock(s.flagged_at) })}
           </p>
         </div>
+        {s.photo_id ? (
+          <img
+            src={`/api/photos/${s.photo_id}?as=loader`}
+            alt={t("flag.photoAlt", { item: t(`casesLower.${line.case_type}`, { defaultValue: line.case_type }) })}
+            className="ml-auto size-16 shrink-0 rounded-button object-cover"
+          />
+        ) : null}
       </div>
+
+      {unsent && load.dispatcher_phone ? (
+        // the tablet cannot place calls, so the number is shown large enough to dial from a phone
+        <div className="flex flex-col gap-2">
+          <Button density="field" full icon={Phone} aria-expanded={showNumber} onClick={() => setShowNumber(true)}>
+            {t("call.title", { name: calledName(load.dispatcher) })}
+          </Button>
+          {showNumber ? <DispatchNumber phone={load.dispatcher_phone} /> : null}
+        </div>
+      ) : null}
 
       {s.decision && s.decided_at ? (
         <section className="flex flex-col gap-2 rounded-card border border-attention bg-attention-soft p-4">
@@ -243,6 +325,32 @@ function FlagRecord({
         {t("flag.back")}
       </Button>
     </div>
+  );
+}
+
+/** The dispatch number in Display size, with a word on why it is not a button. */
+function DispatchNumber({ phone }: { phone: string }) {
+  const { t } = useLoaderText();
+  return (
+    <div className="flex flex-col items-center gap-1 rounded-card border border-asphalt-200 bg-asphalt-50 p-4">
+      <p className="num latin t-display text-asphalt-900">{phone}</p>
+      <p className="text-center t-label text-asphalt-700">{t("call.note")}</p>
+    </div>
+  );
+}
+
+/** "Call Nuwan at dispatch" from the bar alert row, when a flag still has no answer close to departure. */
+export function CallSheet({ open, onClose, load }: { open: boolean; onClose: () => void; load: TripLoad }) {
+  const { t } = useLoaderText();
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={t("call.title", { name: calledName(load.dispatcher) })}
+      closeLabel={t("who.close")}
+    >
+      <div className="pb-4">{load.dispatcher_phone ? <DispatchNumber phone={load.dispatcher_phone} /> : null}</div>
+    </Sheet>
   );
 }
 

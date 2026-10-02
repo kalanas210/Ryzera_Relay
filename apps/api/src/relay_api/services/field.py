@@ -51,7 +51,7 @@ from relay_api.services.notify import add_feed_item, notify_store
 
 ANSWER_WITHIN = timedelta(minutes=10)
 """A question nobody answers goes to the top of the dispatcher's feed after this long."""
-MAX_PHOTO_BYTES = 1_500_000
+MAX_PHOTO_BYTES = dock.MAX_PHOTO_BYTES
 STOP_KINDS = (FieldEventKind.ARRIVED, FieldEventKind.DELIVERED, FieldEventKind.FAILED)
 
 
@@ -643,7 +643,7 @@ def store_photo(
         raise FieldError("This photo belongs to another copy of the day.")
     if len(data) > MAX_PHOTO_BYTES:
         raise FieldError("The photo is too large.")
-    if content_type not in ("image/jpeg", "image/webp", "image/png"):
+    if content_type not in dock.PHOTO_TYPES:
         raise FieldError("Send the photo as a JPEG.")
     stop = db.get(Stop, stop_id) if stop_id else None
     if stop is not None:

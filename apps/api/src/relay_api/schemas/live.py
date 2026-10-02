@@ -24,7 +24,10 @@ class ShortfallDetailOut(Schema):
     place: str
     flagged_at: datetime
     flagged_by: str | None
+    run_date: date
+    """The run the load is for: the day a carried-over order is marked from."""
     departs: datetime
+    trip_stops: int
     driver: str | None
     stop_cases: int
     next_order_ref: str | None
@@ -35,6 +38,20 @@ class ShortfallDetailOut(Schema):
     decided_at: datetime | None
     decided_by: str | None
     added_to_order_ref: str | None
+    store_seen_at: datetime | None
+    """When the store opened its short-delivery notice."""
+    completed_at: datetime | None
+    loaded_cases: int
+    planned_cases: int
+    """The whole load's cases, for the record once the load is complete."""
+    accepted_at: datetime | None
+    accepted_by: str | None
+    hub_spare: int | None
+    """Spare cases of this type at the hub for the run, when Relay knows the hub's stock of it."""
+    next_delivery_at: datetime | None
+    """When the supplier's next drop of this case type reaches the hub."""
+    photo_id: uuid.UUID | None
+    """A photo of damaged cases from the dock."""
 
 
 class FeedItemOut(Schema):

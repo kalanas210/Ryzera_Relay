@@ -60,12 +60,13 @@ class ClockCommand(BaseModel):
 def move_clock(body: ClockCommand, scope: ScopeDep) -> DemoState:
     ws = scope.workspace
     now = sim_now(ws)
+    moment = story.moment_time(body.to or "") if body.action == "jump" else None
     if body.action == "jump":
-        moment = next((m for m in story.moments(scope.db) if m.key == body.to), None)
-        target = moment.at if moment else datetime.fromisoformat(body.to or "")
+        target = moment(scope.db) if moment else datetime.fromisoformat(body.to or "")
         if target < now - timedelta(minutes=1):
             raise HTTPException(status.HTTP_409_CONFLICT, "The clock only moves forward. Reset the day to start again.")
-        set_clock(ws, target)
+        if moment is None:
+            set_clock(ws, target)  # a moment can move while the jump plays the steps on the way; catch_up sets it
     elif body.action == "advance":
         set_clock(ws, now + timedelta(minutes=body.minutes or 15))
     elif body.action == "pause":
@@ -73,7 +74,7 @@ def move_clock(body: ClockCommand, scope: ScopeDep) -> DemoState:
     else:
         set_clock(ws, now, rate=1.0)
     scope.db.commit()
-    played = catch_up(scope.db, ws, jumped_from=now) if body.action in ("jump", "advance") else []
+    played = catch_up(scope.db, ws, moment, jumped_from=now) if body.action in ("jump", "advance") else []
     return state_of(scope.db, ws, played)
 
 

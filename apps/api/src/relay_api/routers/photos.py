@@ -1,12 +1,14 @@
-"""Proof photos, for whoever may see them: the driver who took it, the store it was taken at, and the dispatcher."""
+"""Photos, for whoever may see them: a proof photo for the driver who took it, the store it was taken at and the
+dispatcher; a photo of damaged cases for the dock and the dispatcher."""
 
 from __future__ import annotations
 
 import uuid
 
 from fastapi import APIRouter, HTTPException, Response, status
+from sqlalchemy import select
 
-from relay_api.models import Photo, Role, Stop
+from relay_api.models import Photo, Role, Shortfall, Stop
 from relay_api.security import CurrentUser
 from relay_api.workspaces import ScopeDep
 
@@ -23,6 +25,10 @@ def get_photo(photo_id: uuid.UUID, scope: ScopeDep, user: CurrentUser) -> Respon
         user.role is Role.DISPATCHER
         or photo.uploaded_by == user.id
         or (user.role is Role.STORE_MANAGER and stop is not None and stop.outlet_id == user.outlet_id)
+        or (
+            user.role is Role.LOADER
+            and scope.db.scalar(select(Shortfall.id).where(Shortfall.photo_id == photo.id)) is not None
+        )
     )
     if not allowed:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such photo")

@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable
 from typing import Annotated, Literal, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from relay_api.models import AppUser, LoadLine, Plan, Role, ShortfallKind, Trip
@@ -81,6 +81,16 @@ def flag(line_id: uuid.UUID, body: FlagIn, scope: ScopeDep, user: Loader) -> Tri
     return _load(scope, line.trip_id)
 
 
+@router.put("/lines/{line_id}/flag/photo", response_model=TripLoadOut)
+def flag_photo(line_id: uuid.UUID, scope: ScopeDep, user: Loader, file: Annotated[UploadFile, File()]) -> TripLoadOut:
+    """A photo of the damaged cases, resized on the tablet. Sent after the flag; a second photo replaces it. Not
+    async: the load's lock may have to wait for the simulator's tick."""
+    line = _line(scope, line_id)
+    data = file.file.read(dock.MAX_PHOTO_BYTES + 1)
+    _guard(lambda: dock.attach_photo(scope.db, scope.now, user, line, data, file.content_type or "image/jpeg"))
+    return _load(scope, line.trip_id)
+
+
 @router.delete("/lines/{line_id}/flag", response_model=TripLoadOut)
 def withdraw_flag(line_id: uuid.UUID, scope: ScopeDep, user: Loader) -> TripLoadOut:
     """The cases turned up before the dispatcher answered."""
@@ -103,7 +113,7 @@ class TabletAcceptIn(BaseModel):
 
 @router.post("/trips/{trip_id}/accept", response_model=TripLoadOut)
 def accept_here(trip_id: uuid.UUID, body: TabletAcceptIn, scope: ScopeDep, _user: Loader) -> TripLoadOut:
-    """The driver accepts on the dock tablet with his own PIN, when his phone has no signal. The tablet stays
+    """The driver accepts on the dock tablet with their own PIN, when their phone has no signal. The tablet stays
     signed in as the loader."""
     trip = _trip(scope, trip_id)
     plan = scope.db.get(Plan, trip.plan_id)

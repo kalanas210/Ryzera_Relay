@@ -35,6 +35,8 @@ export type PlanTrip = {
   broken: number;
   stops: PlanStop[];
   note: string;
+  /** Packed or gone, so its stop order can no longer change: the cases went on in that order. */
+  load_locked: boolean;
 };
 export type Lane = {
   vehicle_id: string;

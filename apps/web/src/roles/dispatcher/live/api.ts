@@ -17,7 +17,10 @@ export type ShortfallDetail = {
   place: string;
   flagged_at: string;
   flagged_by: string | null;
+  /** The run the load is for, the day a carried-over order is marked from. */
+  run_date: string;
   departs: string;
+  trip_stops: number;
   driver: string | null;
   stop_cases: number;
   next_order_ref: string | null;
@@ -28,6 +31,18 @@ export type ShortfallDetail = {
   decided_at: string | null;
   decided_by: string | null;
   added_to_order_ref: string | null;
+  store_seen_at: string | null;
+  completed_at: string | null;
+  loaded_cases: number;
+  planned_cases: number;
+  accepted_at: string | null;
+  accepted_by: string | null;
+  /** Spare cases of this type at the hub for the run, when Relay knows the hub's stock of it. */
+  hub_spare: number | null;
+  /** When the supplier's next drop of this case type reaches the hub. */
+  next_delivery_at: string | null;
+  /** A photo of damaged cases from the dock. */
+  photo_id: string | null;
 };
 
 export type FeedItem = {

@@ -1,6 +1,6 @@
-"""The dispatcher's live view (DSP-04): the feed of things that need him once the plan is out, each carrying what
-changed and who was told. On the phone it is the only thing shown, so a flag from the dock at 2:47 AM reaches him
-at home with the decision it needs."""
+"""The dispatcher's live view (DSP-04): the feed of things that need the dispatcher once the plan is out, each
+carrying what changed and who was told. On the phone it is the only thing shown, so a flag from the dock at 2:47 AM
+reaches the dispatcher on call at home with the decision it needs."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from relay_api.models import FeedItem, LoadLine, Order, Plan, Shortfall, Stop, Trip
+from relay_api.models import FeedItem, HubStock, LoadLine, Notification, Order, Plan, Shortfall, Stop, Trip
 from relay_api.schemas.live import FeedItemOut, FeedOut, ShortfallDetailOut
 from relay_api.services import words
-from relay_api.services.dock import DEPOT_LABEL, Lookup, next_order
+from relay_api.services.dock import DEPOT_LABEL, Lookup, loads_for, next_order
 from relay_api.services.ordering import current_run
 
 
@@ -66,6 +66,21 @@ def shortfall_detail(look: Lookup, shortfall_id: str | None) -> ShortfallDetailO
     stop_cases = sum(other.planned_qty for other in db.scalars(select(LoadLine).where(LoadLine.stop_id == stop.id)))
     driver = look.driver_of(trip, plan.run_date)
     manager = look.store_manager(stop.outlet_id)
+    load = loads_for(db, [trip])[trip.id]
+    handover = load.handover
+    notice = next(
+        (
+            n
+            for n in db.scalars(
+                select(Notification).where(
+                    Notification.outlet_id == stop.outlet_id, Notification.kind == "short_delivery"
+                )
+            )
+            if n.data.get("order_ref") == order.order_ref and n.data.get("case_type") == line.case_type
+        ),
+        None,
+    )
+    stock = db.get(HubStock, (plan.depot, line.case_type, plan.run_date))
     return ShortfallDetailOut(
         id=shortfall.id,
         kind=shortfall.kind.value,
@@ -82,7 +97,9 @@ def shortfall_detail(look: Lookup, shortfall_id: str | None) -> ShortfallDetailO
         place=outlet.short_name,
         flagged_at=shortfall.flagged_at,
         flagged_by=look.name(shortfall.flagged_by),
+        run_date=plan.run_date,
         departs=trip.planned_depart,
+        trip_stops=len(trip.stops),
         driver=driver.display_name if driver else None,
         stop_cases=stop_cases,
         next_order_ref=nxt.order_ref if nxt else None,
@@ -93,4 +110,13 @@ def shortfall_detail(look: Lookup, shortfall_id: str | None) -> ShortfallDetailO
         decided_at=shortfall.decided_at,
         decided_by=look.name(shortfall.decided_by),
         added_to_order_ref=shortfall.added_to_order_ref,
+        store_seen_at=notice.read_at if notice else None,
+        completed_at=handover.completed_at if handover else None,
+        loaded_cases=load.loaded,
+        planned_cases=load.cases,
+        accepted_at=handover.accepted_at if handover else None,
+        accepted_by=look.name(handover.accepted_by) if handover else None,
+        hub_spare=stock.spare if stock else None,
+        next_delivery_at=stock.next_delivery_at if stock else None,
+        photo_id=shortfall.photo_id,
     )

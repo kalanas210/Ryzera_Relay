@@ -12,6 +12,7 @@ export function LanguageSheet({
   title,
   helper,
   note,
+  closeLabel,
 }: {
   open: boolean;
   onClose: () => void;
@@ -20,9 +21,11 @@ export function LanguageSheet({
   title: string;
   helper: string;
   note: string;
+  /** The close button's name in the reader's language. */
+  closeLabel?: string;
 }) {
   return (
-    <Sheet open={open} onClose={onClose} title={title}>
+    <Sheet open={open} onClose={onClose} title={title} closeLabel={closeLabel}>
       <div className="flex flex-col gap-3">
         <p className="t-body text-asphalt-700">{helper}</p>
         <div role="radiogroup" aria-label={title} className="flex flex-col gap-2">

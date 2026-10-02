@@ -3,14 +3,17 @@ import {
   ChevronRight,
   CircleAlert,
   Clock,
+  CloudOff,
+  type LucideIcon,
   Package,
   PackageX,
+  RefreshCw,
   Snowflake,
   Square,
   SquareCheck,
   TriangleAlert,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { type PointerEvent, useRef, useState } from "react";
 import { Button } from "@/design/Button";
 import { Sheet } from "@/design/Sheet";
 import { Stepper } from "@/design/Stepper";
@@ -26,12 +29,15 @@ export function LoadProgress({
   short = 0,
   height = 8,
   complete = false,
+  label,
 }: {
   loaded: number;
   total: number;
   short?: number;
   height?: 6 | 8;
   complete?: boolean;
+  /** "116 of 383 cases loaded", in the reader's language. */
+  label?: string;
 }) {
   const share = total ? Math.min(100, (loaded / total) * 100) : 0;
   const shortShare = total ? Math.min(100 - share, (short / total) * 100) : 0;
@@ -39,6 +45,7 @@ export function LoadProgress({
   return (
     <div
       role="progressbar"
+      aria-label={label}
       aria-valuemin={0}
       aria-valuemax={total}
       aria-valuenow={loaded}
@@ -53,8 +60,11 @@ export function LoadProgress({
 
 const LONG_PRESS_MS = 550;
 
+type StatusLine = { text: string; className: string; icon?: LucideIcon };
+
 /** One case type for one stop. The whole row checks with one gloved tap; Flag is its own button, so a check is
- *  never read as a problem. Press and hold to count part of a line on. */
+ *  never read as a problem. Press and hold to count part of a line on. A line whose stop moved after it went on
+ *  shows as changed until the loader taps it to confirm where it sits. */
 export function LoadLineRow({
   line,
   stop,
@@ -65,6 +75,8 @@ export function LoadLineRow({
   onCount,
   onFlag,
   large = false,
+  noAnswer = false,
+  unsent = false,
 }: {
   line: LoadLine;
   stop: number;
@@ -75,22 +87,31 @@ export function LoadLineRow({
   onCount: () => void;
   onFlag: () => void;
   large?: boolean;
+  /** The flag still waits 15 minutes before departure. */
+  noAnswer?: boolean;
+  /** The flag is still on this tablet a minute after it was made. */
+  unsent?: boolean;
 }) {
   const { t, lang } = useLoaderText();
   const press = useRef<number | undefined>(undefined);
   const held = useRef(false);
   const flagged = line.status === "flag_waiting" || line.status === "decided";
+  const changed = !flagged && line.changed_by_plan;
   const damaged = line.shortfall?.kind === "damaged";
   const checked = line.status === "checked";
   const inProgress = line.status === "in_progress";
+  const label = large ? "t-body" : "t-label";
+  const labelStrong = large ? "t-body-strong" : "t-label-strong";
 
   const tone = flagged
     ? damaged
       ? "bg-problem-soft border border-problem"
       : "bg-attention-soft border border-attention"
-    : checked
-      ? "bg-done-soft border border-done"
-      : "bg-white border border-asphalt-200";
+    : changed
+      ? "bg-white border-2 border-attention"
+      : checked
+        ? "bg-done-soft border border-done"
+        : "bg-white border border-asphalt-200";
 
   const SlotIcon = flagged
     ? line.status === "decided"
@@ -98,20 +119,25 @@ export function LoadLineRow({
       : damaged
         ? TriangleAlert
         : Clock
-    : checked
-      ? SquareCheck
-      : Square;
+    : changed
+      ? RefreshCw
+      : checked
+        ? SquareCheck
+        : Square;
   const slotColor = flagged
     ? damaged
       ? "text-problem"
       : "text-attention"
-    : checked
-      ? "text-done"
-      : "text-asphalt-700";
+    : changed
+      ? "text-attention"
+      : checked
+        ? "text-done"
+        : "text-asphalt-700";
 
-  const startPress = () => {
+  // The count sheet opens while the finger is still down; the sheet itself ignores the release of that press.
+  const startPress = (event: PointerEvent) => {
     held.current = false;
-    if (flagged) return;
+    if (flagged || event.button !== 0) return;
     press.current = window.setTimeout(() => {
       held.current = true;
       onCount();
@@ -120,7 +146,7 @@ export function LoadLineRow({
   const endPress = () => window.clearTimeout(press.current);
 
   const missing = line.qty - line.loaded;
-  const statusLines: { text: string; className: string }[] = [];
+  const statusLines: StatusLine[] = [];
   if (flagged && line.shortfall) {
     const s = line.shortfall;
     if (line.status === "flag_waiting") {
@@ -128,29 +154,42 @@ export function LoadLineRow({
         text: damaged
           ? t("load.damagedLine", { loaded: line.loaded, damaged: s.qty })
           : t("load.missingLine", { loaded: line.loaded, missing: s.qty }),
-        className: cx("t-label-strong", damaged ? "text-problem" : "text-attention"),
+        className: cx(labelStrong, damaged ? "text-problem" : "text-attention"),
       });
-      statusLines.push({
-        text: t("load.waitingFor", { name: calledName(dispatcher) }),
-        className: cx("t-label", damaged ? "text-problem" : "text-attention"),
-      });
+      // A flag that has not left the tablet cannot be answered: it says so, in the waiting treatment, and turns
+      // into a problem 15 minutes before departure like any flag without an answer.
+      statusLines.push(
+        unsent
+          ? {
+              text: t("load.notSent"),
+              className: noAnswer ? cx(labelStrong, "text-problem") : cx(label, "text-asphalt-700"),
+              icon: CloudOff,
+            }
+          : noAnswer
+            ? { text: t("load.noAnswerYet"), className: cx(labelStrong, "text-problem"), icon: CircleAlert }
+            : {
+                text: t("load.waitingFor", { name: calledName(dispatcher) }),
+                className: cx(label, damaged ? "text-problem" : "text-attention"),
+              },
+      );
     } else {
       statusLines.push({
         text: t("load.shortLine", { loaded: line.loaded, short: missing }),
-        className: "t-label-strong text-attention",
+        className: cx(labelStrong, "text-attention"),
       });
       statusLines.push({
         text:
           s.decision === "send_short" && s.added_to_day
             ? t("load.comeOn", { count: missing, day: weekdayIn(lang, s.added_to_day) })
             : t("load.notReplaced"),
-        className: "t-label text-asphalt-700",
+        className: cx(label, "text-asphalt-700"),
       });
     }
   }
 
   return (
     <div
+      data-line={line.id}
       className={cx(
         "relative flex items-center gap-2 overflow-hidden rounded-button pr-2",
         tone,
@@ -174,15 +213,19 @@ export function LoadLineRow({
         onPointerLeave={endPress}
         onPointerCancel={endPress}
         onContextMenu={(event) => {
+          // Android raises this during a long press: count once, and keep the release from toggling the line
           event.preventDefault();
-          if (!flagged) onCount();
+          endPress();
+          if (flagged) return;
+          held.current = true;
+          onCount();
         }}
         className="flex min-w-0 flex-1 touch-manipulation items-center gap-2 py-2 pl-2 text-left select-none"
       >
         <span className="flex size-12 shrink-0 items-center justify-center">
           <SlotIcon size={large ? 32 : 28} strokeWidth={1.75} aria-hidden className={slotColor} />
         </span>
-        <span className="flex w-9 shrink-0 flex-col items-end">
+        <span className={cx("flex shrink-0 flex-col items-end", large ? "w-12" : "w-9")}>
           <span className={cx("num text-asphalt-900", large ? "t-display" : "t-h1")}>
             {flagged ? line.loaded : line.qty}
           </span>
@@ -192,7 +235,7 @@ export function LoadLineRow({
           <span className={cx("text-asphalt-900", large ? "text-[24px] leading-8 font-semibold" : "t-field")}>
             {t(`cases.${line.case_type}`, { defaultValue: line.case_type })}
           </span>
-          <span className="flex items-center gap-1 t-label text-asphalt-700">
+          <span className={cx("flex items-center gap-1 text-asphalt-700", label)}>
             {chilled ? (
               <Snowflake size={16} strokeWidth={1.75} aria-hidden className="shrink-0 text-chilled" />
             ) : (
@@ -201,18 +244,20 @@ export function LoadLineRow({
             {t("load.lineStop", { n: stop, kind })}
           </span>
           {inProgress ? (
-            <span className="num t-label-strong text-petrol-700">
+            <span className={cx("num text-petrol-700", labelStrong)}>
               {t("load.onSoFar", { loaded: line.loaded, total: line.qty })}
             </span>
           ) : null}
-          {checked ? (
-            <span className="flex items-center gap-1 t-label text-done">
+          {checked && !changed ? (
+            <span className={cx("flex items-center gap-1 text-done", label)}>
               <Check size={16} strokeWidth={1.75} aria-hidden />
               {t("load.loaded")}
             </span>
           ) : null}
+          {changed ? <span className={cx("text-attention", labelStrong)}>{t("load.changedLine")}</span> : null}
           {statusLines.map((s) => (
-            <span key={s.text} className={s.className}>
+            <span key={s.text} className={cx(s.icon && "flex items-center gap-1", s.className)}>
+              {s.icon ? <s.icon size={16} strokeWidth={1.75} aria-hidden className="shrink-0" /> : null}
               {s.text}
             </span>
           ))}
@@ -224,7 +269,7 @@ export function LoadLineRow({
         icon={flagged ? undefined : CircleAlert}
         iconAfter={flagged ? ChevronRight : undefined}
         onClick={onFlag}
-        className="min-w-[84px] shrink-0 px-2.5"
+        className={cx("shrink-0 px-2.5", large ? "min-w-[104px]" : "min-w-[84px]")}
       >
         {flagged ? t("load.view") : t("load.flag")}
       </Button>
@@ -232,7 +277,8 @@ export function LoadLineRow({
   );
 }
 
-/** "How many are on?": for a line that goes on in several trips from the shelf. */
+/** "How many are on?": for a line that goes on in several trips from the shelf. Each open starts from what the
+ *  line has on now, never from a count left on the stepper last time. */
 export function CountSheet({
   line,
   onClose,
@@ -248,7 +294,10 @@ export function CountSheet({
   if (line && forLine !== line.id) {
     setForLine(line.id);
     setValue(line.loaded || line.qty);
+  } else if (!line && forLine !== null) {
+    setForLine(null);
   }
+  const item = line ? t(`casesLower.${line.case_type}`, { defaultValue: line.case_type }) : "";
   return (
     <Sheet
       open={Boolean(line)}
@@ -278,10 +327,12 @@ export function CountSheet({
             min={0}
             max={line.qty}
             label={t("load.countTitle")}
-            unit={t(`cases.${line.case_type}`, { defaultValue: line.case_type })}
+            unit={item}
+            fewerLabel={t("flag.fewer", { item })}
+            moreLabel={t("flag.more", { item })}
             size="field"
           />
-          <span className="num t-body text-asphalt-700">{t("load.of", { n: line.qty })}</span>
+          <span className="num t-label text-asphalt-700">{t("load.of", { n: line.qty })}</span>
         </div>
       ) : null}
     </Sheet>

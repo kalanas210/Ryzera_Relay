@@ -111,8 +111,8 @@ function TonightBody({
           <div className="flex flex-col gap-3 rounded-card border border-asphalt-200 bg-white p-4">
             {data.left.map((row) => (
               <div key={`${row.district}-${row.at}`} className="flex gap-3">
-                <span className="num t-body-strong w-24 shrink-0 text-asphalt-900">
-                  {row.until ? t("tonight.until", { from: clock(row.at), to: clock(row.until) }) : clock(row.at)}
+                <span className="num t-body-strong min-w-16 shrink-0 whitespace-nowrap text-asphalt-900">
+                  {clock(row.at)}
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span className="latin t-body-strong text-asphalt-900">{row.district}</span>
@@ -237,6 +237,8 @@ function VehicleLoadCard({ card, highlighted }: { card: LoadCard; highlighted: b
   ]
     .filter(Boolean)
     .join(" · ");
+  // The Plan changed modifier is the border and the chip together; both go once the load is complete.
+  const planChanged = highlighted || (Boolean(card.plan_changed_at) && card.state !== "ready");
 
   return (
     <button
@@ -244,7 +246,7 @@ function VehicleLoadCard({ card, highlighted }: { card: LoadCard; highlighted: b
       onClick={() => navigate(`/loader/trips/${card.trip_id}`)}
       className={cx(
         "flex w-full flex-col gap-2 rounded-card bg-white p-4 text-left",
-        highlighted || card.plan_changed_at ? "border-2 border-attention" : "border border-asphalt-200",
+        planChanged ? "border-2 border-attention" : "border border-asphalt-200",
       )}
     >
       <div className="flex w-full items-center gap-2">
@@ -274,7 +276,7 @@ function VehicleLoadCard({ card, highlighted }: { card: LoadCard; highlighted: b
             {t("tonight.completeAt", { time: clock(card.completed_at) })}
           </span>
         ) : null}
-        {card.plan_changed_at && card.state !== "ready" ? (
+        {planChanged && card.plan_changed_at ? (
           <StatusChip icon={RefreshCw} tone="attention">
             {t("chips.planChanged", { time: clock(card.plan_changed_at) })}
           </StatusChip>

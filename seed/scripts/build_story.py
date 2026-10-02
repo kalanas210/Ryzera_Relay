@@ -308,7 +308,10 @@ def main() -> None:
 
     # people --------------------------------------------------------------------
     people = [
-        dict(username="nuwan", display_name="Nuwan Perera", role="dispatcher", depot="", locale="en", judge="1"),
+        # The dispatch number the dock tablet shows under "Call Nuwan at dispatch" (the tablet cannot place calls).
+        # The scenario prints no number, so this is a placeholder no real line has: no subscriber number starts with 0.
+        dict(username="nuwan", display_name="Nuwan Perera", role="dispatcher", depot="", locale="en", judge="1",
+             phone="081 000 2145"),
         # The four judge accounts start in English so the screens can be reviewed; Rizwan reads Tamil most easily
         # and switches with one tap, and the tablet brings each loader's own language back at sign-in.
         dict(username="rizwan", display_name="Mohamed Rizwan", role="loader", depot="Kandy", locale="en", pin="2580", judge="1"),
@@ -331,7 +334,13 @@ def main() -> None:
         people.append(dict(username=username, display_name=name, role="driver", depot=M.VEH.loc[vid, "depot"],
                            vehicle_id=vid, locale="en" if vid == "VEH045" else "si", judge="1" if vid == "VEH045" else "",
                            pin="3690" if vid == "VEH045" else ""))
-    write(STORY / "people.csv", ["username", "display_name", "role", "depot", "outlet_id", "vehicle_id", "locale", "pin", "judge"], people)
+    write(STORY / "people.csv",
+          ["username", "display_name", "role", "depot", "outlet_id", "vehicle_id", "locale", "pin", "judge", "phone"],
+          people)
+
+    # hub stock: scenario fact 23, the Kandy hub's rice and dhal supplier drop at 5:00 AM, with no spare before it
+    write(STORY / "hub_stock.csv", ["depot", "case_type", "run_date", "spare", "next_delivery_at"],
+          [dict(depot="Kandy", case_type="rice_dhal", run_date=WED, spare=0, next_delivery_at=f"{WED}T05:00:00+05:30")])
 
     # vehicle days ----------------------------------------------------------------
     status_wed = {r["vehicle_id"]: r["wednesday"] for r in rows("vehicles")}

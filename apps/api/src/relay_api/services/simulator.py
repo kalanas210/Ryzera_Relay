@@ -13,12 +13,13 @@ never apply the same step twice; the tick simply skips a copy that is busy.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from relay_api.clock import sim_now
+from relay_api.clock import set_clock, sim_now
 from relay_api.db import scope_to_workspace
 from relay_api.models import OrderSource, Outlet, ScheduledEvent, Workspace
 from relay_api.seed.story import parse_lines
@@ -67,10 +68,18 @@ def _apply_events(db: Session, until: datetime) -> None:
 
 
 def catch_up(
-    db: Session, workspace: Workspace, until: datetime | None = None, *, jumped_from: datetime | None = None
+    db: Session,
+    workspace: Workspace,
+    until: datetime | Callable[[Session], datetime] | None = None,
+    *,
+    jumped_from: datetime | None = None,
 ) -> list[str]:
     """Bring a copy of the day up to `until` (default: its scenario time now). With `jumped_from`, also play
-    the story steps the jump skipped. Returns the labels of the steps played."""
+    the story steps the jump skipped. Returns the labels of the steps played.
+
+    `until` can be a story moment's time as a function of the day (`story.moment_time`): the handover follows the
+    truck the story publishes on the way, so it is worked out again after every step played, a step later than it
+    is never played, and the clock lands on it."""
     scope_to_workspace(db, workspace.id)
     locked = db.scalar(
         select(Workspace)
@@ -80,11 +89,20 @@ def catch_up(
     )
     if locked is None:
         return []  # a jump is catching this copy up; the next tick will find it current
-    now = until or sim_now(locked)
+    fixed = until if isinstance(until, datetime) else sim_now(locked)
+
+    def target() -> datetime:
+        if not callable(until):
+            return fixed
+        moment = until(db)
+        return max(moment, jumped_from) if jumped_from is not None else moment
+
+    now = target()
     played: list[str] = []
     if jumped_from is not None:
         people = story.cast(db)
         while people is not None:
+            now = target()
             due = story.pending(db, locked, now)
             if not due:
                 break
@@ -102,6 +120,9 @@ def catch_up(
             if did:
                 played.append(step.label)
             db.flush()
+    if callable(until):
+        now = target()
+        set_clock(locked, now)
     _apply_events(db, now)
     world.advance(db, now)
     db.commit()

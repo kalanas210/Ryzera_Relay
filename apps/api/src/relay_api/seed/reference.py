@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Callable, Iterator
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from relay_api.models import (
     CalendarDay,
     CaseType,
     District,
+    HubStock,
     OrderStream,
     Outlet,
     OutletDwell,
@@ -224,6 +225,19 @@ def _history(seed: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _hub_stock(seed: Path) -> list[dict[str, Any]]:
+    return [
+        dict(
+            depot=r["depot"],
+            case_type=r["case_type"],
+            run_date=date.fromisoformat(r["run_date"]),
+            spare=int(r["spare"]),
+            next_delivery_at=datetime.fromisoformat(r["next_delivery_at"]) if r["next_delivery_at"] else None,
+        )
+        for r in read(seed / "story" / "hub_stock.csv")
+    ]
+
+
 # In dependency order: a table is loaded after the tables it refers to.
 TABLES: list[tuple[type, Rows]] = [
     (District, _districts),
@@ -239,6 +253,7 @@ TABLES: list[tuple[type, Rows]] = [
     (OutletDwell, _dwell),
     (OrderStream, _streams),
     (ServiceHistory, _history),
+    (HubStock, _hub_stock),
 ]
 
 
@@ -257,7 +272,13 @@ def load_reference(db: Session, seed_dir: Path) -> list[str]:
 
 
 def load_people(db: Session, seed_dir: Path, password: str) -> int:
-    if db.scalar(select(AppUser.id).limit(1)) is not None:
+    existing = {u.username: u for u in db.scalars(select(AppUser))}
+    if existing:
+        # people are seeded once; a phone number added to the file later is filled in where none is set yet
+        for r in read(seed_dir / "story" / "people.csv"):
+            user = existing.get(r["username"])
+            if user is not None and user.phone is None and r.get("phone"):
+                user.phone = r["phone"]
         return 0
     password_hash = hash_secret(password)  # one hash for every seeded account keeps the seed fast
     pins: dict[str, str] = {}
@@ -277,6 +298,7 @@ def load_people(db: Session, seed_dir: Path, password: str) -> int:
                 outlet_id=r["outlet_id"] or None,
                 vehicle_id=r["vehicle_id"] or None,
                 locale=r["locale"] or "en",
+                phone=r.get("phone") or None,
                 judge_account=r["judge"] == "1",
             )
         )

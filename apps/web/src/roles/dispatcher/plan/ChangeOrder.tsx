@@ -76,7 +76,13 @@ export function ChangeOrder({
       ) : (
         <div className="flex flex-col gap-4">
           {data.broken.length ? (
-            <Notice tone="problem" compact title="This order breaks a rule">
+            <Notice
+              tone="problem"
+              compact
+              title={
+                data.broken.length > 1 ? `This order breaks ${data.broken.length} rules` : "This order breaks a rule"
+              }
+            >
               {data.broken.join(". ")}. Relay keeps the published order.
             </Notice>
           ) : null}
