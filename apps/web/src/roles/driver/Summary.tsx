@@ -1,11 +1,22 @@
-import { CircleCheck, Clock, CloudOff, RefreshCw, Truck, X } from "lucide-react";
+import { CircleCheck, Clock, CloudOff, Phone, RefreshCw, Truck, X } from "lucide-react";
 import { Navigate } from "react-router";
 import { Button } from "@/design/Button";
 import { Notice } from "@/design/Notice";
 import { PhoneScreen } from "@/design/Phone";
 import { StatusChip } from "@/design/StatusChip";
 import { StopMarker } from "@/design/StopMarker";
-import { awaitingAnswer, countOf, onRunDate, ownStops, sentAt, stopLocal } from "./local";
+import { calledName } from "@/lib/names";
+import {
+  answeredNo,
+  awaitingAnswer,
+  countOf,
+  latest,
+  onRunDate,
+  ownStops,
+  sentAt,
+  stopLocal,
+  waitingForCall,
+} from "./local";
 import { DriverHeader, Helper, markerState, PlaceName, SendChip } from "./parts";
 import { QuestionCards, RunChanges, useOpenQuestion } from "./Question";
 import { useDriver } from "./sync";
@@ -16,7 +27,7 @@ import { useDriverText } from "./words";
  *  signal too (it joins the queue after the stops). DEG-02 happens here: when the signal comes back the stops send,
  *  and a stop that clashed with an office change asks its one question at the top. */
 export function SummaryPage() {
-  const { run, loaded, now, items, save, batch, reconnect } = useDriver();
+  const { run, loaded, now, items, save, batch, reconnect, offline } = useDriver();
   const { t, clock, around, hub, tripLine, list, cases, caseItem } = useDriverText();
   const questionOpen = useOpenQuestion(run);
   if (!loaded || !now || !run) return <PhoneScreen header={<DriverHeader back="/driver" />}>{null}</PhoneScreen>;
@@ -42,6 +53,9 @@ export function SummaryPage() {
   const mine = items.filter((i) => (i.record?.trip_id ?? trip.trip_id) === trip.trip_id);
   const waiting = countOf(mine.filter((i) => i.queued));
   const finishedLocally = mine.some((i) => i.record?.kind === "trip_finished" && i.queued);
+  // "No, something is wrong" cancels nothing: the stop stays at the dock with the driver until the dispatcher calls
+  const atTheDock = answeredNo(run, items).some((q) => trip.stops.some((s) => s.stop_id === q.stop_id));
+  const name = calledName(run.dispatcher);
 
   // what is on the phone, what is going now, or what has gone
   const finished = trip.finished_at;
@@ -54,13 +68,13 @@ export function SummaryPage() {
     photosWith: t("summary.photosWith", { count: n }),
   });
   // what reached the office after the phone had no signal: this phone's own reconnect, together with what Relay
-  // says came in late for stops a demo jump recorded for the driver
+  // says came in late for stops a demo jump recorded for the driver, as of the last of those sends
   const late = trip.stops.filter((s) => s.sent_at);
   const back = reconnect && reconnect.trip_id === trip.trip_id ? reconnect : null;
   const sent =
     back || late.length
       ? {
-          at: [back?.at, ...late.map((s) => s.sent_at)].filter((x): x is string => !!x).sort()[0] ?? "",
+          at: latest([back?.at, ...late.map((s) => s.sent_at)]) ?? "",
           stopIds: [...new Set([...(back?.stopIds ?? []), ...late.map((s) => s.stop_id)])],
           photos: Math.max(back?.photos ?? 0, late.filter((s) => s.has_photo).length),
         }
@@ -106,11 +120,26 @@ export function SummaryPage() {
     bar = (
       <Notice tone="done" field title={t("summary.finishedAt", { time: clock(finished) })}>
         {finishedLocally
-          ? t("summary.finishedOffline")
+          ? offline
+            ? t("summary.finishedOffline")
+            : t("report.sendingBody")
           : trip.expected_back && Date.parse(trip.expected_back) > Date.parse(finished)
             ? t("summary.expectBack", { ...h, around: around(trip.expected_back) })
             : null}
       </Notice>
+    );
+  } else if (atTheDock && !questionOpen) {
+    bar = (
+      <Button
+        variant="primary"
+        density="field"
+        full
+        icon={CircleCheck}
+        disabled
+        reason={name ? t("summary.waitForCall", { name }) : t("summary.waitForCallNoName")}
+      >
+        {t("summary.finish")}
+      </Button>
     );
   } else if (!questionOpen) {
     const helper =
@@ -214,6 +243,8 @@ function SummaryRow({
   const { items } = useDriver();
   const local = stopLocal(items, stop.stop_id);
   const question = awaitingAnswer(run, items, stop.stop_id);
+  const call = waitingForCall(run, items, stop.stop_id);
+  const name = calledName(run.dispatcher);
   const extra: string[] = [];
   const short = stop.lines.filter((l) => l.short > 0);
   // what came off the truck, as the proof says when a line was changed at the store
@@ -247,9 +278,14 @@ function SummaryRow({
             {line}
           </span>
         ))}
-        {question || local.waiting ? (
+        {question || call || local.waiting ? (
           <span className="mt-1.5 flex flex-wrap gap-1.5">
             {question ? <StatusChip kind="needsAnswer">{t("chip.needsAnswer")}</StatusChip> : null}
+            {call ? (
+              <StatusChip tone="attention" icon={Phone}>
+                {name ? t("chip.waitingFor", { name }) : t("chip.waitingForNoName")}
+              </StatusChip>
+            ) : null}
             <SendChip local={local} />
           </span>
         ) : null}

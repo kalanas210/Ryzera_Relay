@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import date
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from relay_api.models import AppUser, Plan, Role, Trip, VehicleDay, VehicleDayStatus
+from relay_api.models import AppUser, Plan, Role, Trip, Vehicle, VehicleDayStatus
 from relay_api.schemas.plan import BoardOut, FitOut
 from relay_api.security import require
 from relay_api.services import board as boards
@@ -22,6 +23,7 @@ from relay_api.workspaces import Scope, ScopeDep
 router = APIRouter(prefix="/api/dispatch/plan", tags=["dispatcher: plan"])
 Dispatcher = Annotated[AppUser, Depends(require(Role.DISPATCHER))]
 Depot = Literal["Peliyagoda", "Kandy"]
+T = TypeVar("T")
 
 
 def _plan(scope: Scope, plan_id: uuid.UUID) -> Plan:
@@ -31,7 +33,8 @@ def _plan(scope: Scope, plan_id: uuid.UUID) -> Plan:
     return plan
 
 
-def _guard(fn: Any) -> Any:
+def _guard(fn: Callable[[], T]) -> T:
+    """Run a planning change; a rule it refuses on is the dispatcher's 409, with the reason."""
     try:
         return fn()
     except planning.PlanError as exc:
@@ -54,7 +57,8 @@ class ProposeIn(BaseModel):
 
 @router.post("/propose", response_model=BoardOut)
 def propose(body: ProposeIn, scope: ScopeDep, _user: Dispatcher) -> BoardOut:
-    """Ask Relay for a plan. It checks every rule for every order, so this takes a few seconds."""
+    """Ask Relay for a plan. The story day's first proposals come from the engine cache in a moment; a new fleet or
+    a new set of orders makes the engine search again, which takes up to a minute."""
     plan = planning.get_plan(scope.db, body.depot, body.run_date or current_run(scope.db, scope.now))
     _guard(lambda: planning.propose_plan(scope.db, scope.now, plan, forced=plan.summary.get("overridden", [])))
     scope.db.commit()
@@ -62,16 +66,24 @@ def propose(body: ProposeIn, scope: ScopeDep, _user: Dispatcher) -> BoardOut:
 
 
 class MoveIn(BaseModel):
-    order_ref: str
+    order_ref: str | None = Field(default=None, description="One order, as a Not placed card moves")
+    order_refs: list[str] = Field(
+        default_factory=list, max_length=12, description="Several orders together: every order of a dragged stop"
+    )
     vehicle_id: str | None = None
     trip_no: int | None = Field(default=None, ge=1, le=2)
+    """No vehicle and trip: off every trip, into Not placed."""
+
+    @property
+    def refs(self) -> list[str]:
+        return [*([self.order_ref] if self.order_ref else []), *self.order_refs]
 
 
 @router.post("/{plan_id}/move", response_model=BoardOut)
 def move(plan_id: uuid.UUID, body: MoveIn, scope: ScopeDep, user: Dispatcher) -> BoardOut:
     plan = _plan(scope, plan_id)
     target = planning.Target(body.vehicle_id, body.trip_no) if body.vehicle_id and body.trip_no else None
-    _guard(lambda: planning.move_order(scope.db, scope.now, plan, body.order_ref, target, user))
+    _guard(lambda: planning.move_orders(scope.db, scope.now, plan, body.refs, target, user))
     scope.db.commit()
     return boards.board(scope.db, scope.now, plan)
 
@@ -85,7 +97,13 @@ def undo(plan_id: uuid.UUID, scope: ScopeDep, _user: Dispatcher) -> BoardOut:
 
 
 @router.get("/{plan_id}/fit", response_model=list[FitOut])
-def fit(plan_id: uuid.UUID, scope: ScopeDep, _user: Dispatcher, order_ref: str) -> list[FitOut]:
+def fit(
+    plan_id: uuid.UUID,
+    scope: ScopeDep,
+    _user: Dispatcher,
+    order_ref: Annotated[list[str], Query(min_length=1, max_length=12)],
+) -> list[FitOut]:
+    """While orders are dragged (one, or every order of a stop, as repeated order_ref): would they fit each trip."""
     return boards.fits(scope.db, _plan(scope, plan_id), order_ref)
 
 
@@ -94,6 +112,16 @@ def deferrals(plan_id: uuid.UUID, scope: ScopeDep, _user: Dispatcher) -> dict[st
     plan = _plan(scope, plan_id)
     data = drawers.drawer(scope.db, scope.now, plan)
     scope.db.commit()  # the next-run check is kept once computed
+    return data
+
+
+@router.get("/{plan_id}/override/preview")
+def override_preview(plan_id: uuid.UUID, order_ref: str, scope: ScopeDep, _user: Dispatcher) -> dict[str, Any]:
+    """What deferring a protected order anyway would change, asked when Defer anyway opens. The engine's answer
+    is kept, so the override that may follow takes no time."""
+    plan = _plan(scope, plan_id)
+    data = _guard(lambda: drawers.override_preview(scope.db, plan, order_ref))
+    scope.db.commit()
     return data
 
 
@@ -183,17 +211,21 @@ class VehicleStatusIn(BaseModel):
 
 @router.patch("/vehicles/{vehicle_id}", response_model=BoardOut)
 def set_vehicle_status(
-    vehicle_id: str, body: VehicleStatusIn, scope: ScopeDep, _user: Dispatcher, depot: Depot = "Kandy"
+    vehicle_id: str, body: VehicleStatusIn, scope: ScopeDep, user: Dispatcher, depot: Depot = "Kandy"
 ) -> BoardOut:
-    """Send a vehicle to the workshop, back into service, or onto standby for a run. Propose again to re-plan."""
-    day = scope.db.scalar(
-        select(VehicleDay).where(VehicleDay.vehicle_id == vehicle_id, VehicleDay.run_date == body.run_date)
+    """Send a vehicle to the workshop, back into service, or onto standby for a run of a draft plan. The plan keeps
+    its trips until it is proposed again; the board asks for that."""
+    vehicle = scope.db.get(Vehicle, vehicle_id)
+    if vehicle is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such vehicle")
+    if vehicle.depot != depot:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"{vehicle_id} is a {planning.DEPOT_LABEL[vehicle.depot]} vehicle"
+        )
+    plan = _guard(
+        lambda: planning.set_vehicle_status(
+            scope.db, scope.now, vehicle, body.run_date, VehicleDayStatus(body.status), body.note, user
+        )
     )
-    if day is None:
-        day = VehicleDay(vehicle_id=vehicle_id, run_date=body.run_date, status=VehicleDayStatus(body.status))
-        scope.db.add(day)
-    day.status = VehicleDayStatus(body.status)
-    day.note = body.note
-    plan = planning.get_plan(scope.db, depot, body.run_date)
     scope.db.commit()
     return boards.board(scope.db, scope.now, plan)

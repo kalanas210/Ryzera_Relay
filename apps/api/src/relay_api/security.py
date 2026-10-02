@@ -12,6 +12,7 @@ X-Relay-Client, a custom header that a cross-site form or image cannot send.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -105,7 +106,7 @@ def current_user(request: Request, db: Annotated[Session, Depends(get_db)]) -> A
 CurrentUser = Annotated[AppUser, Depends(current_user)]
 
 
-def require(*roles: Role):  # type: ignore[no-untyped-def]
+def require(*roles: Role) -> Callable[[AppUser], AppUser]:
     """Dependency that lets only the given roles through."""
 
     def check(user: CurrentUser) -> AppUser:

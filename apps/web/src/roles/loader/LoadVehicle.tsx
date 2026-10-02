@@ -1,12 +1,12 @@
 import {
   Check,
   ChevronDown,
-  ChevronUp,
   CircleAlert,
   CircleDot,
   Clock,
   Handshake,
   Layers,
+  LockKeyhole,
   PackageX,
   RefreshCw,
   User,
@@ -46,7 +46,7 @@ import {
 } from "./api";
 import { CallSheet, FlagSheet, type SendFlag } from "./FlagSheet";
 import { DockHeader } from "./LoaderShell";
-import { CountSheet, LoadLineRow, LoadProgress, StopTitle } from "./parts";
+import { CountSheet, LoadLineRow, LoadProgress, StopTitle, useSettledTap } from "./parts";
 
 const SEEN_KEY = "relay.dock.answers-seen";
 const COLLAPSE_AFTER_MS = 10_000;
@@ -83,11 +83,21 @@ function shown(selector: string): HTMLElement | null {
 /** How long a tapped line is held in place: the fold, the tick and the server's answer all land within it. */
 const HOLD_MS = 1500;
 
-type Anchor = { el: Element; top: number; until: number };
+/** `gap` is how far above the phone's bottom bar the element ended (Infinity on the tablet, which has none). */
+type Anchor = { el: Element; top: number; until: number; gap: number };
+
+/** The phone's bottom bar, when it is on screen. */
+function onScreen(el: HTMLElement | null): HTMLElement | null {
+  return el?.getClientRects().length ? el : null;
+}
 
 /** Where an element sits on screen now, so it can be put back there while the list changes height above it. */
-function measure(el: Element | null | undefined): Anchor | null {
-  return el ? { el, top: el.getBoundingClientRect().top, until: Date.now() + HOLD_MS } : null;
+function measure(el: Element | null | undefined, foot: HTMLElement | null): Anchor | null {
+  if (!el) return null;
+  const box = el.getBoundingClientRect();
+  const bar = onScreen(foot);
+  const gap = bar ? bar.getBoundingClientRect().top - box.bottom : Number.POSITIVE_INFINITY;
+  return { el, top: box.top, until: Date.now() + HOLD_MS, gap };
 }
 
 /** The first line or stop showing under the app bar, outside the stop about to fold: what the loader is looking
@@ -98,6 +108,20 @@ function firstInView(below: number, folding: Element | null): Element | null {
     if (el.getBoundingClientRect().bottom > below) return el;
   }
   return null;
+}
+
+/** The stop being loaded now, by its header or else its first line, when that starts on screen between the app bar
+ *  and the bottom bar: where the loader's eyes go when a finished stop folds by itself. */
+function loadingNowInView(stopId: string | undefined, below: number, foot: HTMLElement | null): Element | null {
+  if (!stopId) return null;
+  const above = onScreen(foot)?.getBoundingClientRect().top ?? window.innerHeight;
+  const candidates = [shown(`[data-stop="${stopId}"]`), shown(`[data-stop="${stopId}"] [data-line]`)];
+  return (
+    candidates.find((el) => {
+      const top = el?.getBoundingClientRect().top;
+      return top !== undefined && top >= below && top < above;
+    }) ?? null
+  );
 }
 
 /** Scrolls up by about what a stop above `el` loses when it folds, before it folds. Near the end of the list the
@@ -173,11 +197,15 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
   const unsent = useUnsentFlags(load.trip_id);
   const groups = load.groups;
   const sections = useRef<Record<string, HTMLElement | null>>({});
+  const root = useRef<HTMLDivElement>(null);
   const [bar, setBar] = useState<HTMLDivElement | null>(null);
+  const [foot, setFoot] = useState<HTMLDivElement | null>(null);
   const barHeight = useHeight(bar, 64);
 
   // Folding a finished stop must not move the list under a gloved finger. Whatever the loader is working at is
-  // measured before the fold and put back in the same place after it, before the browser paints.
+  // measured before the fold and put back in the same place after it, before the browser paints. When the bottom
+  // bar grows over it (Go to handover appears as the last line is checked, or an alert slides in), the list moves
+  // up just enough to keep it in view above the bar, with the room it had, and holds it there.
   const anchor = useRef<Anchor | null>(null);
   useLayoutEffect(() => {
     const held = anchor.current;
@@ -186,9 +214,37 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
       anchor.current = null;
       return;
     }
-    const shift = held.el.getBoundingClientRect().top - held.top;
-    if (Math.abs(shift) >= 1) window.scrollBy(0, shift);
+    const box = held.el.getBoundingClientRect();
+    const shift = box.top - held.top;
+    const bottomBar = onScreen(foot);
+    // a line the loader tapped while it sat half under the bar is left where it is
+    const covered =
+      bottomBar && held.gap >= 0
+        ? held.top + box.height - (bottomBar.getBoundingClientRect().top - Math.min(held.gap, 8))
+        : 0;
+    const lift = Math.max(0, covered);
+    if (Math.abs(shift + lift) >= 1) window.scrollBy(0, shift + lift);
+    held.top -= lift;
   });
+
+  // The tablet's control column fills the screen below its own top. Until the page scrolls the demo bar away, that
+  // top sits lower than the app bar's, so the column is sized from where the app bar is now, not from its height.
+  useEffect(() => {
+    const el = root.current;
+    if (!el || !bar) return;
+    const update = () =>
+      el.style.setProperty("--above", `${Math.max(0, Math.round(bar.getBoundingClientRect().top))}px`);
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(document.body);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      observer?.disconnect();
+    };
+  }, [bar]);
   // The loader scrolling, or pressing anything, lets go at once: the list never fights a hand.
   useEffect(() => {
     const letGo = () => {
@@ -210,30 +266,39 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
     !g.lines.some((l) => l.status === "flag_waiting" || isChanged(l));
   const touchedFolds = foldsOnLeave(groups.find((g) => g.stop_id === touched?.stop));
 
+  const complete = Boolean(load.handover.completed_at);
+  // The server names the one stop being loaded now; the screen never works it out for itself.
+  const current = complete ? undefined : groups.find((g) => g.state === "loading");
+  // read when the fold comes, without starting its 10 seconds again each time a poll lands
+  const loadingNow = useRef(current?.stop_id);
+  loadingNow.current = current?.stop_id;
+
   // A stop just finished stays open under the loader's hand until they touch another stop or 10 seconds pass. Then
-  // whatever is on screen stays where it is: the loader may have scrolled anywhere in those 10 seconds.
+  // what the loader is looking at stays where it is: the stop being loaded now, if it is on screen, or else
+  // whatever shows first under the app bar, as they may have scrolled anywhere in those 10 seconds.
   useEffect(() => {
     if (!touched) return;
     const timer = window.setTimeout(() => {
       if (touchedFolds) {
-        const view = firstInView(bar?.getBoundingClientRect().bottom ?? 0, shown(`[data-stop="${touched.stop}"]`));
-        anchor.current = measure(view);
+        const below = bar?.getBoundingClientRect().bottom ?? 0;
+        const view =
+          loadingNowInView(loadingNow.current, below, foot) ??
+          firstInView(below, shown(`[data-stop="${touched.stop}"]`));
+        anchor.current = measure(view, foot);
         makeRoomToFold(touched.stop, view);
       }
       // fold, and put the list back, before the browser paints
       flushSync(() => setTouched(null));
     }, COLLAPSE_AFTER_MS);
     return () => window.clearTimeout(timer);
-  }, [touched, touchedFolds, bar]);
+  }, [touched, touchedFolds, bar, foot]);
 
   const kind = t(`kinds.${loadKindKey(load.brand, load.temp)}`);
   const chilled = load.temp === "chilled";
   const firstSeq = groups[0]?.seq;
   const lastSeq = groups[groups.length - 1]?.seq;
   const allDone = load.lines_done === load.lines_total && load.lines_total > 0;
-  const complete = Boolean(load.handover.completed_at);
-  // The server names the one stop being loaded now; the screen never works it out for itself.
-  const current = complete ? undefined : groups.find((g) => g.state === "loading");
+  const departed = Boolean(now && now.getTime() >= Date.parse(load.planned_depart));
   const late = Boolean(now && now.getTime() >= Date.parse(load.planned_depart) - NO_ANSWER_BEFORE_MS) && !complete;
 
   const answers = useMemo(
@@ -262,7 +327,7 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
 
   const touch = (g: StopGroup, line: LoadLine) => {
     const row = shown(`[data-line="${line.id}"]`);
-    anchor.current = measure(row);
+    anchor.current = measure(row, foot);
     if (touched && touched.stop !== g.stop_id && touchedFolds) makeRoomToFold(touched.stop, row);
     setTouched({ stop: g.stop_id, at: Date.now() });
   };
@@ -362,7 +427,14 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
     alert = {
       tone: "problem",
       who: t("load.noAnswerFrom", { name: calledName(load.dispatcher) }),
-      what: t("load.callBefore", { time: clock(load.planned_depart) }),
+      // once the time to leave has gone, there is no "before" left to call by
+      what: departed
+        ? t("load.dueToLeave", {
+            vehicle: load.vehicle_id,
+            time: clock(load.planned_depart),
+            name: calledName(load.dispatcher),
+          })
+        : t("load.callBefore", { time: clock(load.planned_depart) }),
       action: load.dispatcher_phone
         ? { label: t("load.call", { name: calledName(load.dispatcher) }), onClick: () => setCalling(true) }
         : undefined,
@@ -432,17 +504,35 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
       </div>
     ) : null;
 
-  const hint = allDone ? (
-    <p className="flex items-start gap-3 t-body text-asphalt-700">
-      <Check size={24} strokeWidth={1.75} aria-hidden className="shrink-0 text-done" />
-      {t("load.hintDone", { count: load.lines_total, driver: calledName(load.driver) })}
-    </p>
-  ) : (
-    <p className="flex items-start gap-3 t-body text-asphalt-700">
-      <Layers size={24} strokeWidth={1.75} aria-hidden className="shrink-0" />
-      {groups.length > 1 ? t("load.hint", { first: firstSeq, last: lastSeq }) : t("load.hintSingle")}
-    </p>
-  );
+  // Once the load is marked complete the page is its record: the lines no longer check or flag, and it says so.
+  const hint =
+    complete && load.handover.completed_at ? (
+      <section
+        role="status"
+        className="flex items-start gap-3 rounded-card border border-asphalt-300 bg-waiting-soft p-4"
+      >
+        <LockKeyhole size={24} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0 text-asphalt-700" />
+        <div className="flex min-w-0 flex-col gap-2">
+          <h2 className="t-h3">{t("load.completeTitle", { time: clock(load.handover.completed_at) })}</h2>
+          <p className="t-body text-asphalt-900">
+            {load.dispatcher
+              ? t("load.completeBody", { name: calledName(load.dispatcher) })
+              : t("load.completeBodyNoName")}
+          </p>
+        </div>
+      </section>
+    ) : allDone ? (
+      <p className="flex items-start gap-3 t-body text-asphalt-700">
+        <Check size={24} strokeWidth={1.75} aria-hidden className="shrink-0 text-done" />
+        {t("load.hintDone", { count: load.lines_total, driver: calledName(load.driver) })}
+      </p>
+    ) : (
+      <p className="flex items-start gap-3 t-body text-asphalt-700">
+        <Layers size={24} strokeWidth={1.75} aria-hidden className="shrink-0" />
+        {/* press and hold has no other cue on screen, so the hint names it */}
+        {`${groups.length > 1 ? t("load.hint", { first: firstSeq, last: lastSeq }) : t("load.hintSingle")} ${t("load.holdHint")}`}
+      </p>
+    );
 
   const lines = (large: boolean) =>
     groups.map((g, index) => (
@@ -470,6 +560,7 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
             large={large}
             noAnswer={late && line.status === "flag_waiting"}
             unsent={unsent.has(line.id)}
+            readOnly={complete}
             onToggle={() => toggle(g, line)}
             onCount={() => {
               if (complete) return;
@@ -487,20 +578,24 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
       </StopSection>
     ));
 
+  // It appears under the finger that checked the last line, and the handover's Load complete takes its place on
+  // the next page: it waits a moment before it takes a tap, so a double tap never skips the totals.
+  const settled = useSettledTap(allDone);
   const handoverButton = allDone ? (
     <Button
       variant="primary"
       density="field"
       full
       icon={Handshake}
-      onClick={() => navigate(`/loader/trips/${load.trip_id}/handover`)}
+      onClick={settled(() => navigate(`/loader/trips/${load.trip_id}/handover`))}
     >
-      {t("load.goToHandover")}
+      {complete ? t("load.seeHandover") : t("load.goToHandover")}
     </Button>
   ) : null;
 
   return (
     <div
+      ref={root}
       className="mx-auto flex min-h-dvh w-full max-w-[1100px] flex-col"
       style={{ "--bar": `${barHeight}px` } as CSSProperties}
     >
@@ -516,7 +611,10 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
         </div>
         <div className="px-4 py-3">{hint}</div>
         <div className="flex flex-col gap-4 px-4 pb-6 [overflow-anchor:none]">{lines(false)}</div>
-        <div className="sticky bottom-0 z-20 mt-auto flex flex-col gap-2 border-t border-asphalt-200 bg-white px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+        <div
+          ref={setFoot}
+          className="sticky bottom-0 z-20 mt-auto flex flex-col gap-2 border-t border-asphalt-200 bg-white px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]"
+        >
           {alertRow(false)}
           {progress(false)}
           {handoverButton}
@@ -525,18 +623,20 @@ function LoadVehicle({ load, title }: { load: TripLoad; title: string }) {
 
       {/* dock tablet: a control column with the load map, and the lines set larger */}
       <div className="hidden flex-1 gap-6 p-6 md:flex">
-        {/* The column keeps the viewport's height so the progress sits at its foot. When an alert, three chips and
-            the map need more than that (Sinhala and Tamil on a 768 high tablet), the column scrolls on its own and
-            nothing in it is squeezed. */}
-        <aside className="sticky top-[calc(var(--bar)_+_24px)] flex h-[calc(100dvh_-_var(--bar)_-_48px)] w-80 shrink-0 flex-col gap-4 overflow-y-auto overscroll-contain rounded-card border border-asphalt-200 bg-white p-4">
-          {alertRow(true)}
-          {chips}
-          <div className="flex flex-col gap-1">
-            <h2 className="t-h3">{t("load.loadMap")}</h2>
-            <p className="t-caption text-asphalt-500">{t("load.loadMapHelp")}</p>
+        {/* The column fills the screen below its own top, so the progress and Go to handover always sit at its foot,
+            in view. When an alert, three chips and the map need more room than is left (Sinhala and Tamil on a 768
+            high tablet), only they scroll, on their own, and nothing in the column is squeezed. */}
+        <aside className="sticky top-[calc(var(--bar)_+_24px)] flex h-[calc(100dvh_-_var(--bar)_-_var(--above,0px)_-_48px)] w-80 shrink-0 flex-col overflow-hidden rounded-card border border-asphalt-200 bg-white">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
+            {alertRow(true)}
+            {chips}
+            <div className="flex flex-col gap-1">
+              <h2 className="t-h3">{t("load.loadMap")}</h2>
+              <p className="t-caption text-asphalt-500">{t("load.loadMapHelp")}</p>
+            </div>
+            <LoadMap groups={groups} current={current?.stop_id} onPick={scrollTo} />
           </div>
-          <LoadMap groups={groups} current={current?.stop_id} onPick={scrollTo} />
-          <div className="mt-auto flex flex-col gap-2">
+          <div className="flex shrink-0 flex-col gap-2 px-4 pt-2 pb-4">
             {progress(true)}
             {handoverButton}
           </div>
@@ -687,16 +787,33 @@ function StopSection({ group, position, loadingNow, open, onOpen, large, barHeig
           </div>
         </div>
       </div>
-      <div className="flex min-h-12 items-center gap-3 py-2">
-        <StopMarker n={group.seq} state={markerState(group)} />
-        <h3 className={cx("min-w-0 flex-1", large ? "t-h1" : "t-h2")}>
-          <StopTitle seq={group.seq} place={group.place} />
+      {group.state === "done" && !group.short ? (
+        // a finished stop opened again: its header folds it, as the design's stop group does, so nothing is added
+        // beside the title to squeeze it onto a second line
+        <h3>
+          <button
+            type="button"
+            aria-expanded
+            onClick={() => onOpen(false)}
+            className="flex min-h-12 w-full items-center gap-3 py-2 text-left"
+          >
+            <StopMarker n={group.seq} state={markerState(group)} />
+            <span className={cx("min-w-0 flex-1", large ? "t-h1" : "t-h2")}>
+              <StopTitle seq={group.seq} place={group.place} />
+            </span>
+            <span className={cx("num shrink-0 text-asphalt-900", large ? "t-h3" : "t-body-strong")}>{count}</span>
+            <span className="sr-only">{t("load.collapse")}</span>
+          </button>
         </h3>
-        <span className={cx("num shrink-0 text-asphalt-900", large ? "t-h3" : "t-body-strong")}>{count}</span>
-        {group.state === "done" && !group.short ? (
-          <IconButton icon={ChevronUp} label={t("load.collapse")} density="field" onClick={() => onOpen(false)} />
-        ) : null}
-      </div>
+      ) : (
+        <div className="flex min-h-12 items-center gap-3 py-2">
+          <StopMarker n={group.seq} state={markerState(group)} />
+          <h3 className={cx("min-w-0 flex-1", large ? "t-h1" : "t-h2")}>
+            <StopTitle seq={group.seq} place={group.place} />
+          </h3>
+          <span className={cx("num shrink-0 text-asphalt-900", large ? "t-h3" : "t-body-strong")}>{count}</span>
+        </div>
+      )}
       <div className="-mt-1 flex flex-col gap-1 pl-11">
         <p className={cx("latin text-asphalt-700", large ? "t-body" : "t-label")}>
           {t("load.stopMeta", {
@@ -706,7 +823,8 @@ function StopSection({ group, position, loadingNow, open, onOpen, large, barHeig
           })}
         </p>
         {loadingNow || moved || position ? (
-          <div className="flex flex-wrap items-center gap-2">
+          // as high as the Loading now chip, so the chip coming or going never moves the lines below
+          <div className="flex min-h-7 flex-wrap items-center gap-2">
             {loadingNow ? (
               <StatusChip icon={CircleDot} tone="petrol">
                 {t("chips.loadingNow")}

@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
+from starlette.exceptions import HTTPException
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from relay_api.db import SessionLocal
 from relay_api.models import Workspace
@@ -17,6 +19,41 @@ from relay_api.security import require_client_header
 from relay_api.services.simulator import catch_up
 
 log = logging.getLogger("relay")
+
+MAX_BODY_BYTES = 2_000_000
+"""The largest request Relay reads: a proof photo (at most dock.MAX_PHOTO_BYTES) with the form around it. Caddy
+holds the same limit in front of the deployed API; this one covers docker compose and dev runs without it."""
+TOO_LARGE = "This is too large for Relay to take."
+
+
+class LimitBody:
+    """Refuse a request body over `limit` bytes with 413: at once when its Content-Length says so, or as soon as a
+    body sent without one passes the limit, before the route has it."""
+
+    def __init__(self, app: ASGIApp, limit: int) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        length = dict(scope["headers"]).get(b"content-length")
+        if length is not None and (not length.isdigit() or int(length) > self.limit):
+            await JSONResponse({"detail": TOO_LARGE}, status_code=413)(scope, receive, send)
+            return
+        seen = 0
+
+        async def counted() -> Message:
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > self.limit:
+                    raise HTTPException(413, TOO_LARGE)
+            return message
+
+        await self.app(scope, counted, send)
 
 
 async def _simulate_forever() -> None:
@@ -54,6 +91,8 @@ app = FastAPI(
     lifespan=lifespan,
     dependencies=[Depends(require_client_header)],
 )
+
+app.add_middleware(LimitBody, limit=MAX_BODY_BYTES)
 
 app.include_router(auth.router)
 app.include_router(demo.router)

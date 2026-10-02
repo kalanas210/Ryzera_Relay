@@ -12,7 +12,7 @@ saved there.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -48,18 +48,20 @@ from relay_api.schemas.driver import (
     DriverTripOut,
     HeldOut,
     HeldPhotoOut,
+    LoadPhase,
     NoticeOut,
     QuestionOut,
     RecordIn,
+    StopState,
 )
-from relay_api.services import dock, field, story, words
+from relay_api.services import backup, dock, field, story, words
 from relay_api.services.ordering import current_run
 
 SENT_LATE = timedelta(minutes=2)
 """A stop record that reached Relay this long after it was made was saved on the phone with no signal."""
 
 
-def vehicle_today(db: Session, user: AppUser, run_date) -> str | None:  # type: ignore[no-untyped-def]
+def vehicle_today(db: Session, user: AppUser, run_date: date) -> str | None:
     day = db.scalar(select(VehicleDay).where(VehicleDay.driver_id == user.id, VehicleDay.run_date == run_date))
     return day.vehicle_id if day else user.vehicle_id
 
@@ -72,7 +74,9 @@ def run(db: Session, now: datetime, user: AppUser, workspace: Workspace) -> Driv
     published = False
     if vehicle_id is not None:
         plans = db.scalars(select(Plan).where(Plan.run_date == run_date, Plan.status == PlanStatus.PUBLISHED)).all()
-        published = bool(plans)
+        # the driver's own hub's plan: another hub publishing first says nothing about this run
+        vehicle = look.vehicles.get(vehicle_id)
+        published = any(p.depot == vehicle.depot for p in plans) if vehicle is not None else bool(plans)
         trips = list(
             db.scalars(
                 select(Trip)
@@ -114,6 +118,7 @@ def run(db: Session, now: datetime, user: AppUser, workspace: Workspace) -> Driv
         vehicle_id=vehicle_id,
         published=published,
         dispatcher=dispatcher.display_name if dispatcher else None,
+        dispatcher_phone=dispatcher.phone if dispatcher else None,
         trip=_trip(db, look, t, len(trips), seen) if (t := current) is not None else None,
         later=[_trip(db, look, t, len(trips), seen) for t in later],
         questions=[_question(db, look, c) for c in questions],
@@ -155,7 +160,15 @@ def _trip(
     load = dock.trip_load(db, trip)
     vehicle = look.vehicles[trip.vehicle_id]
     handover = load.handover
-    state = "accepted" if handover.accepted_at else "to_accept" if handover.completed_at else "loading"
+    state: LoadPhase = (
+        "accepted"
+        if handover.accepted_at
+        else "to_accept"
+        if handover.completed_at
+        else "not_started"
+        if load.state == "not_started"
+        else "loading"
+    )
     types = {c.code: c for c in db.scalars(select(CaseType))}
     shortfalls = []
     stops_out = []
@@ -205,7 +218,8 @@ def _trip(
             )
         proof = db.scalar(select(Proof).where(Proof.stop_id == stop.id))
         copy = copies.get(stop.id)
-        version, status = stop.version, stop.status.value
+        version: int = stop.version
+        status: StopState = stop.status.value
         if seen and str(stop.id) in seen:
             version, status = seen[str(stop.id)]  # as the phone last saw it: a move made since never reached it
             copy = None if status != StopStatus.MOVED.value else copy
@@ -214,7 +228,7 @@ def _trip(
                 stop_id=stop.id,
                 seq=stop.seq,
                 version=version,
-                status=status,  # type: ignore[arg-type]
+                status=status,
                 order_ref=order.order_ref,
                 outlet_id=stop.outlet_id,
                 place=outlet.short_name,
@@ -227,7 +241,7 @@ def _trip(
                 expected=stop.expected_arrival,
                 arrived_at=stop.arrived_at,
                 completed_at=stop.completed_at,
-                moved_to=db.get(Trip, copy.trip_id).vehicle_id if copy is not None else None,  # type: ignore[union-attr]
+                moved_to=backup.carrier(db, copy),
                 cases=sum(x.loaded for x in line_out),
                 lines=line_out,
                 receiver=proof.receiver_name if proof else None,
@@ -253,7 +267,7 @@ def _trip(
         planned_back=trip.planned_back,
         expected_back=trip.expected_back,
         finished_at=trip.finished_at,
-        load=state,  # type: ignore[arg-type]
+        load=state,
         loader=load.loader,
         handover=handover,
         shortfalls=shortfalls,
@@ -280,9 +294,9 @@ def _question(db: Session, look: dock.Lookup, conflict: Conflict) -> QuestionOut
         else sum(line.loaded_qty for line in db.scalars(select(LoadLine).where(LoadLine.stop_id == stop.id)))
     )
     copy = db.get(Stop, conflict.backup_stop_id) if conflict.backup_stop_id else None
-    backup = db.get(Trip, copy.trip_id) if copy is not None else None
-    plan = db.get(Plan, backup.plan_id) if backup is not None else None
-    backup_driver = look.driver_of(backup, plan.run_date) if backup is not None and plan is not None else None
+    backup_trip = db.get(Trip, copy.trip_id) if copy is not None else None
+    plan = db.get(Plan, backup_trip.plan_id) if backup_trip is not None else None
+    backup_driver = look.driver_of(backup_trip, plan.run_date) if backup_trip is not None and plan is not None else None
     moved = db.scalar(
         select(AuditLog)
         .where(AuditLog.action == "stop.moved", AuditLog.entity_id == str(stop.id))
@@ -296,7 +310,7 @@ def _question(db: Session, look: dock.Lookup, conflict: Conflict) -> QuestionOut
         seq=stop.seq,
         place=look.outlets[stop.outlet_id].short_name,
         question=conflict.question,
-        status=conflict.status.value,  # type: ignore[arg-type]
+        status=conflict.status.value,
         answer=conflict.answer,
         opened_at=conflict.opened_at,
         arrived_at=arrived.occurred_at if arrived else None,
@@ -305,7 +319,7 @@ def _question(db: Session, look: dock.Lookup, conflict: Conflict) -> QuestionOut
         receiver=str(payload.get("receiver") or "") or None,
         has_photo=bool(payload.get("photo_id")),
         signed=bool(payload.get("signature_svg")),
-        backup_vehicle=backup.vehicle_id if backup else None,
+        backup_vehicle=backup_trip.vehicle_id if backup_trip else None,
         backup_driver=backup_driver.display_name if backup_driver else None,
         moved_at=moved.at if moved else None,
         moved_by=moved.actor_label if moved else None,

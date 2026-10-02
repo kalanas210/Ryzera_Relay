@@ -1,14 +1,19 @@
-"""The story autopilot: the steps the four judge characters take in the story, played only when a judge skips
-past them.
+"""The story autopilot: the steps the four judge characters take in the story, played when a judge skips past them
+or when nobody is playing that character.
 
 A judge can walk the whole day, or jump straight to the dock at 2:40 AM, or to the driver on the road. When the
 demo bar moves the clock forward, every story step whose time has passed and that nobody took is played as the
 story wrote it, in order, through the same services a person uses: Dilani's orders, the plan and its deferral,
-publishing, the 9:12 PM swap, Rizwan's loading and flag, Nuwan's answer, the handover, and then Kasun's morning on
-the road: the stops, the signal lost near Mawanella, Nuwan's backup, Dilani's receipt, and the one question when the
-phone comes back. A step the judge already took, or one that no longer fits what the judge did (an order moved, a
-stop swapped by hand, a backup already sent or called off), is left alone. When time simply runs, nothing is played:
-the characters wait for the judge.
+publishing, the 9:12 PM swap, Rizwan's loading and flag, Nuwan's answer, the load complete and Kasun accepting it,
+and then Kasun's morning on the road: the stops, the signal lost near Mawanella, Nuwan's backup, Dilani's receipt,
+and the one question when the phone comes back. A step the judge already took, or one that no longer fits what the
+judge did (an order moved, a stop swapped by hand, a stop reported closed, a backup already sent or called off), is
+left alone.
+
+When time simply runs, a character nobody is playing (nobody signed in as them has used this copy in the last few
+minutes) still acts as their times come, so a judge playing one role is never left waiting on another: Nuwan answers
+a flag five minutes after it is raised, Kasun accepts a load nobody accepts. A character someone is playing waits for
+them. A step that cannot be taken yet (the load is not complete) is tried again as the clock runs.
 
 On the road Kasun keeps the story's own times (Kegalle at 4:52 AM, and so on), later only when the truck left too
 late for them. The thunderstorm is not a character: from 5:41 to 7:14 AM Kasun's phone has no network whoever holds
@@ -57,6 +62,8 @@ from relay_api.models import (
     Plan,
     PlanChange,
     PlanStatus,
+    ProblemReason,
+    ProblemReport,
     Receipt,
     Role,
     ScheduledEvent,
@@ -90,12 +97,27 @@ SHORT_QTY = 6
 OUTAGE = (at(DELIVERY_DAY, "05:41"), at(DELIVERY_DAY, "07:14"))
 """The thunderstorm that takes Kasun's network down around Mawanella and the hill roads, 93 minutes."""
 DEVICE = "relay-story"
-"""The phone the autopilot carries for Kasun when a judge skips ahead on the road."""
+"""The phone the autopilot carries for Kasun on the road, when a judge skips ahead or nobody holds Kasun's phone."""
 RELEASE = "phone_back"
 """The scheduled event that holds what the phone saved with no signal, and sends it when the signal returns."""
 GRACE = timedelta(minutes=1)
 """How long a judge who lands on a step that is theirs to take has before a later jump plays it."""
+LATER = timedelta(minutes=5)
+"""As the clock runs, how long such a step waits for the judge to come and take it before its character does."""
+ANSWER_AFTER = timedelta(minutes=5)
+"""How long Nuwan takes to answer a flag from the dock, as in the story: flagged at 2:47, answered at 2:52."""
+STOPPED_BY = frozenset(
+    {
+        ProblemReason.OUTLET_CLOSED,
+        ProblemReason.ACCESS_BLOCKED,
+        ProblemReason.GOODS_REFUSED,
+        ProblemReason.DAMAGED_IN_TRANSIT,
+    }
+)
+"""Problems at a stop that the driver deals with there; a delay is not one of them."""
 STOP_RECORDS = (FieldEventKind.ARRIVED, FieldEventKind.DELIVERED, FieldEventKind.FAILED)
+TRIP_KNOWN = "story_trip"
+"""Key in Session.info: the story truck, while the steps' times are worked out with nothing changing."""
 
 
 @dataclass(frozen=True)
@@ -130,10 +152,16 @@ class Cast:
     driver: AppUser
     store: AppUser
 
+    def of(self, who: str) -> AppUser:
+        person: AppUser = getattr(self, who)
+        return person
+
 
 @dataclass(frozen=True)
 class Step:
     key: str
+    who: str
+    """Whose step it is, as the Cast names them: dispatcher, loader, driver or store."""
     label: str | Callable[[Session], str]
     """What the demo bar says was played; worked out from the day when it names a place."""
     when: Callable[[Session], datetime | None]
@@ -143,6 +171,8 @@ class Step:
     after: bool = False
     """Played only once the clock is a minute past its time, so a jump that lands on it leaves the step to the judge;
     played, it still happens at its own time."""
+    again: bool = False
+    """Taken each time its time comes round: Nuwan answers every flag raised on the story truck, not only the first."""
 
 
 # ------------------------------------------------------------------------------------------------ helpers
@@ -164,6 +194,15 @@ def _plan(db: Session, depot: str) -> Plan:
 
 def story_trip(db: Session) -> Trip | None:
     """The published trip carrying Dilani's dry order."""
+    known: dict[str, Trip | None] | None = db.info.get(TRIP_KNOWN)
+    if known is not None:
+        if "trip" not in known:
+            known["trip"] = _find_story_trip(db)
+        return known["trip"]
+    return _find_story_trip(db)
+
+
+def _find_story_trip(db: Session) -> Trip | None:
     order = db.scalar(select(Order).where(Order.order_ref == DRY_ORDER))
     if order is None:
         return None
@@ -338,23 +377,40 @@ def _flag(db: Session, now: datetime, people: Cast) -> bool:
     return True
 
 
-def _answer(db: Session, now: datetime, people: Cast) -> bool:
-    """Nuwan answers any flag still waiting on the story truck: send short, add to the store's next order."""
+def _waiting_flags(db: Session) -> list[Shortfall]:
     trip = story_trip(db)
     if trip is None:
-        return False
-    waiting = db.scalars(
-        select(Shortfall)
-        .join(LoadLine, LoadLine.id == Shortfall.load_line_id)
-        .where(LoadLine.trip_id == trip.id, Shortfall.decision.is_(None))
-    ).all()
+        return []
+    return list(
+        db.scalars(
+            select(Shortfall)
+            .join(LoadLine, LoadLine.id == Shortfall.load_line_id)
+            .where(LoadLine.trip_id == trip.id, Shortfall.decision.is_(None))
+            .order_by(Shortfall.flagged_at)
+        )
+    )
+
+
+def _after_flag(db: Session) -> datetime | None:
+    """When Nuwan answers: at the story's 2:52, or five minutes after a flag raised later. None while no flag on the
+    story truck waits for an answer."""
+    waiting = _waiting_flags(db)
+    if not waiting:
+        return None
+    return max(at(DELIVERY_DAY, "02:52"), waiting[0].flagged_at + ANSWER_AFTER)
+
+
+def _answer(db: Session, now: datetime, people: Cast) -> bool:
+    """Nuwan answers any flag still waiting on the story truck: send short, add to the store's next order."""
+    waiting = _waiting_flags(db)
     for shortfall in waiting:
         dock.decide(db, now, people.dispatcher, shortfall, ShortfallDecision.SEND_SHORT)
     return bool(waiting)
 
 
 def _finish_loading(db: Session, now: datetime, people: Cast) -> bool:
-    """Every line on or decided. Played even on a load the judge started, so the truck can leave on time."""
+    """Every line on or decided, and Load complete, so the handover is on Kasun's phone by the demo bar's handover
+    moment. Played even on a load the judge started, so the truck can leave on time."""
     trip = story_trip(db)
     if trip is None or trip.departed_at is not None:
         return False
@@ -363,28 +419,34 @@ def _finish_loading(db: Session, now: datetime, people: Cast) -> bool:
     todo = [line for line in lines if line.status in (LoadLineStatus.TO_LOAD, LoadLineStatus.IN_PROGRESS)]
     for line in todo:
         dock.set_loaded(db, now, people.loader, line, line.planned_qty, scripted=True)
-    return bool(todo)
+    if dock.loads_for(db, [trip], fresh=True)[trip.id].complete:
+        return bool(todo)
+    dock.complete(db, now, people.loader, trip, scripted=True)
+    return True
 
 
-def _handover(db: Session, now: datetime, people: Cast) -> bool:
+def _cut_off(db: Session, people: Cast) -> bool:
+    """The demo bar's switch has cut Kasun's phone off: a judge holds it, and what it saved is still only on it, so
+    none of Kasun's phone steps is played for it until the switch is off again."""
+    return records.switched_off(db, people.driver) is not None
+
+
+def _accept(db: Session, now: datetime, people: Cast) -> bool:
+    """Kasun accepts the load on the phone. Played only after the handover moment, so a judge who lands there taps
+    Accept load."""
     trip = story_trip(db)
-    if trip is None or trip.departed_at is not None:
+    if trip is None or trip.departed_at is not None or _cut_off(db, people):
         return False
-    did = False
-    load = dock.loads_for(db, [trip])[trip.id]
-    if not load.complete:
-        dock.complete(db, now, people.loader, trip, scripted=True)
-        did = True
-    handover = dock.loads_for(db, [trip])[trip.id].handover
-    if handover is not None and handover.accepted_at is None:
-        dock.accept(db, now, people.driver, trip, on="phone")
-        did = True
-    return did
+    handover = dock.loads_for(db, [trip], fresh=True)[trip.id].handover
+    if handover is None or handover.completed_at is None or handover.accepted_at is not None:
+        return False
+    dock.accept(db, now, people.driver, trip, on="phone")
+    return True
 
 
 def _leave(db: Session, now: datetime, people: Cast) -> bool:
     trip = story_trip(db)
-    if trip is None or trip.departed_at is not None:
+    if trip is None or trip.departed_at is not None or _cut_off(db, people):
         return False
     load = dock.loads_for(db, [trip])[trip.id]
     if load.handover is None or load.handover.accepted_at is None:
@@ -404,23 +466,32 @@ def _running(db: Session) -> Trip | None:
     return trip if trip is not None and trip.departed_at is not None and trip.finished_at is None else None
 
 
+_LATE: dict[tuple[uuid.UUID, datetime], timedelta] = {}
+"""How late each departure of the story truck makes Kasun's day, by trip and departure: a departure never changes."""
+
+
 def _late(db: Session, trip: Trip) -> timedelta:
     """How much later than the story Kasun's day runs: nothing, unless the truck left too late to reach the first
     stop at the story's time on Relay's expected clock. Every time Kasun keeps moves by this much. Worked out once
-    per session for a departure: every stop of the run is in one district, so the first leg is the same to each."""
+    for a departure, which never changes once made: every stop of the run is in one district, so the first leg is the
+    same to each."""
+    if trip.departed_at is None:
+        return timedelta(0)
+    key = (trip.id, trip.departed_at)
+    if key in _LATE:
+        return _LATE[key]
     first = next((s for s in _stops(trip) if s.status not in (StopStatus.MOVED, StopStatus.CANCELLED)), None)
     plan = db.get(Plan, trip.plan_id)
-    if trip.departed_at is None or first is None or plan is None:
+    if first is None or plan is None:
         return timedelta(0)
-    known: dict[tuple[uuid.UUID, datetime], timedelta] = db.info.setdefault("story_late", {})
-    key = (trip.id, trip.departed_at)
-    if key not in known:
-        depart = adapters.minutes_of(plan.run_date, trip.departed_at)
-        conditions = adapters.conditions(db, plan.run_date)
-        rows, _ = expected(adapters.network(db), conditions, [first.outlet_id], depart, Brand(trip.brand))
-        earliest = adapters.at_minutes(plan.run_date, rows[0].arrive)
-        known[key] = max(timedelta(0), earliest - at(DELIVERY_DAY, VISITS[0].arrive))
-    return known[key]
+    depart = adapters.minutes_of(plan.run_date, trip.departed_at)
+    conditions = adapters.conditions(db, plan.run_date)
+    rows, _ = expected(adapters.network(db), conditions, [first.outlet_id], depart, Brand(trip.brand))
+    earliest = adapters.at_minutes(plan.run_date, rows[0].arrive)
+    if len(_LATE) > 512:
+        _LATE.clear()  # the trips of copies reset long ago
+    _LATE[key] = max(timedelta(0), earliest - at(DELIVERY_DAY, VISITS[0].arrive))
+    return _LATE[key]
 
 
 def _on_the_road(clock: str) -> Callable[[Session], datetime | None]:
@@ -488,6 +559,27 @@ def _held(db: Session, stop: Stop) -> set[FieldEventKind]:
     return {FieldEventKind(r["kind"]) for r in rows if r["stop_id"] == str(stop.id)}
 
 
+def _stopped(db: Session, stop: Stop) -> bool:
+    """The judge holding Kasun's phone reported the store closed, the way in blocked, or goods refused or damaged
+    there: that stop is theirs to deal with, so the autopilot neither arrives nor delivers there. Reported to Relay,
+    or saved in the phone's outbox in the storm. The autopilot reports no problems itself, so any such report is the
+    judge's."""
+    reported = db.scalar(
+        select(ProblemReport.id).where(ProblemReport.stop_id == stop.id, ProblemReport.reason.in_(STOPPED_BY))
+    )
+    if reported is not None:
+        return True
+    event = _outbox(db)
+    rows = event.payload.get("records", []) if event is not None else []
+    reasons = {reason.value for reason in STOPPED_BY}
+    return any(
+        r["stop_id"] == str(stop.id)
+        and r["kind"] == FieldEventKind.PROBLEM.value
+        and (r.get("payload") or {}).get("reason") in reasons
+        for r in rows
+    )
+
+
 def memory(db: Session) -> dict[str, Any] | None:
     """The phone's outbox while the storm lasts: each stop as the phone last saw it, and what it holds."""
     event = _outbox(db)
@@ -548,10 +640,13 @@ def phone(db: Session, workspace: Workspace, now: datetime) -> None:
     trip = _running(db)
     if trip is None:
         return
+    # the demo bar's switch cut the phone off: the desk sees the silence the judge made, from the last check-in
+    cut = _cut_off(db, people)
     if offline(now):
-        _check_in(db, driver, min(now, OUTAGE[0]))
+        if not cut:
+            _check_in(db, driver, min(now, OUTAGE[0]))
         _open_outbox(db, driver, trip)
-    elif now < OUTAGE[0] or _outbox(db) is None:
+    elif not cut and (now < OUTAGE[0] or _outbox(db) is None):
         _check_in(db, driver, now)
 
 
@@ -670,12 +765,12 @@ def _arrive(n: int) -> Callable[[Session, datetime, Cast], bool]:
     def play(db: Session, now: datetime, people: Cast) -> bool:
         trip = _running(db)
         stops = _stops(trip) if trip is not None else []
-        if trip is None or n >= len(stops):
+        if trip is None or n >= len(stops) or _cut_off(db, people):
             return False
         stop = stops[n]
         if _to_do(db, trip, stop, now) is not StopStatus.PENDING or stop.arrived_at is not None:
             return False
-        if _held(db, stop) & set(STOP_RECORDS):
+        if _held(db, stop) & set(STOP_RECORDS) or _stopped(db, stop):
             return False
         record = records.RecordIn(
             id=uuid.uuid5(stop.id, "story arrived"),
@@ -694,12 +789,12 @@ def _deliver(n: int) -> Callable[[Session, datetime, Cast], bool]:
     def play(db: Session, now: datetime, people: Cast) -> bool:
         trip = _running(db)
         stops = _stops(trip) if trip is not None else []
-        if trip is None or n >= len(stops):
+        if trip is None or n >= len(stops) or _cut_off(db, people):
             return False
         stop = stops[n]
         if _to_do(db, trip, stop, now) not in (StopStatus.PENDING, StopStatus.ARRIVED) or stop.completed_at:
             return False
-        if _held(db, stop) & {FieldEventKind.DELIVERED, FieldEventKind.FAILED}:
+        if _held(db, stop) & {FieldEventKind.DELIVERED, FieldEventKind.FAILED} or _stopped(db, stop):
             return False
         outlet = db.get(Outlet, stop.outlet_id)
         payload: dict[str, Any] = {"receiver": RECEIVERS.get(stop.outlet_id, ""), "all_delivered": True}
@@ -848,7 +943,7 @@ def _keep_backup(db: Session, now: datetime, people: Cast) -> bool:
 def _answer_yes(db: Session, now: datetime, people: Cast) -> bool:
     """At the dock, Kasun answers the one question about the stop with two copies: yes, delivered."""
     trip = _running(db)
-    if trip is None or offline(now):
+    if trip is None or offline(now) or _cut_off(db, people):
         return False
     question = db.scalar(
         select(Conflict).where(
@@ -874,7 +969,7 @@ def _finish(db: Session, now: datetime, people: Cast) -> bool:
     """Kasun taps Finish trip at the last dock, once every stop is done, nothing waits on the phone and no question
     is open."""
     trip = _running(db)
-    if trip is None or offline(now) or _outbox(db) is not None:
+    if trip is None or offline(now) or _outbox(db) is not None or _cut_off(db, people):
         return False
     if any(s.status in (StopStatus.PENDING, StopStatus.ARRIVED) for s in trip.stops):
         return False
@@ -940,25 +1035,63 @@ def stand_in_photo(piles: int) -> bytes:
 
 
 STEPS: tuple[Step, ...] = (
-    Step("dilani_orders", "Dilani places the chilled and dry orders", _fixed(PLANNING_DAY, "14:14"), _dilani_orders),
-    Step("propose_kandy", "Relay proposes the Kandy plan", _fixed(PLANNING_DAY, "16:35"), _propose("Kandy")),
+    Step(
+        "dilani_orders",
+        "store",
+        "Dilani places the chilled and dry orders",
+        _fixed(PLANNING_DAY, "14:14"),
+        _dilani_orders,
+    ),
+    Step(
+        "propose_kandy",
+        "dispatcher",
+        "Relay proposes the Kandy plan",
+        _fixed(PLANNING_DAY, "16:35"),
+        _propose("Kandy"),
+    ),
     Step(
         "confirm_kandy",
+        "dispatcher",
         "Nuwan confirms the deferral with Relay's reason",
         _fixed(PLANNING_DAY, "16:52"),
         _confirm_kandy,
     ),
-    Step("publish_peliyagoda", "Nuwan publishes Peliyagoda", _fixed(PLANNING_DAY, "18:31"), _publish("Peliyagoda")),
-    Step("publish_kandy", "Nuwan publishes the Kandy plan", _fixed(PLANNING_DAY, "18:40"), _publish("Kandy")),
-    Step("swap", "Nuwan swaps two stops on Kasun's run", _fixed(PLANNING_DAY, "21:12"), _swap),
-    Step("load_last_stop", "Rizwan loads the last stop first", _fixed(DELIVERY_DAY, "02:40"), _load_last_stop),
-    Step("flag", "Rizwan flags 6 rice and dhal cases missing", _fixed(DELIVERY_DAY, "02:47"), _flag),
-    Step("answer", "Nuwan answers: send short, add to Thursday", _fixed(DELIVERY_DAY, "02:52"), _answer),
-    Step("finish_loading", "Rizwan finishes loading", _from_departure(-14, latest="03:30"), _finish_loading),
-    Step("handover", "Load complete, and Kasun accepts it", _from_departure(-12, latest="03:32"), _handover),
-    Step("leave", "Kasun leaves the hub", _from_departure(4), _leave),
+    Step(
+        "publish_peliyagoda",
+        "dispatcher",
+        "Nuwan publishes Peliyagoda",
+        _fixed(PLANNING_DAY, "18:31"),
+        _publish("Peliyagoda"),
+    ),
+    Step(
+        "publish_kandy",
+        "dispatcher",
+        "Nuwan publishes the Kandy plan",
+        _fixed(PLANNING_DAY, "18:40"),
+        _publish("Kandy"),
+    ),
+    Step("swap", "dispatcher", "Nuwan swaps two stops on Kasun's run", _fixed(PLANNING_DAY, "21:12"), _swap),
+    Step(
+        "load_last_stop",
+        "loader",
+        "Rizwan loads the last stop first",
+        _fixed(DELIVERY_DAY, "02:40"),
+        _load_last_stop,
+    ),
+    Step("flag", "loader", "Rizwan flags 6 rice and dhal cases missing", _fixed(DELIVERY_DAY, "02:47"), _flag),
+    Step("answer", "dispatcher", "Nuwan answers: send short, add to Thursday", _after_flag, _answer, again=True),
+    Step(
+        "finish_loading",
+        "loader",
+        "Rizwan finishes loading",
+        _from_departure(-14, latest="03:30"),
+        _finish_loading,
+    ),
+    Step("accept", "driver", "Kasun accepts the load", _from_departure(-12, latest="03:32"), _accept, after=True),
+    Step("leave", "driver", "Kasun leaves the hub", _from_departure(4), _leave),
     Step(
         "handle_delay",
+        "dispatcher",
         f"Nuwan marks {world.REPORTS[0].vehicle_id}'s delay as handled",
         _fixed(DELIVERY_DAY, DELAY_HANDLED_AT),
         _handle_delay,
@@ -967,32 +1100,62 @@ STEPS: tuple[Step, ...] = (
         step
         for n, visit in enumerate(VISITS)
         for step in (
-            Step(f"arrive_{n + 1}", _place(n, "arrives at"), _on_the_road(visit.arrive), _arrive(n)),
-            Step(f"deliver_{n + 1}", _place(n, "delivers to"), _on_the_road(visit.deliver), _deliver(n)),
+            Step(f"arrive_{n + 1}", "driver", _place(n, "arrives at"), _on_the_road(visit.arrive), _arrive(n)),
+            Step(f"deliver_{n + 1}", "driver", _place(n, "delivers to"), _on_the_road(visit.deliver), _deliver(n)),
         )
     ),
-    Step("send_backup", _backup_label, _fixed(DELIVERY_DAY, MOVE_AT), _send_backup, after=True),
-    Step("receipt", "Dilani confirms everything arrived", _on_the_road(RECEIPT_AT), _receipt, after=True),
-    Step("keep_backup", "Nuwan keeps the backup on its way", _on_the_road(KEEP_AT), _keep_backup),
-    Step("answer_yes", "Kasun answers yes: delivered", _on_the_road(ANSWER_AT), _answer_yes, after=True),
-    Step("finish_trip", "Kasun finishes the trip", _on_the_road(FINISH_AT), _finish, after=True),
+    Step("send_backup", "dispatcher", _backup_label, _fixed(DELIVERY_DAY, MOVE_AT), _send_backup, after=True),
+    Step("receipt", "store", "Dilani confirms everything arrived", _on_the_road(RECEIPT_AT), _receipt, after=True),
+    Step("keep_backup", "dispatcher", "Nuwan keeps the backup on its way", _on_the_road(KEEP_AT), _keep_backup),
+    Step("answer_yes", "driver", "Kasun answers yes: delivered", _on_the_road(ANSWER_AT), _answer_yes, after=True),
+    Step("finish_trip", "driver", "Kasun finishes the trip", _on_the_road(FINISH_AT), _finish, after=True),
 )
 
 
 def pending(db: Session, workspace: Workspace, until: datetime) -> list[tuple[datetime, Step]]:
-    """Story steps due by `until` that no jump has settled yet, in story order."""
+    """Story steps due by `until` that no jump has settled yet, in story order: what a jump plays."""
+    due = [(m, step) for m, step in _unsettled(db, workspace) if m + (GRACE if step.after else timedelta(0)) <= until]
+    return sorted(due, key=lambda pair: pair[0])
+
+
+def on_time(
+    db: Session, workspace: Workspace, now: datetime, people: Cast, playing: set[str]
+) -> list[tuple[datetime, Step]]:
+    """Story steps due by `now` as the clock simply runs, for the characters nobody is playing, each with the time
+    its character takes it, in story order. A step a judge who lands on it would take waits LATER for them first."""
+    due = []
+    for moment, step in _unsettled(db, workspace, lambda s: people.of(s.who).username not in playing):
+        taken = moment + (LATER if step.after else timedelta(0))
+        if taken <= now:
+            due.append((taken, step))
+    return sorted(due, key=lambda pair: pair[0])
+
+
+def _unsettled(
+    db: Session, workspace: Workspace, keep: Callable[[Step], bool] | None = None
+) -> list[tuple[datetime, Step]]:
+    """Each step not settled yet that can apply as the day stands, with its time in the story. Nothing changes while
+    the times are worked out, so the story truck is looked up once for them all."""
     settled = workspace.state.get("story", {})
     out = []
-    for step in STEPS:
-        if step.key in settled:
-            continue
-        moment = step.when(db)
-        if moment is not None and moment + (GRACE if step.after else timedelta(0)) <= until:
-            out.append((moment, step))
-    return sorted(out, key=lambda pair: pair[0])
+    db.info[TRIP_KNOWN] = {}
+    try:
+        for step in STEPS:
+            if step.key in settled or (keep is not None and not keep(step)):
+                continue
+            moment = step.when(db)
+            if moment is not None:
+                out.append((moment, step))
+    finally:
+        db.info.pop(TRIP_KNOWN, None)
+    return out
 
 
 def settle(workspace: Workspace, step: Step, played: bool) -> None:
+    """A step is not played again once settled; a step taken `again` stays open once played, its time worked out
+    afresh (no flag waiting, no time)."""
+    if step.again and played:
+        return
     workspace.state = {**workspace.state, "story": {**workspace.state.get("story", {}), step.key: played}}
 
 

@@ -455,3 +455,39 @@ def test_a_copy_cannot_reach_another_copys_loads(new_copy: Callable[[], Copy]) -
         f"/api/dock/lines/{line['id']}", json={"loaded": 1}, headers={"X-Relay-Role": "loader"}
     )
     assert response.status_code == 404
+
+
+def test_a_loader_reaches_only_their_own_hubs_loads(new_copy: Callable[[], Copy]) -> None:
+    from sqlalchemy import select
+
+    from relay_api.db import SessionLocal, scope_to_workspace
+    from relay_api.models import LoadLine, Plan, Trip
+    from relay_api.workspaces import find_workspace
+
+    copy = new_copy()
+    copy.jump("loading")
+    copy.sign_in("rizwan", "loader")  # a Kandy loader
+    with SessionLocal() as db:
+        workspace = find_workspace(db, copy.code)
+        assert workspace is not None
+        scope_to_workspace(db, workspace.id)
+        trip = db.scalars(select(Trip).join(Plan, Plan.id == Trip.plan_id).where(Plan.depot == "Peliyagoda")).first()
+        assert trip is not None
+        line = db.scalars(select(LoadLine).where(LoadLine.trip_id == trip.id)).first()
+        assert line is not None
+        trip_id, line_id, loaded = trip.id, line.id, line.loaded_qty
+
+    headers = {"X-Relay-Role": "loader"}
+    # another hub's load reads as not there, and nothing on it changes
+    assert copy.client.get(f"/api/dock/trips/{trip_id}", headers=headers).status_code == 404
+    assert copy.client.post(f"/api/dock/lines/{line_id}", json={"loaded": 1}, headers=headers).status_code == 404
+    flag = copy.client.post(f"/api/dock/lines/{line_id}/flag", json={"kind": "missing", "qty": 1}, headers=headers)
+    assert flag.status_code == 404
+    assert copy.client.post(f"/api/dock/trips/{trip_id}/complete", json={}, headers=headers).status_code == 404
+    accept = copy.client.post(f"/api/dock/trips/{trip_id}/accept", json={"pin": "3690"}, headers=headers)
+    assert accept.status_code == 404
+    with SessionLocal() as db:
+        assert db.get(LoadLine, line_id).loaded_qty == loaded  # type: ignore[union-attr]
+
+    # the loader's own hub is still theirs
+    assert _story_trip(copy)["vehicle_id"] == "VEH045"

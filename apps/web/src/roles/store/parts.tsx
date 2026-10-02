@@ -10,12 +10,12 @@ import {
   Upload,
   User,
   WifiOff,
+  X,
 } from "lucide-react";
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { Notice } from "@/design/Notice";
 import { Card, PhoneScreen } from "@/design/Phone";
-import { Sheet } from "@/design/Sheet";
 import { useOnline } from "@/design/SyncPill";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
@@ -233,21 +233,60 @@ export function ProofCard({ tracker }: { tracker: Tracker }) {
         </p>
       ) : null}
       {proof.photo_id ? (
-        <Sheet
+        <PhotoViewer
           open={enlarged}
           onClose={() => setEnlarged(false)}
-          variant="dialog"
-          title="Delivery photo"
-          meta={`${delivered}, ${tracker.order_ref}`}
-        >
-          <img
-            src={photoUrl(proof.photo_id)}
-            alt={`Delivery photo, ${delivered}`}
-            className="max-h-[70dvh] w-full rounded-button object-contain"
-          />
-        </Sheet>
+          src={photoUrl(proof.photo_id)}
+          alt={`Delivery photo, ${delivered}`}
+          caption={`${delivered}, ${tracker.order_ref}`}
+        />
       ) : null}
     </Card>
+  );
+}
+
+/** The delivery photo filling the screen, with a close button; Esc closes it too. On the native <dialog>, so the
+ *  browser keeps focus inside it and gives it back to the thumbnail. */
+function PhotoViewer({
+  open,
+  onClose,
+  src,
+  alt,
+  caption,
+}: {
+  open: boolean;
+  onClose: () => void;
+  src: string;
+  alt: string;
+  caption: string;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    else if (!open && dialog.open) dialog.close();
+  }, [open]);
+  return (
+    <dialog
+      ref={ref}
+      aria-label={alt}
+      onClose={onClose}
+      className="m-0 h-dvh max-h-none w-full max-w-none flex-col bg-asphalt-900 p-0 text-white open:flex backdrop:bg-asphalt-900"
+    >
+      <div className="flex shrink-0 items-center gap-3 py-1 pr-1 pl-4">
+        <p className="min-w-0 flex-1 t-label">{caption}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex size-12 shrink-0 items-center justify-center rounded-button hover:bg-asphalt-700"
+        >
+          <X size={24} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>
+      {open ? <img src={src} alt={alt} className="min-h-0 w-full flex-1 object-contain" /> : null}
+    </dialog>
   );
 }
 

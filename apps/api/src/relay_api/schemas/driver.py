@@ -11,6 +11,10 @@ from pydantic import BaseModel, Field
 from relay_api.schemas.common import Schema
 from relay_api.schemas.dock import HandoverOut
 
+StopState = Literal["pending", "arrived", "delivered", "failed", "moved", "cancelled"]
+LoadPhase = Literal["not_started", "loading", "to_accept", "accepted"]
+"""Nobody has started loading yet, loading, the handover waiting for the driver, or accepted."""
+
 
 class DriverLineOut(Schema):
     case_type: str
@@ -26,7 +30,7 @@ class DriverStopOut(Schema):
     stop_id: uuid.UUID
     seq: int
     version: int
-    status: Literal["pending", "arrived", "delivered", "failed", "moved", "cancelled"]
+    status: StopState
     order_ref: str
     outlet_id: str
     place: str
@@ -105,7 +109,7 @@ class DriverTripOut(Schema):
     planned_back: datetime
     expected_back: datetime | None
     finished_at: datetime | None
-    load: Literal["loading", "to_accept", "accepted"]
+    load: LoadPhase
     loader: str | None
     handover: HandoverOut
     shortfalls: list[dict[str, Any]]
@@ -119,6 +123,8 @@ class DriverRunOut(Schema):
     vehicle_id: str | None
     published: bool
     dispatcher: str | None
+    dispatcher_phone: str | None = None
+    """The dispatcher on call, for "Call Nuwan at dispatch"."""
     trip: DriverTripOut | None
     later: list[DriverTripOut]
     questions: list[QuestionOut]
@@ -152,6 +158,12 @@ class HeldIn(BaseModel):
     device_id: str = Field(min_length=1, max_length=64)
     records: list[RecordIn] = Field(default_factory=list, max_length=200)
     photos: list[HeldPhotoOut] = Field(default_factory=list, max_length=50)
+
+
+class SignalIn(BaseModel):
+    """The demo bar's "no signal" switch on this phone (demo mode only)."""
+
+    on: bool
 
 
 class RecordIn(BaseModel):

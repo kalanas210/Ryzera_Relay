@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import pytest
 from copy_client import Copy
 
 COLOMBO = ZoneInfo("Asia/Colombo")
@@ -119,6 +120,8 @@ def test_first_stop(new_copy: Callable[[], Copy]) -> None:
 
 
 def test_on_the_road(new_copy: Callable[[], Copy]) -> None:
+    from relay_api.services import words
+
     day = Day(new_copy, "on_the_road")
     assert hm(day.state["now"]) == "05:20"
     stops = day.stops()
@@ -133,10 +136,12 @@ def test_on_the_road(new_copy: Callable[[], Copy]) -> None:
     assert hm(kasun["last_contact_at"]) == "05:20"
     assert_the_world_keeps_up(panel, day.now)
 
-    # Dilani reads the same estimate Nuwan does, and was told when it moved
+    # Dilani reads the same estimate Nuwan does, to 5 minutes where his desk shows the minute, and was told when
+    # it moved
     tracker = day.tracker()
     assert (tracker["status"], tracker["out_of_contact"]) == ("on_the_way", False)
-    assert tracker["expected"] == markers(kasun)["Hemmathagama"]["estimate"]
+    desk = datetime.fromisoformat(markers(kasun)["Hemmathagama"]["estimate"])
+    assert hm(tracker["expected"]) == hm(words.round5(desk).isoformat()) == "06:35"
     notices = day.copy.get("/api/store/notices", "store_manager")
     assert any(n["kind"] == "new_time" and spoken(tracker["expected"]) in n["body"] for n in notices)
 
@@ -329,7 +334,8 @@ def test_settled(new_copy: Callable[[], Copy]) -> None:
 
 
 def tick(copy: Copy, minutes: int) -> dict[str, Any]:
-    """Let the clock run on by itself, as the background tick does: the world moves, nobody's story step is played."""
+    """Let the clock run on by itself, as the background tick does: the world moves, and the characters nobody is
+    playing take their story steps as their times come."""
     from relay_api.clock import set_clock, sim_now
     from relay_api.db import SessionLocal
     from relay_api.workspaces import find_workspace
@@ -350,12 +356,22 @@ def test_the_running_clock_sees_the_silence_and_the_unanswered_question(new_copy
     assert day.panel()["out_of_contact"] == 1
 
     day = Day(new_copy, "signal_back")
-    [question] = day.run()["questions"]
+    [question] = day.run()["questions"]  # the judge holds Kasun's phone, so the answer is theirs to give
     assert question["status"] == "waiting_for_driver"
-    state = tick(day.copy, 11)
-    assert state["played"] == []  # time running on its own plays nobody's step: Kasun has not answered
+    tick(day.copy, 11)
     [question] = day.run()["questions"]
     assert question["status"] == "escalated"
+
+
+def test_the_running_clock_drives_kasun_when_nobody_holds_the_phone(new_copy: Callable[[], Copy]) -> None:
+    day = Day(new_copy, "first_stop")  # signed in, but nobody has opened Kasun's phone
+    tick(day.copy, 10)
+    tick(day.copy, 10)
+    kegalle = day.stops()["Kegalle"]
+    # Kasun delivered at the story's 5:11, not when the clock happened to be read
+    assert (kegalle["status"], hm(kegalle["completed_at"]), kegalle["receiver"]) == ("delivered", "05:11", "P. Silva")
+    tick(day.copy, 20)  # 5:32: the judge has the phone now, so the 5:30 arrival at Mawanella waits for them
+    assert day.stops()["Mawanella"]["status"] == "pending"
 
 
 def test_nothing_from_the_phone_reaches_relay_in_the_storm(new_copy: Callable[[], Copy]) -> None:
@@ -418,6 +434,41 @@ def test_a_judge_holding_the_phone_in_the_storm_keeps_those_stops(new_copy: Call
     assert "7 records received" in back["body"]
 
 
+@pytest.mark.parametrize("reason", ["outlet_closed", "access_blocked", "goods_refused", "damaged_in_transit"])
+def test_a_stop_the_judge_reported_a_problem_at_is_theirs(new_copy: Callable[[], Copy], reason: str) -> None:
+    day = Day(new_copy, "on_the_road")
+    run = day.run()
+    report = record("problem", run, day.stops(run)["Mawanella"], "05:20", reason=reason)
+    out = day.copy.post("/api/driver/records", {"device_id": "judge-phone", "records": [report]}, "driver")
+    assert out["results"][0]["outcome"] == "applied"
+
+    played = day.copy.jump("signal_lost")["played"] + day.copy.jump("silence")["played"]
+    # the judge is dealing with Mawanella: the jumps play neither an arrival nor a delivery there
+    assert "Kasun arrives at Mawanella" not in played
+    assert "Kasun delivers to Mawanella" not in played
+    mawanella = day.stops()["Mawanella"]
+    assert (mawanella["status"], mawanella["arrived_at"], mawanella["completed_at"]) == ("pending", None, None)
+
+
+def test_a_delay_the_judge_reported_lets_the_story_go_on(new_copy: Callable[[], Copy]) -> None:
+    day = Day(new_copy, "on_the_road")
+    run = day.run()
+    report = record("problem", run, day.stops(run)["Mawanella"], "05:20", reason="delayed", delay_min=10)
+    day.copy.post("/api/driver/records", {"device_id": "judge-phone", "records": [report]}, "driver")
+    assert "Kasun arrives at Mawanella" in day.copy.jump("signal_lost")["played"]
+
+
+def test_a_stop_reported_in_the_storm_is_left_to_the_phone_that_holds_it(new_copy: Callable[[], Copy]) -> None:
+    day = Day(new_copy, "signal_lost")
+    run = day.run()
+    report = record("problem", run, day.stops(run)["Hemmathagama"], "05:50", reason="outlet_closed")
+    held = {"device_id": "judge-phone", "records": [report], "photos": []}
+    day.copy.post("/api/driver/held", held, "driver", expect=204)
+    played = day.copy.jump("receipt")["played"]
+    assert "Kasun delivers to Mawanella" in played
+    assert not [step for step in played if step.endswith("Hemmathagama")]
+
+
 def test_runs_still_out_when_the_day_turns_over_drive_home(new_copy: Callable[[], Copy]) -> None:
     """At midday the stores' day turns to Thursday; Wednesday's runs still on the road finish as they would, and
     nobody's phone is read as silent for it."""
@@ -425,6 +476,7 @@ def test_runs_still_out_when_the_day_turns_over_drive_home(new_copy: Callable[[]
 
     from relay_api.db import SessionLocal, scope_to_workspace
     from relay_api.models import AppUser, DeviceContact, Trip
+    from relay_api.services.field import back_at_hub
     from relay_api.workspaces import find_workspace
 
     day = Day(new_copy, "settled")
@@ -436,7 +488,8 @@ def test_runs_still_out_when_the_day_turns_over_drive_home(new_copy: Callable[[]
         scope_to_workspace(db, workspace.id)
         trips = db.scalars(select(Trip).where(Trip.departed_at.is_not(None))).all()
         # the world kept driving after the turn: runs came home after midday
-        assert [t for t in trips if t.finished_at and hm(t.finished_at.isoformat()) >= "12:00"]  # type: ignore[operator]
+        home = [back_at_hub(t) for t in trips]
+        assert [back for back in home if back is not None and hm(back.isoformat()) >= "12:00"]
         drivers = {u.vehicle_id: u.id for u in db.scalars(select(AppUser).where(AppUser.vehicle_id.is_not(None)))}
         contacts = {c.user_id: c.last_contact_at for c in db.scalars(select(DeviceContact))}
         for trip in trips:

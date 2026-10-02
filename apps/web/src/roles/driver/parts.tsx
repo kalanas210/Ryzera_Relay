@@ -16,6 +16,7 @@ import {
   type LucideIcon,
   MapPin,
   Minus,
+  Phone,
   Plus,
   RefreshCw,
   Store,
@@ -31,7 +32,8 @@ import { Button, IconButton } from "@/design/Button";
 import { StatusChip } from "@/design/StatusChip";
 import { type MarkerState, StopMarker } from "@/design/StopMarker";
 import { cx } from "@/lib/cx";
-import { awaitingAnswer, type StopLocal, stopLocal, windowState } from "./local";
+import { calledName } from "@/lib/names";
+import { awaitingAnswer, type StopLocal, stopLocal, waitingForCall, windowState } from "./local";
 import { useDriver } from "./sync";
 import type { DriverRun, DriverStop, DriverTrip } from "./types";
 import { useDriverText } from "./words";
@@ -111,7 +113,10 @@ export function DriverHeader({
       )}
     >
       {lead}
-      <h1 className={cx("min-w-0 flex-1 truncate text-asphalt-900", root ? "t-h1" : "t-h2")}>{title}</h1>
+      {/* a second line rather than lost words beside a two-line Tamil pill, so a stop's title keeps its number */}
+      <h1 className={cx("min-w-0 flex-1 text-asphalt-900 [overflow-wrap:anywhere]", root ? "t-h1" : "t-h2")}>
+        {title}
+      </h1>
       <DriverPill />
     </header>
   );
@@ -254,7 +259,7 @@ export function NextStopCard({
   now: Date;
   primary: boolean;
 }) {
-  const { t, cases, storeName, windowOf, access, clock, around } = useDriverText();
+  const { t, cases, storeName, windowOf, access, clock, expectedAt } = useDriverText();
   const navigate = useNavigate();
   const titleId = useId();
   return (
@@ -296,7 +301,7 @@ export function NextStopCard({
         {stop.status === "arrived" && stop.arrived_at ? (
           <Detail icon={MapPin} label={t("card.arrived")} value={clock(stop.arrived_at)} />
         ) : stop.expected ? (
-          <Detail icon={Timer} label={t("card.expected")} value={around(stop.expected)} />
+          <Detail icon={Timer} label={t("card.expected")} value={expectedAt(stop, now)} />
         ) : null}
       </dl>
       <div className="flex flex-col gap-2">
@@ -345,10 +350,11 @@ export function ShortChip({ stop, long }: { stop: DriverStop; long?: boolean }) 
 /** Stop row / field on the run list: marker, place, what is known about it, and a way in. Stops after the next one
  *  show both named times; the next stop's times are on its card. */
 export function StopRow({ run, stop, next }: { run: DriverRun; stop: DriverStop; next: DriverStop | null }) {
-  const { t, clock, around, windowOf, access, place, caseItem } = useDriverText();
-  const { items, batch } = useDriver();
+  const { t, clock, expectedAt, windowOf, access, place, caseItem } = useDriverText();
+  const { items, batch, now } = useDriver();
   const local = stopLocal(items, stop.stop_id);
   const question = awaitingAnswer(run, items, stop.stop_id);
+  const call = waitingForCall(run, items, stop.stop_id);
   const isNext = next?.stop_id === stop.stop_id;
   const toCome = stop.status === "pending" || stop.status === "arrived";
   const window = windowOf(run.run_date, stop.window_open, stop.window_close);
@@ -376,7 +382,7 @@ export function StopRow({ run, stop, next }: { run: DriverRun; stop: DriverStop;
     tone = "t-body-strong text-asphalt-900";
   } else if (stop.status === "pending") {
     lines.push(t("row.planned", { time: clock(stop.planned) }));
-    if (stop.expected) lines.push(t("row.expected", { time: around(stop.expected) }));
+    if (stop.expected) lines.push(t("row.expected", { time: expectedAt(stop, now) }));
   }
 
   const chips: { key: string; text: string; node: ReactNode }[] = [];
@@ -405,6 +411,19 @@ export function StopRow({ run, stop, next }: { run: DriverRun; stop: DriverStop;
   if (question) {
     const text = t("chip.needsAnswer");
     chips.push({ key: "question", text, node: <StatusChip kind="needsAnswer">{text}</StatusChip> });
+  }
+  if (call) {
+    const name = calledName(run.dispatcher);
+    const text = name ? t("chip.waitingFor", { name }) : t("chip.waitingForNoName");
+    chips.push({
+      key: "call",
+      text,
+      node: (
+        <StatusChip tone="attention" icon={Phone}>
+          {text}
+        </StatusChip>
+      ),
+    });
   }
   if (local.waiting) {
     const text = local.sending || batch ? t("chip.sending") : t("chip.waiting");
@@ -705,6 +724,30 @@ export function ConfirmPanel({ title, children }: { title: ReactNode; children: 
       <h1 className="t-h1 text-asphalt-900">{title}</h1>
       <p className="t-body text-asphalt-700">{children}</p>
     </section>
+  );
+}
+
+/** "081 000 2145" as a number to dial: digits only, with a leading + kept for an international number. */
+function telLink(phone: string): string {
+  return `tel:${phone.trim().replace(/(?!^\+)[^\d]/g, "")}`;
+}
+
+/** "Call Nuwan at dispatch": a tel: link drawn as a field button. Quiet and left-aligned under the report list, the
+ *  primary when the truck cannot move. */
+export function CallButton({ phone, primary, children }: { phone: string; primary?: boolean; children: ReactNode }) {
+  return (
+    <a
+      href={telLink(phone)}
+      className={cx(
+        "inline-flex w-full items-center gap-2 rounded-button px-4 t-field-button transition-colors select-none",
+        primary
+          ? "min-h-14 justify-center bg-petrol-700 py-2 text-center text-white hover:bg-petrol-800 active:bg-petrol-800"
+          : "min-h-12 justify-start py-1.5 text-asphalt-900 hover:bg-asphalt-100",
+      )}
+    >
+      <Phone size={24} strokeWidth={1.75} aria-hidden className="shrink-0" />
+      {children}
+    </a>
   );
 }
 

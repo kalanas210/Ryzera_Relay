@@ -16,6 +16,7 @@ import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
 import { type Person, useLinesToSend, useTonight } from "./api";
 import { shortDate } from "./days";
+import { Swap } from "./parts";
 
 const IDLE_LOCK_MS = 15 * 60 * 1000;
 const LOCK_KEY = "relay.dock.locked";
@@ -138,15 +139,38 @@ export function LoaderShell() {
   );
 }
 
+/** What a failed PIN entry says. `shown` goes false at the next digit, and the text stays, laid out unseen, so the
+ *  message line keeps its height until the sheet closes. */
+export type PinFailure = { text: string; wrongPin: boolean; shown: boolean };
+
 /** What a failed PIN entry says: a wrong PIN only when the server said so, never for a dropped connection. */
 export function pinError(
   t: ReturnType<typeof useLoaderText>["t"],
   error: Error,
   otherwise: (message: string) => string,
-): { text: string; wrongPin: boolean } {
-  if (error instanceof ApiError && error.status === 401) return { text: t("who.wrongPin"), wrongPin: true };
-  if (error instanceof ApiError && error.offline) return { text: t("who.noConnection"), wrongPin: false };
-  return { text: otherwise(error.message), wrongPin: false };
+): PinFailure {
+  if (error instanceof ApiError && error.status === 401)
+    return { text: t("who.wrongPin"), wrongPin: true, shown: true };
+  if (error instanceof ApiError && error.offline) return { text: t("who.noConnection"), wrongPin: false, shown: true };
+  return { text: otherwise(error.message), wrongPin: false, shown: true };
+}
+
+/** The line between the PIN dots and the keys: a note, or what went wrong. It is sized for the longest of them in
+ *  the reader's language, so a wrong PIN, and the next digit that clears it, never move the keys under a finger. */
+export function PinMessage({ note, error }: { note?: ReactNode; error: PinFailure | null }) {
+  const { t } = useLoaderText();
+  const problem = (text: string) => <p className="t-body-strong text-center text-problem">{text}</p>;
+  const options: Record<string, ReactNode> = {
+    note: <p className="t-caption text-center text-asphalt-500">{note}</p>,
+    wrong: problem(t("who.wrongPin")),
+    offline: problem(t("who.noConnection")),
+  };
+  if (error) options.error = problem(error.text);
+  return (
+    <div aria-live="assertive" className="w-full">
+      <Swap as="div" shown={error?.shown ? "error" : "note"} options={options} />
+    </div>
+  );
 }
 
 /** "Password relay2026 · PIN 2580" gives "2580". */
@@ -182,7 +206,7 @@ function SwitchSheet({
   const loaders = tonight.data?.loaders ?? [];
   const [picked, setPicked] = useState<string | undefined>(current);
   const [pin, setPin] = useState("");
-  const [error, setError] = useState<{ text: string; wrongPin: boolean } | null>(null);
+  const [error, setError] = useState<PinFailure | null>(null);
 
   // Every open starts from whoever is signed in, so a pick left from a cancelled switch never carries over.
   useEffect(() => {
@@ -196,7 +220,7 @@ function SwitchSheet({
   const person = loaders.find((l) => l.username === picked);
   const demo = useDemoPin((a) => a.role === "loader" && a.username === picked);
   const enter = (next: string) => {
-    setError(null);
+    setError((was) => was && { ...was, shown: false });
     setPin(next);
     if (next.length === 4 && picked) {
       signIn.mutate(
@@ -241,18 +265,12 @@ function SwitchSheet({
             <PinPad
               value={pin}
               onChange={enter}
-              error={Boolean(error?.wrongPin)}
+              error={Boolean(error?.shown && error.wrongPin)}
               disabled={signIn.isPending}
               deleteLabel={t("who.deleteDigit")}
               progressLabel={(entered, total) => t("who.pinProgress", { entered, total })}
+              message={<PinMessage note={t("who.pinNote")} error={error} />}
             />
-            {error ? (
-              <p role="alert" className="t-body-strong text-center text-problem">
-                {error.text}
-              </p>
-            ) : (
-              <p className="t-caption text-center text-asphalt-500">{t("who.pinNote")}</p>
-            )}
           </div>
         ) : null}
       </div>
@@ -325,13 +343,29 @@ export function DockHeader({
   );
   const status = (
     <>
-      <SyncPill
-        synced={t("bar.synced")}
-        sending={t("bar.sending")}
-        offline={t("bar.offline")}
-        waiting={waiting}
-        toSend={(count) => t("bar.toSend", { count })}
-      />
+      {/* The pill is as wide as its longest label in the reader's language, so going from All synced to Sending
+          and back never moves the buttons beside it. The unseen copies match SyncPill's box. */}
+      <span className="inline-grid shrink-0 justify-items-end">
+        <span className="col-start-1 row-start-1 inline-flex">
+          <SyncPill
+            synced={t("bar.synced")}
+            sending={t("bar.sending")}
+            offline={t("bar.offline")}
+            waiting={waiting}
+            toSend={(count) => t("bar.toSend", { count })}
+          />
+        </span>
+        {[t("bar.synced"), t("bar.sending"), t("bar.offline"), t("bar.toSend", { count: 10 })].map((label) => (
+          <span
+            key={label}
+            aria-hidden
+            className="invisible col-start-1 row-start-1 inline-flex h-8 max-w-[140px] items-center gap-1 rounded-chip border px-2 t-label"
+          >
+            <span className="size-4 shrink-0" />
+            <span className="min-w-0 leading-tight">{label}</span>
+          </span>
+        ))}
+      </span>
       <IconButton icon={Languages} label={t("bar.language")} density="field" onClick={dock.openLanguage} />
     </>
   );
@@ -384,7 +418,7 @@ export function LoaderBar() {
     <div className="flex min-h-14 items-center gap-2 border-b border-asphalt-200 bg-white px-4 py-1">
       <div className="min-w-0 flex-1">
         <p className="t-caption text-asphalt-500">{t("who.signedInAs")}</p>
-        <p className="latin t-h3 truncate text-asphalt-900">{me.data?.display_name}</p>
+        <p className="latin t-h3 [overflow-wrap:anywhere] text-asphalt-900">{me.data?.display_name}</p>
       </div>
       <Button density="field" compact icon={Users} onClick={dock.openSwitch}>
         {t("who.switch")}

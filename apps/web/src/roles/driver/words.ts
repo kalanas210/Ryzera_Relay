@@ -3,7 +3,7 @@
  *  strings table, not Intl, which does not write Sinhala dates reliably. */
 import { useTranslation } from "react-i18next";
 import { clockIn, isLang, type Lang } from "@/i18n";
-import { onRunDate, round5 } from "./local";
+import { expectedPassed, onRunDate, round5 } from "./local";
 import type { DriverStop, DriverTrip } from "./types";
 
 /** "5:20 AM" is { hm: "5:20", part: "AM" }; "පෙ.ව. 5:20" is { part: "පෙ.ව.", hm: "5:20" }. */
@@ -30,6 +30,14 @@ export function useDriverText() {
     const rounded = round5(value);
     const { hm, part } = clockParts(lang, rounded);
     return t("time.around", { time: clock(rounded), hm, part });
+  };
+
+  /** Relay's expected time for a stop still to come, "around 6:35 AM", and once the clock is past it "around 6:35 AM,
+   *  now passed": the phone never pushes the time later, so it says the time has gone by instead. */
+  const expectedAt = (stop: Pick<DriverStop, "status" | "expected">, now: Date | null) => {
+    if (!stop.expected) return "";
+    const time = around(stop.expected);
+    return now && expectedPassed(stop, now) ? t("time.passed", { time }) : time;
   };
 
   /** "19 min", "2 h 25 min" */
@@ -78,6 +86,10 @@ export function useDriverText() {
     return { text, latin: lang === "en" || text === name };
   };
 
+  /** Going to a place, "to Aranayake": one word in Tamil ("அரநாயக்கவுக்கு") and Sinhala ("අරනායකට") where Relay
+   *  knows the place, the ending set apart after any other name. */
+  const placeTo = (name: string) => t(`placesTo.${name}`, { defaultValue: t("placeTo", { place: place(name).text }) });
+
   /** "Waypoint Fresh Mawanella" with the place in the reader's script. */
   const storeName = (stop: Pick<DriverStop, "store_name" | "place">) => {
     const p = place(stop.place);
@@ -123,12 +135,14 @@ export function useDriverText() {
     lang,
     clock,
     around,
+    expectedAt,
     duration,
     left,
     windowOf,
     date,
     weekday,
     place,
+    placeTo,
     storeName,
     hub,
     tripLine,

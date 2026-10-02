@@ -7,13 +7,15 @@ the eleven rules on the board always describe what is stored.
 
 from __future__ import annotations
 
+import itertools
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from relay_api.clock import COLOMBO
@@ -33,20 +35,27 @@ from relay_api.models import (
     Stop,
     Trip,
     TripStatus,
+    Vehicle,
+    VehicleDay,
+    VehicleDayStatus,
 )
 from relay_api.services import network as adapters
 from relay_api.services import words
 from relay_api.services.engine_cache import propose_cached
 from relay_api.services.notify import notify_store
-from relay_api.services.ordering import next_operating_day
-from relay_engine.clock import sequence_stops
-from relay_engine.model import Deferred, GroupAnalysis, TripReport
+from relay_api.services.ordering import current_run, next_operating_day
+from relay_engine.clock import expected, free_flow, sequence_stops
+from relay_engine.model import RELOAD_MINUTES, Deferred, GroupAnalysis, StopTiming, TripReport, VehicleStatus
 from relay_engine.model import Trip as EngineTrip
-from relay_engine.network import Brand
+from relay_engine.network import Brand, VehicleType
 from relay_engine.propose import RunInput, propose
 from relay_engine.rules import Context, ampm, evaluate
+from relay_engine.standard import FRESH_BUDGET_MIN
 
 DEPOT_LABEL = {"Kandy": "Kandy hub", "Peliyagoda": "Peliyagoda"}
+
+FLEET_DAYS_AHEAD = 13
+"""How far past the run being planned the dispatcher can mark a vehicle in the workshop or on standby."""
 
 REASONS = {
     "reefer_short": "Refrigerated capacity short",
@@ -59,17 +68,31 @@ REASONS = {
 }
 
 
+def and_list(items: Iterable[str]) -> str:
+    """'VEH039, VEH043 and VEH058': how every list in the dispatcher's sentences reads."""
+    names = list(items)
+    if len(names) < 2:
+        return "".join(names)
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 class PlanError(Exception):
     """A request the plan can't take, in words for the dispatcher."""
 
 
 # ------------------------------------------------------------------------------------------------ loading
 def get_plan(db: Session, depot: str, run_date: date) -> Plan:
-    plan = db.scalar(select(Plan).where(Plan.depot == depot, Plan.run_date == run_date))
+    """The depot's plan for a run, made empty on the first read. Two first reads can arrive together (the board's
+    poll and a depot switch): the unique key lets one insert win, and the other reads the winner's row."""
+    found = select(Plan).where(Plan.depot == depot, Plan.run_date == run_date)
+    plan = db.scalar(found)
     if plan is None:
-        plan = Plan(depot=depot, run_date=run_date, status=PlanStatus.DRAFT, version=0, summary={})
-        db.add(plan)
-        db.flush()
+        try:
+            with db.begin_nested():
+                plan = Plan(depot=depot, run_date=run_date, status=PlanStatus.DRAFT, version=0, summary={})
+                db.add(plan)
+        except IntegrityError:
+            plan = db.scalars(found).one()
     return plan
 
 
@@ -110,11 +133,19 @@ def context(db: Session, plan: Plan, orders: Sequence[Order]) -> Context:
     )
 
 
+def order_ref_of(db: Session, order_id: uuid.UUID) -> str:
+    """The order number of an order a stop or a deferral names by its id (a foreign key, so it is there)."""
+    order = db.get(Order, order_id)
+    if order is None:
+        raise LookupError(f"No order {order_id}")
+    return order.order_ref
+
+
 def stored_trips(db: Session, plan: Plan) -> list[EngineTrip]:
     trips = db.scalars(select(Trip).where(Trip.plan_id == plan.id, Trip.is_backup.is_(False))).all()
     out = []
     for t in sorted(trips, key=lambda t: (t.vehicle_id, t.trip_no)):
-        refs = [db.get(Order, s.order_id).order_ref for s in sorted(t.stops, key=lambda s: s.seq)]  # type: ignore[union-attr]
+        refs = [order_ref_of(db, s.order_id) for s in sorted(t.stops, key=lambda s: s.seq)]
         out.append(
             EngineTrip(t.vehicle_id, t.trip_no, refs, round(adapters.minutes_of(plan.run_date, t.planned_depart)))
         )
@@ -140,15 +171,21 @@ def propose_plan(db: Session, now: datetime, plan: Plan, *, forced: Iterable[str
         protected=protected,
     )
     result = propose_cached(db, run)
-    _write_trips(db, plan, result.trips, by_ref)
+    _write_trips(db, plan, result.trips, by_ref, ctx)
     _write_deferrals(db, now, plan, result.deferred, result.analyses, by_ref, forced)
     plan.version += 1
     plan.proposed_at = now
+    fleet = sorted(
+        f"{v}:{d.status.value}" for v, d in ctx.vehicles.items() if ctx.network.vehicles[v].depot == plan.depot
+    )
     plan.summary = {
-        **{k: v for k, v in plan.summary.items() if k not in {"undo", "edited_at"}},
+        **{k: v for k, v in plan.summary.items() if k not in {"undo", "edited_at", "fleet_changed_at"}},
         "analyses": [_analysis_json(a) for a in result.analyses],
+        "analyses_before_override": _before_override(plan.summary, fleet) if forced else None,
+        "fleet": fleet,
         "protected": sorted(protected),
         "overridden": sorted(forced),
+        "proposal": _assignment(result.trips),
         "undo": [],
     }
     db.add(
@@ -164,6 +201,15 @@ def propose_plan(db: Session, now: datetime, plan: Plan, *, forced: Iterable[str
     return plan
 
 
+def _before_override(summary: dict[str, Any], fleet: list[str]) -> list[dict[str, Any]] | None:
+    """What the engine found with every order in the run, kept through an override: the override plans without
+    the overridden order, so its own analysis no longer counts what no plan could avoid. Only while the fleet is
+    the same one that analysis saw."""
+    if summary.get("fleet") != fleet:
+        return None
+    return summary.get("analyses_before_override") if summary.get("overridden") else summary.get("analyses")
+
+
 def _analysis_json(a: GroupAnalysis) -> dict[str, Any]:
     return {
         "temp_class": a.temp_class,
@@ -177,13 +223,16 @@ def _analysis_json(a: GroupAnalysis) -> dict[str, Any]:
     }
 
 
-def _write_trips(db: Session, plan: Plan, trips: Sequence[EngineTrip], by_ref: dict[str, Order]) -> None:
-    for t in db.scalars(select(Trip).where(Trip.plan_id == plan.id)).all():
-        db.delete(t)
-    db.flush()
+def _write_trips(
+    db: Session, plan: Plan, trips: Sequence[EngineTrip], by_ref: dict[str, Order], ctx: Context | None = None
+) -> None:
+    # One statement, the stops going with their trips in the database. Only a draft is ever rewritten, and nothing
+    # hangs on a draft's trips yet; deleting them one by one through the session cost a round trip for every
+    # relationship of every trip, about a second on each move.
+    db.execute(delete(Trip).where(Trip.plan_id == plan.id))
+    db.expire(plan, ["trips"])
     orders = list(by_ref.values())
-    ctx = context(db, plan, orders)
-    reports, _ = evaluate(ctx, trips)
+    reports, _ = evaluate(ctx or context(db, plan, orders), trips)
     for report in reports:
         t = report.trip
         row = Trip(
@@ -249,11 +298,11 @@ def _write_deferrals(
             )
         )
     for ref in forced:
-        order = by_ref.get(ref)
-        if order is not None:
+        overridden = by_ref.get(ref)
+        if overridden is not None:
             db.add(
                 Deferral(
-                    order_id=order.id,
+                    order_id=overridden.id,
                     plan_id=plan.id,
                     kind=DeferralKind.MANUAL,
                     from_date=plan.run_date,
@@ -272,21 +321,28 @@ class Target:
     trip_no: int
 
 
-def move_order(db: Session, now: datetime, plan: Plan, order_ref: str, target: Target | None, user: AppUser) -> None:
-    """Move one order onto a trip, or off every trip. Relay never refuses the move; the board names what it
+def move_orders(
+    db: Session, now: datetime, plan: Plan, order_refs: Sequence[str], target: Target | None, user: AppUser
+) -> None:
+    """Move orders onto a trip, or off every trip, as one step of the board's undo: one order from Not placed, or
+    every order of a store when its stop is dragged. Relay never refuses the move; the board names what it
     breaks."""
     if plan.status is PlanStatus.PUBLISHED:
         raise PlanError("This plan is published. Change it from Live runs.")
+    refs = list(dict.fromkeys(order_refs))
+    if not refs:
+        raise PlanError("Choose an order to move")
     orders = run_orders(db, plan.depot, plan.run_date)
     by_ref = {o.order_ref: o for o in orders}
-    if order_ref not in by_ref:
-        raise PlanError(f"{order_ref} is not on this run")
+    missing = [ref for ref in refs if ref not in by_ref]
+    if missing:
+        raise PlanError(f"{and_list(missing)} {'is' if len(missing) == 1 else 'are'} not on this run")
     trips = stored_trips(db, plan)
     _remember(plan, trips)
     ctx = context(db, plan, orders)
     for t in trips:
-        if order_ref in t.order_ids:
-            t.order_ids.remove(order_ref)
+        if any(ref in t.order_ids for ref in refs):
+            t.order_ids[:] = [o for o in t.order_ids if o not in refs]
             t.depart = None
     trips = [t for t in trips if t.order_ids]
     if target is not None:
@@ -300,31 +356,30 @@ def move_order(db: Session, now: datetime, plan: Plan, order_ref: str, target: T
         if trip is None:
             trip = EngineTrip(target.vehicle_id, target.trip_no, [])
             trips.append(trip)
-        trip.order_ids.append(order_ref)
+        trip.order_ids.extend(refs)
         trip.depart = None
-        _resequence(ctx, trip)
+        resequence(ctx, trip, trips)
     _renumber(trips)
-    _write_trips(db, plan, trips, by_ref)
+    _write_trips(db, plan, trips, by_ref, ctx)
     # an order taken off every trip waits, and needs a reason; an order placed stops waiting
     placed = {o for t in trips for o in t.order_ids}
     for d in db.scalars(select(Deferral).where(Deferral.plan_id == plan.id)).all():
-        if db.get(Order, d.order_id).order_ref in placed:  # type: ignore[union-attr]
+        if order_ref_of(db, d.order_id) in placed:
             db.delete(d)
-    if target is None and not db.scalar(
-        select(Deferral).where(Deferral.plan_id == plan.id, Deferral.order_id == by_ref[order_ref].id)
-    ):
-        db.add(
-            Deferral(
-                order_id=by_ref[order_ref].id,
-                plan_id=plan.id,
-                kind=DeferralKind.MANUAL,
-                from_date=plan.run_date,
-                to_date=next_operating_day(db, plan.run_date),
-                explanation={"manual": True, "suggested_reason": "other"},
-                created_at=now,
+    for ref in refs if target is None else ():
+        if not db.scalar(select(Deferral).where(Deferral.plan_id == plan.id, Deferral.order_id == by_ref[ref].id)):
+            db.add(
+                Deferral(
+                    order_id=by_ref[ref].id,
+                    plan_id=plan.id,
+                    kind=DeferralKind.MANUAL,
+                    from_date=plan.run_date,
+                    to_date=next_operating_day(db, plan.run_date),
+                    explanation={"manual": True, "suggested_reason": "other"},
+                    created_at=now,
+                )
             )
-        )
-    plan.summary = {**plan.summary, "edited_at": now.isoformat()}
+    _mark_edited(plan, trips, now)
     plan.version += 1
     db.add(
         AuditLog(
@@ -333,15 +388,84 @@ def move_order(db: Session, now: datetime, plan: Plan, order_ref: str, target: T
             actor_label=user.display_name,
             action="plan.moved",
             entity="order",
-            entity_id=order_ref,
-            summary=f"Moved {order_ref} to "
+            entity_id=refs[0],
+            summary=f"Moved {and_list(refs)} to "
             + (f"{target.vehicle_id} trip {target.trip_no}" if target else "Not placed"),
+            data={"order_refs": refs},
         )
     )
 
 
-def _resequence(ctx: Context, trip: EngineTrip) -> None:
-    """Put a changed trip's stops in Relay's order when some order keeps every window; otherwise keep the
+def _assignment(trips: Iterable[EngineTrip]) -> list[list[Any]]:
+    """Which orders ride which trip, in stop order: what the board compares with Relay's proposal."""
+    return sorted([t.vehicle_id, t.trip_no, list(t.order_ids)] for t in trips)
+
+
+def _day(day: date) -> str:
+    """ "Wednesday 8 April" (strftime has no portable day without its leading zero)."""
+    return f"{day:%A} {day.day} {day:%B}"
+
+
+def _mark_edited(plan: Plan, trips: Sequence[EngineTrip], now: datetime) -> None:
+    """The board reads "Edited" from the first move until it is back to exactly what Relay proposed, by undo or by
+    moving the orders back."""
+    summary = {k: v for k, v in plan.summary.items() if k != "edited_at"}
+    if _assignment(trips) != plan.summary.get("proposal"):
+        summary["edited_at"] = now.isoformat()
+    plan.summary = summary
+
+
+def set_vehicle_status(
+    db: Session, now: datetime, vehicle: Vehicle, run_date: date, status: VehicleDayStatus, note: str, user: AppUser
+) -> Plan:
+    """Send a vehicle to the workshop, back into service, or onto standby for one run. The plan keeps its trips
+    until the dispatcher proposes again; a trip left on a vehicle in the workshop breaks rule 9, so it can't go
+    out. Only a draft's fleet can change: once a plan is published its trucks are loaded and on the road."""
+    today = current_run(db, now)
+    if not today <= run_date <= today + timedelta(days=FLEET_DAYS_AHEAD):
+        raise PlanError(f"The fleet can be changed for runs from {_day(today)} to two weeks after it.")
+    plan = get_plan(db, vehicle.depot, run_date)
+    if plan.status is PlanStatus.PUBLISHED:
+        raise PlanError(
+            f"The {DEPOT_LABEL[vehicle.depot]} plan for {run_date:%A} is published, so its fleet is set. "
+            "Change a trip from Live runs instead."
+        )
+    day = db.scalar(
+        select(VehicleDay).where(VehicleDay.vehicle_id == vehicle.vehicle_id, VehicleDay.run_date == run_date)
+    )
+    if day is None:
+        day = VehicleDay(vehicle_id=vehicle.vehicle_id, run_date=run_date, status=status)
+        db.add(day)
+    day.status = status
+    day.note = note.strip() if status is not VehicleDayStatus.AVAILABLE else ""
+    if plan.version > 0:
+        # the board says so, and asks for a new proposal, until Relay plans with this fleet
+        plan.summary = {**plan.summary, "fleet_changed_at": now.isoformat()}
+        plan.version += 1
+    words_for = {
+        VehicleDayStatus.AVAILABLE: "back in service",
+        VehicleDayStatus.WORKSHOP: "in the workshop",
+        VehicleDayStatus.STANDBY: "on standby",
+    }
+    db.add(
+        AuditLog(
+            at=now,
+            actor_id=user.id,
+            actor_label=user.display_name,
+            action="vehicle.status",
+            entity="vehicle",
+            entity_id=vehicle.vehicle_id,
+            summary=f"{vehicle.vehicle_id} {words_for[status]} for {_day(run_date)}",
+            data={"status": status.value, "note": day.note},
+        )
+    )
+    db.flush()
+    return plan
+
+
+def resequence(ctx: Context, trip: EngineTrip, trips: Sequence[EngineTrip] = ()) -> None:
+    """Put a changed trip's stops in Relay's order when some order keeps every window, counted from when the
+    vehicle can leave: 2:00 AM for a first trip, and for a second, once the first is back. Otherwise keep the
     dispatcher's order, and the board shows what breaks."""
     orders = [ctx.orders[o] for o in trip.order_ids]
     brands = {o.brand for o in orders}
@@ -350,8 +474,14 @@ def _resequence(ctx: Context, trip: EngineTrip) -> None:
     if len(brands) != 1 or len(districts) != 1 or len(set(outlets)) != len(outlets) or len(outlets) > 7:
         return
     brand = next(iter(brands))
+    ready = 120.0
+    before = next((t for t in trips if t.vehicle_id == trip.vehicle_id and t.trip_no == trip.trip_no - 1), None)
+    if before is not None:
+        # a second trip starting at 2:00 AM would find an order the van can never drive
+        (report,), _ = evaluate(ctx, [before])
+        ready = report.back + RELOAD_MINUTES
     found = sequence_stops(
-        ctx.network, ctx.conditions, outlets, brand, 120.0, latest=480 if brand is Brand.FRESH else 17 * 60
+        ctx.network, ctx.conditions, outlets, brand, ready, latest=480 if brand is Brand.FRESH else 17 * 60
     )
     if found is not None:
         by_outlet = {o.outlet_id: o.order_id for o in orders}
@@ -391,7 +521,7 @@ def undo(db: Session, now: datetime, plan: Plan) -> None:
     _write_trips(db, plan, trips, by_ref)
     placed = {o for t in trips for o in t.order_ids}
     for d in db.scalars(select(Deferral).where(Deferral.plan_id == plan.id)).all():
-        if db.get(Order, d.order_id).order_ref in placed:  # type: ignore[union-attr]
+        if order_ref_of(db, d.order_id) in placed:
             db.delete(d)
     # an order the undo takes off every trip waits again, as the engine proposed it
     for ref, order in by_ref.items():
@@ -409,6 +539,7 @@ def undo(db: Session, now: datetime, plan: Plan) -> None:
                     created_at=now,
                 )
             )
+    _mark_edited(plan, trips, now)
     plan.summary = {**plan.summary, "undo": stack}
     plan.version += 1
 
@@ -439,13 +570,13 @@ def confirm_deferral(
     if reason == "other" and not note.strip():
         raise PlanError("Add a note for the record")
     deferral.reason = REASONS[reason] if reason != "other" else note.strip()
-    if "next_run" not in deferral.explanation and deferral.kind is DeferralKind.CAPACITY:
-        # the store is told the next run has room for it, whether or not the drawer was opened first
-        deferral.explanation = {**deferral.explanation, "next_run": next_run_check(db, plan, deferral)}
+    # the note goes in first: with "Other", the note is the words the store reads
+    deferral.explanation = {**deferral.explanation, "reason_code": reason, "note": note.strip()}
+    # the store is told the next run has room for it, whether or not the drawer was opened first
+    check_next_run(db, plan)
     deferral.store_notice = store_notice(db, plan, order, deferral, reason)
     deferral.confirmed_at = now
     deferral.confirmed_by = user.id
-    deferral.explanation = {**deferral.explanation, "reason_code": reason, "note": note.strip()}
     db.add(
         AuditLog(
             at=now,
@@ -461,6 +592,14 @@ def confirm_deferral(
     return deferral
 
 
+_COUNTS = ("No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine")
+
+
+def _counted(n: int) -> str:
+    """A count that starts a sentence the store reads, in words while it is small: "Three of our ..."."""
+    return _COUNTS[n] if 0 <= n < len(_COUNTS) else str(n)
+
+
 def store_notice(db: Session, plan: Plan, order: Order, deferral: Deferral, reason: str) -> str:
     """The words the store reads, in the order STM-03 shows them."""
     day = f"{plan.run_date:%A}"
@@ -468,11 +607,10 @@ def store_notice(db: Session, plan: Plan, order: Order, deferral: Deferral, reas
     limiting = analysis.get("limiting", [])
     parts = []
     if reason in ("reefer_short", "workshop") and limiting:
-        count = "Two" if len(limiting) == 2 else str(len(limiting)) if len(limiting) > 2 else "One"
         verb = "are" if len(limiting) > 1 else "is"
         parts.append(
-            f"{count} of our refrigerated vehicles {verb} in the workshop this week, and the ones still running "
-            f"can't fit your order on {day} morning."
+            f"{_counted(len(limiting))} of our refrigerated vehicles {verb} in the workshop this week, and the ones "
+            f"still running can't fit your order on {day} morning."
         )
     elif reason == "reefer_short":
         parts.append(f"Our refrigerated vehicles are full for {day} morning.")
@@ -486,10 +624,11 @@ def store_notice(db: Session, plan: Plan, order: Order, deferral: Deferral, reas
         parts.append("You asked us to move it.")
     else:
         parts.append(deferral.explanation.get("note") or "We had to move it.")
-    if deferral.explanation.get("rule") == 2:
+    if deferral.explanation.get("rule") == 2 and reason != "store_asked":
+        # Relay's choice, told only when it is the reason: a store that asked for the move already knows why
         parts.append(
-            "Another store in your area had its chilled order wait on its last run, so it goes first this time. "
-            "We avoid making any store wait twice in a row."
+            f"Another store in your area had its {'chilled' if order.temp == 'chilled' else 'dry'} order wait on its "
+            "last run, so it goes first this time. We avoid making any store wait twice in a row."
         )
     check = deferral.explanation.get("next_run")
     if check and check.get("fits"):
@@ -498,55 +637,120 @@ def store_notice(db: Session, plan: Plan, order: Order, deferral: Deferral, reas
     return "\n\n".join(parts)
 
 
-def next_run_check(db: Session, plan: Plan, deferral: Deferral) -> dict[str, Any]:
-    """Will the next run carry a waiting order? Plans the next day's orders of the same kind at the depot with
-    this order added, and reports where it would ride."""
-    order = db.get(Order, deferral.order_id)
-    assert order is not None
-    day = deferral.to_date
+def check_next_run(db: Session, plan: Plan) -> None:
+    """Will the next run carry the orders waiting on this plan? One plan of that day at the depot, with every
+    waiting order added and protected (a store never waits twice in a row), so two waiting orders are never each
+    checked onto the same trip in plans of their own. Kept on each deferral until the waiting orders change; a
+    published plan keeps the check its stores were told about."""
+    if plan.status is PlanStatus.PUBLISHED:
+        return
+    deferrals = list(db.scalars(select(Deferral).where(Deferral.plan_id == plan.id)))
+    waiting = {d.id: order for d in deferrals if (order := db.get(Order, d.order_id)) is not None}
+    refs = sorted(o.order_ref for o in waiting.values())
+    if all((d.explanation.get("next_run") or {}).get("checked_with") == refs for d in deferrals):
+        return
+    today = {v.vehicle_id: v.status for v in adapters.vehicle_days(db, plan.run_date)}
+    for day in sorted({d.to_date for d in deferrals}):
+        mine = [d for d in deferrals if d.to_date == day and d.id in waiting]
+        found = _next_run(db, plan.depot, day, [waiting[d.id] for d in mine], today)
+        for d in mine:
+            order = waiting[d.id]
+            d.explanation = {**d.explanation, "next_run": {**found[order.order_ref], "checked_with": refs}}
+            if d.confirmed_at and d.explanation.get("reason_code"):
+                # a reason already given keeps its words, with the check as it now stands
+                d.store_notice = store_notice(db, plan, order, d, d.explanation["reason_code"])
+    db.flush()
+
+
+def _next_run(
+    db: Session, depot: str, day: date, moving: Sequence[Order], today: dict[str, VehicleStatus]
+) -> dict[str, dict[str, Any]]:
+    ids = {o.id for o in moving}
     others = [
         o
         for o in db.scalars(
             select(Order)
             .join(Outlet, Outlet.outlet_id == Order.outlet_id)
-            .where(Outlet.depot == plan.depot, Order.run_date == day, Order.temp == order.temp)
+            .where(Outlet.depot == depot, Order.run_date == day, Order.temp.in_({o.temp for o in moving}))
         )
-        if o.id != order.id
+        if o.id not in ids
     ]
     net = adapters.network(db)
-    orders = [adapters.engine_order(o) for o in [*others, order]]
+    fleet_days = adapters.vehicle_days(db, day)
+    status = {v.vehicle_id: v.status for v in fleet_days}
     run = RunInput(
         network=net,
-        depot=plan.depot,
-        orders=orders,
-        vehicles=adapters.vehicle_days(db, day),
+        depot=depot,
+        orders=[adapters.engine_order(o) for o in [*others, *moving]],
+        vehicles=fleet_days,
         usual=adapters.usual(db, day),
         conditions=adapters.conditions(db, day),
-        protected={order.order_ref},
+        protected={o.order_ref for o in moving} | protected_refs(db, day, others),
     )
     result = propose(run, explain=False)
-    for report in result.reports:
-        for stop in report.planned:
-            if stop.order_id == order.order_ref:
-                vehicle = net.vehicles[report.trip.vehicle_id]
-                kind = ("refrigerated " if vehicle.refrigerated else "") + ("van" if vehicle.is_van else "truck")
-                return {
-                    "fits": True,
-                    "day": day.isoformat(),
-                    "vehicle_id": report.trip.vehicle_id,
-                    "vehicle_kind": kind,
-                    "trip_no": report.trip.trip_no,
-                    "planned": ampm(stop.arrive),
-                    "depart": ampm(report.depart),
-                    "back": ampm(report.back),
-                    "stops": len(report.planned),
-                    "weight_kg": report.weight_kg,
-                    "weight_cap": vehicle.weight_cap_kg,
-                    "volume_m3": report.volume_m3,
-                    "volume_cap": vehicle.volume_cap_m3,
-                    "orders_with_it": [s.order_id for s in report.planned if s.order_id != order.order_ref],
+    where = {s.order_id: (r, s) for r in result.reports for s in r.planned}
+    by_ref = {o.order_ref: o for o in [*others, *moving]}
+    names = {
+        o.outlet_id: o.short_name
+        for o in db.scalars(select(Outlet).where(Outlet.outlet_id.in_({o.outlet_id for o in by_ref.values()})))
+    }
+    waiting = {o.order_ref for o in moving}
+    out: dict[str, dict[str, Any]] = {}
+    for order in moving:
+        if order.order_ref not in where:
+            out[order.order_ref] = {"fits": False, "day": day.isoformat()}
+            continue
+        report, stop = where[order.order_ref]
+        vehicle_id = report.trip.vehicle_id
+        vehicle = net.vehicles[vehicle_id]
+        kind = ("refrigerated " if vehicle.refrigerated else "") + ("van" if vehicle.is_van else "truck")
+        fleet = [v for v in net.vehicles.values() if v.depot == depot and v.refrigerated == vehicle.refrigerated]
+        used = {r.trip.vehicle_id for r in result.reports if net.vehicles[r.trip.vehicle_id] in fleet}
+        other = next((r for r in result.reports if r.trip.vehicle_id == vehicle_id and r is not report), None)
+        out[order.order_ref] = {
+            "fits": True,
+            "day": day.isoformat(),
+            "vehicle_id": vehicle_id,
+            "vehicle_kind": kind,
+            "back_from_workshop": today.get(vehicle_id) is VehicleStatus.WORKSHOP,
+            "trip_no": report.trip.trip_no,
+            "district": report.district,
+            "usual": report.usual,
+            # the time unloading starts: an early vehicle waits for the store to open
+            "planned": ampm(stop.start),
+            "arrives": ampm(stop.arrive) if stop.start - stop.arrive >= 1 else None,
+            "depart": ampm(report.depart),
+            "back": ampm(report.back),
+            "stops": len(report.planned),
+            "inside_windows": all(r.passed for r in report.rules if r.rule == 8),
+            "weight_kg": report.weight_kg,
+            "weight_cap": vehicle.weight_cap_kg,
+            "volume_m3": report.volume_m3,
+            "volume_cap": vehicle.volume_cap_m3,
+            "trip_minutes": report.standard_minutes,
+            "fresh_minutes": result.vehicles[vehicle_id].fresh_minutes,
+            "fresh_budget": FRESH_BUDGET_MIN,
+            "other_trip": {"trip_no": other.trip.trip_no, "district": other.district} if other else None,
+            "orders_with_it": [s.order_id for s in report.planned if s.order_id != order.order_ref],
+            "with": [
+                {
+                    "order_ref": s.order_id,
+                    "outlet_id": s.outlet_id,
+                    "short_name": names.get(s.outlet_id, s.outlet_id),
+                    "waiting": s.order_id in waiting,
                 }
-    return {"fits": False, "day": day.isoformat()}
+                for s in report.planned
+                if s.order_id != order.order_ref
+            ],
+            "needed": len(used),
+            "fleet": len([v for v in fleet if status.get(v.vehicle_id) is not VehicleStatus.WORKSHOP]),
+            "standby": sorted(
+                v.vehicle_id
+                for v in fleet
+                if status.get(v.vehicle_id) is VehicleStatus.STANDBY and v.vehicle_id not in used
+            ),
+        }
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ checking
@@ -558,10 +762,15 @@ def publish_check(db: Session, plan: Plan) -> dict[str, Any]:
     waits = db.scalars(select(Deferral).where(Deferral.plan_id == plan.id)).all()
     unreasoned = [d for d in waits if not d.confirmed_at]
     fresh_stops = [(r, s) for r in reports if r.brand is Brand.FRESH for s in r.expected]
+    names = {
+        o.outlet_id: o.short_name
+        for o in db.scalars(select(Outlet).where(Outlet.outlet_id.in_({o.outlet_id for o in orders})))
+    }
     late = []
     for r in reports:
         if r.brand is not Brand.FRESH:
             continue  # the morning windows are the ones at risk; daytime deliveries have hours of slack
+        explained = False
         for p, e in zip(r.planned, r.expected, strict=True):
             close = ctx.network.outlets[e.outlet_id].receiving_window[1]
             if e.arrive > close:
@@ -571,45 +780,219 @@ def publish_check(db: Session, plan: Plan) -> dict[str, Any]:
                         "trip_no": r.trip.trip_no,
                         "order_ref": e.order_id,
                         "outlet_id": e.outlet_id,
+                        "short_name": names.get(e.outlet_id, ""),
                         "closes": ampm(close),
                         "planned": ampm(p.arrive),
                         "expected": ampm(e.arrive),
-                        "why": _why_kept(ctx, r, e.order_id, reports),
+                        "why": _why_kept(ctx, r, e.order_id, reports, names, same_trip=explained),
                     }
                 )
+                explained = True
     return {
         "fresh_stops": len(fresh_stops),
         "planned_late": sum(1 for r, b in broken if b.rule == 8),
         "broken": [
             {"vehicle_id": r.trip.vehicle_id, "trip_no": r.trip.trip_no, "message": b.message} for r, b in broken
         ],
-        "waiting_without_reason": [db.get(Order, d.order_id).order_ref for d in unreasoned],  # type: ignore[union-attr]
+        "waiting_without_reason": [order_ref_of(db, d.order_id) for d in unreasoned],
         "expected_late": late,
         "can_publish": not broken and not unreasoned,
     }
 
 
-def _why_kept(ctx: Context, report: TripReport, order_ref: str, reports: Sequence[TripReport]) -> str:
-    net = ctx.network
-    stops = [s.order_id for s in report.planned]
-    position = stops.index(order_ref) + 1
-    outlet = net.outlets[ctx.orders[order_ref].outlet_id]
-    parts = []
+def _why_kept(
+    ctx: Context,
+    report: TripReport,
+    order_ref: str,
+    reports: Sequence[TripReport],
+    names: dict[str, str],
+    *,
+    same_trip: bool,
+) -> str:
+    """Why Relay keeps a stop it expects after the window where it is: what holds the trip back, whether another
+    stop order would bring the store in, and what every other vehicle that could carry it would cost instead."""
+    parts = ["Same trip."] if same_trip else [_holds_back(report, reports)]
+    parts.append(_stop_order(ctx, report, order_ref, reports, names))
+    parts += _other_vehicles(ctx, report, order_ref, reports, names)
+    return " ".join(p for p in parts if p)
+
+
+def _holds_back(report: TripReport, reports: Sequence[TripReport]) -> str:
+    vehicle_id = report.trip.vehicle_id
     if report.trip.trip_no == 2:
-        first = next((r for r in reports if r.trip.vehicle_id == report.trip.vehicle_id and r.trip.trip_no == 1), None)
+        first = next((r for r in reports if r.trip.vehicle_id == vehicle_id and r.trip.trip_no == 1), None)
         if first is not None:
-            parts.append(
-                f"{report.trip.vehicle_id}'s second trip leaves {round(report.depart - first.back)} min after "
-                f"its first is back at {ampm(first.back)}."
+            return (
+                f"{vehicle_id} runs {first.district} first and is back at {ampm(first.back)}; its "
+                f"{'second ' if first.district == report.district else ''}{report.district} trip leaves "
+                f"{round(report.depart - first.back)} min later."
             )
-    if position == len(stops) and len(stops) > 1:
-        parts.append(f"The last of {len(stops)} stores on the {report.district} run.")
-    if not parts:
-        parts.append(
-            f"Relay's model expects slow roads in {outlet.district} at this hour; the plan keeps it inside its "
-            "window on the published standard."
+    return f"{vehicle_id} leaves for {report.district} at {ampm(report.depart)}."
+
+
+def _expected_start(report: TripReport, reports: Sequence[TripReport]) -> float:
+    """When the trip leaves on Relay's expected clock: a second trip waits for the first to be back."""
+    if report.trip.trip_no == 1:
+        return float(report.depart)
+    first = next(r for r in reports if r.trip.vehicle_id == report.trip.vehicle_id and r.trip.trip_no == 1)
+    return max(float(report.depart), float(first.expected_back + RELOAD_MINUTES))
+
+
+def _stop_order(
+    ctx: Context, report: TripReport, order_ref: str, reports: Sequence[TripReport], names: dict[str, str]
+) -> str:
+    """Would any other stop order, keeping every window at the published standard, bring this store in?"""
+    net = ctx.network
+    stops = [(s.order_id, s.outlet_id) for s in report.planned]
+    if len(stops) < 2 or len(stops) > 7:
+        return ""
+
+    def closes(row: StopTiming) -> float:
+        return float(net.outlets[row.outlet_id].receiving_window[1])
+
+    start = _expected_start(report, reports)
+    later = next(
+        (r for r in reports if r.trip.vehicle_id == report.trip.vehicle_id and r.trip.trip_no > report.trip.trip_no),
+        None,
+    )
+    fixes: list[list[StopTiming]] = []
+    for order in itertools.permutations(stops):
+        ids, outlets = [o for o, _ in order], [o for _, o in order]
+        if ids == [s.order_id for s in report.planned]:
+            continue
+        planned, back = free_flow(net, outlets, report.depart, report.brand, ids)
+        if any(p.arrive > closes(p) for p in planned):
+            continue
+        if later is not None and back + RELOAD_MINUTES > later.depart:
+            continue  # the vehicle's next trip could not leave on time
+        rows, _ = expected(net, ctx.conditions, outlets, start, report.brand, ids)
+        late = [r for r in rows if r.arrive > closes(r)]
+        if all(r.order_id != order_ref for r in late):
+            fixes.append(late)
+    outlet_id = ctx.orders[order_ref].outlet_id
+    name = names.get(outlet_id, outlet_id)
+    close = ampm(net.outlets[outlet_id].receiving_window[1])
+    if not fixes:
+        return f"{name} would miss its {close} close in any stop order that keeps every window."
+    fewest = min(fixes, key=len)
+    if not fewest:
+        return ""
+    return f"Serving {name} earlier would make {and_list(names.get(r.outlet_id, r.outlet_id) for r in fewest)} late."
+
+
+def _other_vehicles(
+    ctx: Context, report: TripReport, order_ref: str, reports: Sequence[TripReport], names: dict[str, str]
+) -> list[str]:
+    """Each other vehicle that could carry the order, tried for real: on its trip to the same district, or on a trip
+    of its own. Says what the nearest one that works would cost, and groups the ones that can't."""
+    net = ctx.network
+    order = ctx.orders[order_ref]
+    outlet = net.outlets[order.outlet_id]
+    close = outlet.receiving_window[1]
+    mine = net.vehicles[report.trip.vehicle_id]
+    name = names.get(outlet.outlet_id, outlet.outlet_id)
+    own: dict[str, list[EngineTrip]] = {}
+    for r in reports:
+        own.setdefault(r.trip.vehicle_id, []).append(r.trip)
+
+    def expected_late(rows: Iterable[TripReport]) -> set[str]:
+        return {
+            s.outlet_id
+            for r in rows
+            for s in r.expected
+            if s.order_id != order_ref and s.arrive > net.outlets[s.outlet_id].receiving_window[1]
+        }
+
+    standby: list[str] = []
+    idle: list[tuple[str, TripReport, StopTiming]] = []
+    busy: list[tuple[str, TripReport, StopTiming, list[str]]] = []
+    late: list[str] = []
+    no_time: list[str] = []
+    full: list[str] = []
+    for v in sorted(net.vehicles.values(), key=lambda v: v.vehicle_id):
+        if v.depot != mine.depot or v.refrigerated != mine.refrigerated or v.vehicle_id == mine.vehicle_id:
+            continue
+        if outlet.van_only and v.type is not VehicleType.VAN:
+            continue
+        if order.weight_kg > v.weight_cap_kg or order.volume_m3 > v.volume_cap_m3:
+            continue
+        day = ctx.vehicles.get(v.vehicle_id)
+        if day is None or day.status is VehicleStatus.WORKSHOP:
+            continue
+        if day.status is VehicleStatus.STANDBY:
+            standby.append(v.vehicle_id)
+            continue
+        trips = [EngineTrip(t.vehicle_id, t.trip_no, list(t.order_ids), t.depart) for t in own.get(v.vehicle_id, [])]
+        before = expected_late(r for r in reports if r.trip.vehicle_id == v.vehicle_id)
+        tries: list[list[EngineTrip]] = []
+        same = next(
+            (
+                t
+                for t in trips
+                if net.outlets[ctx.orders[t.order_ids[0]].outlet_id].district == outlet.district
+                and ctx.orders[t.order_ids[0]].brand is order.brand
+            ),
+            None,
         )
-    return " ".join(parts)
+        if same is not None:
+            joined = EngineTrip(same.vehicle_id, same.trip_no, [*same.order_ids, order_ref])
+            tries.append([joined if t is same else t for t in trips])
+        if len(trips) < 2:
+            tries.append([*trips, EngineTrip(v.vehicle_id, len(trips) + 1, [order_ref])])
+        best: tuple[TripReport, StopTiming, list[str]] | None = None
+        rules: set[int] = set()
+        for candidate in tries:
+            tried, _ = evaluate(ctx, candidate)
+            carrying = next(r for r in tried if order_ref in r.trip.order_ids)
+            row = next(s for s in carrying.expected if s.order_id == order_ref)
+            broken = {b.rule for r in tried for b in r.broken}
+            if broken or row.arrive > close:
+                rules |= broken or {8}
+                continue
+            newly = sorted(expected_late(tried) - before)
+            if best is None or (len(newly), row.arrive) < (len(best[2]), best[1].arrive):
+                best = (carrying, row, newly)
+        if best is not None:
+            if trips:
+                busy.append((v.vehicle_id, *best))
+            else:
+                idle.append((v.vehicle_id, best[0], best[1]))
+        elif rules & {8, 10}:
+            late.append(v.vehicle_id)
+        elif 7 in rules:
+            no_time.append(v.vehicle_id)
+        elif rules & {1, 2}:
+            full.append(v.vehicle_id)
+    lines: list[str] = []
+    if busy:
+        vehicle_id, carrying, row, newly = min(busy, key=lambda b: (len(b[3]), b[2].arrive))
+        offer = f"{vehicle_id} could take it on trip {carrying.trip.trip_no}, expected {ampm(row.arrive)}"
+        if newly:
+            lines.append(f"{offer}, but {and_list(names.get(o, o) for o in newly)} would then be late.")
+        elif not carrying.usual:
+            lines.append(f"{offer}, but that takes {vehicle_id} off its usual run (rule 1).")
+        else:
+            lines.append(f"{offer}, with every other store on it still on time: drag it there to use that.")
+    if idle:
+        vehicle_id, carrying, row = min(idle, key=lambda b: b[2].arrive)
+        kind = "van" if net.vehicles[vehicle_id].is_van else "truck"
+        hours = max(1, round((carrying.back - carrying.depart) / 60))
+        lines.append(
+            f"{vehicle_id} has no trip and could take {name} alone (expected about {ampm(row.arrive)}), but that is a "
+            f"second {kind} and driver for about {hours} hour{'s' if hours != 1 else ''} and about "
+            f"{carrying.litres:.0f} L of fuel for one store."
+        )
+    if standby:
+        lines.append(f"{and_list(standby)} {'stays' if len(standby) == 1 else 'stay'} free as the standby.")
+    if late:
+        verb = "is" if len(late) == 1 else "are"
+        lines.append(f"{and_list(late)} {verb} back too late to reach it by {ampm(close)}.")
+    if no_time:
+        verb = "has" if len(no_time) == 1 else "have"
+        lines.append(f"{and_list(no_time)} {verb} no Fresh time left for it.")
+    if full:
+        lines.append(f"{and_list(full)} {'is' if len(full) == 1 else 'are'} full.")
+    return lines
 
 
 # ------------------------------------------------------------------------------------------------ publishing

@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { FieldRecord, Queued, Sent } from "@/offline/outbox";
-import { localItems, minutesBetween, nextStop, overlay, pillView, round5, stopLocal, windowState } from "./local";
+import {
+  answeredNo,
+  expectedPassed,
+  latest,
+  localItems,
+  minutesBetween,
+  nextStop,
+  overlay,
+  ownStops,
+  pillView,
+  round5,
+  sentAt,
+  stopLocal,
+  waitingForCall,
+  windowState,
+} from "./local";
 import type { DriverRun, DriverStop, Question } from "./types";
 
 const DAY = "2026-04-08";
@@ -166,16 +181,32 @@ describe("the phone's own records over Relay's run", () => {
     expect(overlay(base, items).trip?.stops[0]).toMatchObject({ status: "delivered", completed_at: at("05:11") });
   });
 
-  it("keeps a delivery that clashed with the office's move, until the driver says no", () => {
+  it("keeps a delivery that clashed with the office's move until the office settles it, even after a no", () => {
     const moved = stop(4, "Aranayake", { status: "moved", moved_to: "VEH060", version: 2 });
     const delivered = record("delivered", "07:09", "s4", { receiver: "K. Herath" });
     const question = asked();
     const items = localItems([], [sent(delivered, "conflict")], new Set());
     expect(overlay(run([moved], [question]), items).trip?.stops[0]?.status).toBe("delivered");
 
+    // "No, something is wrong" cancels nothing: the stop is still this truck's, waiting for the dispatcher's call
     const no = record("conflict_answer", "07:15", "s4", { conflict_id: "q1", answer: "no" });
     const answered = localItems([queued(no)], [sent(delivered, "conflict")], new Set());
-    expect(overlay(run([moved], [question]), answered).trip?.stops[0]?.status).toBe("moved");
+    const waiting = overlay(run([moved], [question]), answered);
+    expect(waiting.trip?.stops[0]).toMatchObject({ status: "delivered", completed_at: at("07:09") });
+    expect(ownStops(waiting.trip as NonNullable<DriverRun["trip"]>)).toHaveLength(1);
+    expect(waitingForCall(run([moved], [question]), answered, "s4")).toBe(true);
+    // the same once Relay has the answer, with nothing left on the phone
+    const escalated = asked({ status: "escalated", answer: "no" });
+    expect(answeredNo(run([moved], [escalated]), [])).toEqual([escalated]);
+    expect(overlay(run([moved], [escalated]), []).trip?.stops[0]?.status).toBe("delivered");
+
+    // settled with the other vehicle's copy kept: the phone's own record is set aside
+    const kept = asked({ status: "resolved", answer: "no", resolution: "dispatcher" });
+    expect(overlay(run([moved], [kept]), answered).trip?.stops[0]?.status).toBe("moved");
+    expect(waitingForCall(run([moved], [kept]), answered, "s4")).toBe(false);
+    // settled with the driver's delivery standing: Relay has it delivered
+    const stands = stop(4, "Aranayake", { status: "delivered", completed_at: at("07:09"), version: 3 });
+    expect(overlay(run([stands], [kept]), answered).trip?.stops[0]?.status).toBe("delivered");
   });
 
   it("shows a clashed stop as the driver's delivery from Relay's records when this phone holds none", () => {
@@ -194,6 +225,16 @@ describe("the phone's own records over Relay's run", () => {
     const local = stopLocal(items, "s2");
     expect(local.waiting).toBe(false);
     expect(local.sentAt).toBe(at("07:14"));
+  });
+
+  it("says a stop reached Relay when the last of its records did, from this phone or a demo jump", () => {
+    // the phone sent its arrival at 5:37 once the demo switch was off; the delivery a jump played came in at 7:14
+    const arrived = record("arrived", "05:22", "s2");
+    const items = localItems([], [sent(arrived, "applied", { saved_offline: true, at: at("05:37") })], new Set());
+    const mawanella = stop(2, "Mawanella", { status: "delivered", sent_at: "2026-04-08T07:14:00+05:30" });
+    expect(Date.parse(sentAt(mawanella, stopLocal(items, "s2")) ?? "")).toBe(Date.parse(at("07:14")));
+    expect(latest([null, at("05:37"), undefined])).toBe(at("05:37"));
+    expect(latest([])).toBeNull();
   });
 });
 
@@ -256,6 +297,16 @@ describe("the run's clock", () => {
   it("compares an arrival with the plan in whole minutes and rounds Expected to 5", () => {
     expect(minutesBetween(at("04:22"), at("04:41"))).toBe(19);
     expect(round5(new Date(`${DAY}T07:12:36+05:30`)).toISOString()).toBe(at("07:15"));
+  });
+
+  it("says an expected time has passed once the clock is past it, for a stop still to come", () => {
+    const s = stop(2, "Mawanella", { expected: at("05:04") }); // around 5:05 AM
+    expect(expectedPassed(s, new Date(at("05:05")))).toBe(false);
+    expect(expectedPassed(s, new Date(`${DAY}T05:05:59+05:30`))).toBe(false);
+    expect(expectedPassed(s, new Date(at("05:06")))).toBe(true);
+    // an arrival or a delivery answers it: nothing is still expected
+    expect(expectedPassed({ ...s, status: "arrived" }, new Date(at("05:20")))).toBe(false);
+    expect(expectedPassed({ ...s, expected: null }, new Date(at("05:20")))).toBe(false);
   });
 
   it("drives on past a stop left with a problem for the dispatcher", () => {

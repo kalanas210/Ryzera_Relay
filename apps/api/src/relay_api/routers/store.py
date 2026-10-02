@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta
-from typing import Annotated, Literal
+from datetime import datetime, timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 
 from relay_api.clock import COLOMBO
@@ -15,18 +14,31 @@ from relay_api.models import (
     AppUser,
     CaseType,
     Deferral,
-    DeferralKind,
     Notification,
     Order,
     OrderSource,
     Outlet,
     Role,
 )
-from relay_api.schemas.common import Schema
+from relay_api.schemas.store import (
+    CaseTypeOut,
+    ChangeOrder,
+    DeferralOut,
+    IssuesIn,
+    LineIn,
+    LineOut,
+    NoticeOut,
+    OutletOut,
+    PlaceOrder,
+    ReceiptIn,
+    StoreHome,
+    StoreOrderOut,
+)
 from relay_api.security import require
-from relay_api.services import tracker
+from relay_api.services import ordering, tracker
 from relay_api.services.ordering import (
     LineInput,
+    closed_run,
     cutoff_for,
     delivery_day_for,
     next_operating_day,
@@ -41,80 +53,19 @@ ORDER_FORM = ["rice_dhal", "packet_foods", "tea_biscuit", "dairy", "produce", "m
 StoreUser = Annotated[AppUser, Depends(require(Role.STORE_MANAGER))]
 
 
-class CaseTypeOut(Schema):
-    code: str
-    name: str
-    temp: str
-    kg: float
-    m3: float
-
-
-class OutletOut(Schema):
-    outlet_id: str
-    name: str
-    short_name: str
-    brand: str
-    district: str
-    depot: str
-    dock_type: str
-    parking_constraint: str
-    window_open: str
-    window_close: str
-
-
-class LineOut(Schema):
-    case_type: str
-    name: str
-    qty: int
-    carried_qty: int
-    carried_from: str | None
-
-
-class DeferralOut(Schema):
-    id: uuid.UUID
-    kind: DeferralKind
-    from_date: date
-    to_date: date
-    store_notice: str
-    notified_at: datetime | None
-    acknowledged_at: datetime | None
-
-
-class StoreOrderOut(Schema):
-    id: uuid.UUID
-    order_ref: str
-    temp: str
-    brand: str
-    requested_date: date
-    run_date: date
-    units: int
-    weight_kg: float
-    volume_m3: float
-    status: str
-    placed_at: datetime
-    locked: bool
-    lines: list[LineOut]
-    deferral: DeferralOut | None
-
-
-class StoreHome(Schema):
-    outlet: OutletOut
-    now: datetime
-    ordering_for: date
-    """The run a new order joins right now."""
-    cutoff: datetime
-    """When orders for `ordering_for` close."""
-    next_run: date
-    orders: list[StoreOrderOut]
-    case_types: list[CaseTypeOut]
-    unread_notices: int
-
-
 def _outlet(scope: ScopeDep, user: AppUser) -> Outlet:
     outlet = scope.db.get(Outlet, user.outlet_id) if user.outlet_id else None
     if outlet is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No store is linked to this account")
     return outlet
+
+
+def _my_order(scope: ScopeDep, user: AppUser, order_ref: str) -> Order:
+    outlet = _outlet(scope, user)
+    order = scope.db.scalar(select(Order).where(Order.order_ref == order_ref, Order.outlet_id == outlet.outlet_id))
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such order at your store")
+    return order
 
 
 def _order_out(order: Order, names: dict[str, str], deferral: Deferral | None, now: datetime) -> StoreOrderOut:
@@ -131,6 +82,7 @@ def _order_out(order: Order, names: dict[str, str], deferral: Deferral | None, n
         status=order.status.value,
         placed_at=order.placed_at.astimezone(COLOMBO),
         locked=now >= cutoff_for(order.requested_date),
+        locks_at=cutoff_for(order.requested_date),
         lines=[
             LineOut(
                 case_type=line.case_type,
@@ -150,6 +102,7 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
     db, now = scope.db, scope.now
     outlet = _outlet(scope, user)
     ordering_for = delivery_day_for(db, now)
+    closed_for = closed_run(db, now)
     local = now.astimezone(COLOMBO)
     today = local.date()
     form_order = {code: i for i, code in enumerate(ORDER_FORM)}
@@ -188,6 +141,8 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
         now=now,
         ordering_for=ordering_for,
         cutoff=cutoff_for(ordering_for),
+        closed_for=closed_for,
+        closed_at=cutoff_for(closed_for) if closed_for else None,
         next_run=next_run,
         orders=[_order_out(o, names, deferrals.get(o.id), now) for o in orders],
         case_types=[CaseTypeOut.model_validate(c) for c in types],
@@ -195,34 +150,40 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
     )
 
 
-class LineIn(BaseModel):
-    case_type: str
-    qty: int = Field(ge=1, le=999)
-
-
-class PlaceOrder(BaseModel):
-    temp: Literal["ambient", "chilled"]
-    lines: list[LineIn] = Field(min_length=1, max_length=12)
-    client_ref: str = Field(min_length=8, max_length=64)
-    """Generated on the store's device, so pressing Try again never sends a second order."""
+def _lines(types: dict[str, CaseType], outlet: Outlet, temp: str, lines: list[LineIn]) -> list[LineInput]:
+    """The store's lines, each a case type of its own brand and, for a Fresh store, of the order's temperature."""
+    for line in lines:
+        case = types.get(line.case_type)
+        if case is None or case.brand != outlet.brand or (outlet.brand == "Fresh" and case.temp != temp):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"{line.case_type} does not belong in this order"
+            )
+    if len({line.case_type for line in lines}) < len(lines):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Each case type goes on one line")
+    return [LineInput(line.case_type, line.qty) for line in lines]
 
 
 @router.post("/orders", response_model=StoreOrderOut, status_code=status.HTTP_201_CREATED)
 def create_order(body: PlaceOrder, scope: ScopeDep, user: StoreUser) -> StoreOrderOut:
+    """STM-02. The order goes on the run the store's form showed, unless it reaches Relay after that run's cutoff:
+    then it goes on the run taking orders now, and the store is told so in the same answer."""
     db, now = scope.db, scope.now
     outlet = _outlet(scope, user)
     types = {c.code: c for c in db.scalars(select(CaseType))}
-    for line in body.lines:
-        case = types.get(line.case_type)
-        if case is None or case.brand != outlet.brand or (outlet.brand == "Fresh" and case.temp != body.temp):
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{line.case_type} does not belong in this order")
+    ordering_for = delivery_day_for(db, now)
+    requested = body.for_date or ordering_for
+    if requested > ordering_for:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Orders for {requested:%A} {requested.day} {requested:%B} are not open yet",
+        )
     order = place_order(
         db,
         now,
         outlet,
         body.temp,
-        [LineInput(line.case_type, line.qty) for line in body.lines],
-        requested_date=delivery_day_for(db, now),
+        _lines(types, outlet, body.temp, body.lines),
+        requested_date=requested,
         source=OrderSource.STORE,
         placed_by=user,
         client_ref=body.client_ref,
@@ -232,15 +193,19 @@ def create_order(body: PlaceOrder, scope: ScopeDep, user: StoreUser) -> StoreOrd
     return _order_out(order, {c: t.name for c, t in types.items()}, deferral, now)
 
 
-class NoticeOut(Schema):
-    id: uuid.UUID
-    kind: str
-    title: str
-    body: str
-    data: dict[str, object]
-    created_at: datetime
-    read_at: datetime | None
-    acknowledged_at: datetime | None
+@router.patch("/orders/{order_ref}", response_model=StoreOrderOut)
+def change_order(order_ref: str, body: ChangeOrder, scope: ScopeDep, user: StoreUser) -> StoreOrderOut:
+    """STM-01 Change this order: new counts until 4:00 PM the day before its run, refused from then on."""
+    db, now = scope.db, scope.now
+    order = _my_order(scope, user, order_ref)
+    types = {c.code: c for c in db.scalars(select(CaseType))}
+    lines = _lines(types, _outlet(scope, user), order.temp, body.lines)
+    try:
+        ordering.change_order(db, now, order, lines, changed_by=user)
+    except ordering.OrderClosed as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    db.commit()
+    return _order_out(order, {c: t.name for c, t in types.items()}, None, now)
 
 
 @router.get("/notices", response_model=list[NoticeOut])
@@ -255,12 +220,27 @@ def notices(scope: ScopeDep, user: StoreUser) -> list[Notification]:
     )
 
 
-@router.post("/notices/{notice_id}/ack", response_model=NoticeOut)
-def acknowledge(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notification:
+def _my_notice(scope: ScopeDep, user: AppUser, notice_id: uuid.UUID) -> Notification:
     outlet = _outlet(scope, user)
     notice = scope.db.get(Notification, notice_id)
-    if notice is None or notice.outlet_id != outlet.outlet_id:
+    if notice is None or notice.outlet_id != outlet.outlet_id or notice.created_at > scope.now:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such notice")
+    return notice
+
+
+@router.post("/notices/{notice_id}/read", response_model=NoticeOut)
+def read_notice(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notification:
+    """The store opened the notice: the dispatcher's records can say when it was read. Got it is still the store's
+    own word that it has seen it."""
+    notice = _my_notice(scope, user, notice_id)
+    notice.read_at = notice.read_at or scope.now
+    scope.db.commit()
+    return notice
+
+
+@router.post("/notices/{notice_id}/ack", response_model=NoticeOut)
+def acknowledge(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notification:
+    notice = _my_notice(scope, user, notice_id)
     notice.read_at = notice.read_at or scope.now
     notice.acknowledged_at = notice.acknowledged_at or scope.now
     deferral_id = notice.data.get("deferral_id")
@@ -272,31 +252,11 @@ def acknowledge(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notif
 
 
 # ------------------------------------------------------------------------------------------------ on the way
-def _my_order(scope: ScopeDep, user: AppUser, order_ref: str) -> Order:
-    outlet = _outlet(scope, user)
-    order = scope.db.scalar(select(Order).where(Order.order_ref == order_ref, Order.outlet_id == outlet.outlet_id))
-    if order is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such order at your store")
-    return order
-
-
 @router.get("/orders/{order_ref}/tracker")
 def track(order_ref: str, scope: ScopeDep, user: StoreUser) -> dict[str, object]:
     """STM-04: where the delivery is and when it is expected, from the driver's own records. While the driver's
     phone is silent, a likely range; once the estimate has passed, the store can confirm receipt itself."""
     return tracker.tracker(scope.db, scope.now, _my_order(scope, user, order_ref)).as_dict()
-
-
-class IssueIn(BaseModel):
-    case_type: str = Field(max_length=24)
-    kind: Literal["missing", "damaged", "not_cold"]
-    qty: int = Field(ge=1, le=9999)
-    note: str = Field(default="", max_length=300)
-
-
-class ReceiptIn(BaseModel):
-    client_ref: str | None = Field(default=None, max_length=64)
-    issues: list[IssueIn] = Field(default_factory=list, max_length=20)
 
 
 @router.post("/orders/{order_ref}/receipt")
@@ -312,12 +272,6 @@ def confirm(order_ref: str, body: ReceiptIn, scope: ScopeDep, user: StoreUser) -
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     scope.db.commit()
     return tracker.tracker(scope.db, scope.now, order).as_dict()
-
-
-class IssuesIn(BaseModel):
-    client_ref: str = Field(min_length=8, max_length=64)
-    """Made on the store's phone, so Try again never reports the same problem twice."""
-    issues: list[IssueIn] = Field(min_length=1, max_length=20)
 
 
 @router.post("/orders/{order_ref}/issues")

@@ -41,6 +41,15 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        // the driver's and the loader's words in three languages, with i18next, are shared by those two roles only:
+        // a chunk of their own, so the sign-in page and the desk never download them
+        codeSplitting: { groups: [{ name: "i18n", test: /[\\/]src[\\/]i18n[\\/]|[\\/]node_modules[\\/].*i18next/ }] },
+      },
+    },
+  },
   server: {
     // every loopback name, so separate browser tabs on localhost and 127.0.0.1 keep separate sign-ins while testing
     host: true,

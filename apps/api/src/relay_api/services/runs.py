@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,8 +31,8 @@ from relay_api.models import (
     VehicleDay,
     VehicleDayStatus,
 )
+from relay_api.services import backup, words
 from relay_api.services import network as adapters
-from relay_api.services import words
 from relay_api.services.dock import DEPOT_LABEL, Lookup
 from relay_api.services.estimates import RunEstimate, run_estimate
 from relay_api.services.ordering import current_run
@@ -58,6 +59,12 @@ class Marker:
     backup_of: str | None = None
     held: datetime | None = None
     """While the stop has two copies: when the driver's phone says it was delivered, held until it is settled."""
+    denied: bool = False
+    """While the stop has two copies: the driver answered no, so the delivery the phone holds was not made."""
+    store_contact: str | None = None
+    """The store's manager, who reads the same estimate."""
+    handed_over: bool = False
+    """A moved stop that is now the backup's alone: its two-copy question was settled by keeping the backup's copy."""
 
 
 @dataclass
@@ -75,11 +82,17 @@ class RunRow:
     planned_depart: datetime
     departed_at: datetime | None
     finished_at: datetime | None
+    """When the driver tapped Finish trip, often at the last store's dock: never read as back at the hub."""
+    expected_back: datetime | None
+    """When the hub expects the vehicle back, the same time the driver's phone shows. Relay never records the return."""
     last_contact_at: datetime | None
     out_of_contact: bool
     silent_minutes: int
     position: str
     caption: str
+    risk: str
+    """Every stop still to come that is expected after its close, in words; empty when none is. The desk says a
+    later trip's risk with it."""
     delivered: int
     stops: int
     attention: int
@@ -102,7 +115,7 @@ class Panel:
     standby: list[str]
     rows: list[RunRow]
 
-    def as_dict(self) -> dict:  # type: ignore[type-arg]
+    def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -136,10 +149,16 @@ def panel(db: Session, now: datetime, depot: str) -> Panel:
     copies = {
         s.backup_of: s
         for s in db.scalars(select(Stop).where(Stop.backup_of.is_not(None), Stop.status != StopStatus.CANCELLED))
+        if s.backup_of is not None
     }
+    handed = set(
+        db.scalars(
+            select(Conflict.stop_id).where(Conflict.status == ConflictStatus.RESOLVED, Conflict.resolution == "backup")
+        )
+    )
     for trip in sorted(trips, key=lambda t: (t.planned_depart, t.vehicle_id, t.trip_no)):
         estimate = run_estimate(db, trip, now, conditions)
-        row = _row(db, look, plan, trip, estimate, conflicts, copies, now)
+        row = _row(db, look, plan, trip, estimate, Seen(conflicts, copies, handed), now)
         out.rows.append(row)
         if trip.departed_at is not None and trip.finished_at is None:
             out.running += 1
@@ -162,14 +181,23 @@ def panel(db: Session, now: datetime, depot: str) -> Panel:
     return out
 
 
+@dataclass
+class Seen:
+    """What the panel reads once for every row: open two-copy questions, the backups' live copies and the moved
+    stops settled in the backup's favour, each by the stop they are about."""
+
+    conflicts: dict[uuid.UUID, Conflict]
+    copies: dict[uuid.UUID, Stop]
+    handed: set[uuid.UUID]
+
+
 def _row(
     db: Session,
     look: Lookup,
     plan: Plan,
     trip: Trip,
     estimate: RunEstimate,
-    conflicts: dict,  # type: ignore[type-arg]
-    copies: dict,  # type: ignore[type-arg]
+    seen: Seen,
     now: datetime,
 ) -> RunRow:
     net = adapters.network(db)
@@ -190,14 +218,18 @@ def _row(
             StopStatus.MOVED: "moved",
             StopStatus.CANCELLED: "cancelled",
         }.get(stop.status, "pending")
-        if stop.id in conflicts:
+        conflict = seen.conflicts.get(stop.id)
+        if conflict is not None:
             state = "conflict"
         if state == "pending" and e is not None and e.receipt_at is not None:
             state = "delivered"
         if state == "pending" and not next_marked and trip.departed_at is not None:
             state = "next"
             next_marked = True
-        copy = copies.get(stop.id)
+        copy = seen.copies.get(stop.id)
+        manager = look.store_manager(stop.outlet_id)
+        # the desk shows Expected to the minute; while the phone is silent it says "around" with the store's time
+        shown = (e.estimate if estimate.out_of_contact else e.exact) if e else None
         marker = Marker(
             stop_id=str(stop.id),
             seq=stop.seq,
@@ -208,12 +240,15 @@ def _row(
             closes=closes,
             recorded=stop.completed_at or stop.arrived_at,
             arrived=stop.arrived_at,
-            estimate=e.estimate if e else None,
+            estimate=shown,
             range=e.range if e else None,
-            passed=bool(e and e.passed),
+            passed=shown is not None and shown < now,
             receipt_at=e.receipt_at if e else None,
-            moved_to=db.get(Trip, copy.trip_id).vehicle_id if copy is not None else None,  # type: ignore[union-attr]
+            moved_to=backup.carrier(db, copy),
             backup_of=str(stop.backup_of) if stop.backup_of else None,
+            denied=conflict is not None and conflict.answer == "no",
+            handed_over=state == "moved" and stop.id in seen.handed,
+            store_contact=manager.display_name if manager else None,
         )
         if marker.estimate is not None and marker.estimate > closes and state in ("next", "pending"):
             marker.late_risk = True
@@ -250,16 +285,23 @@ def _row(
         planned_depart=trip.planned_depart,
         departed_at=trip.departed_at,
         finished_at=trip.finished_at,
+        expected_back=_expected_back(trip, estimate),
         last_contact_at=estimate.last_contact_at,
         out_of_contact=estimate.out_of_contact,
         silent_minutes=estimate.silent_minutes,
         position=_position_text(look, estimate),
         caption=_caption(look, plan, trip, estimate, markers, driver.display_name if driver else None),
+        risk=late_words([m for m in markers if m.late_risk]),
         delivered=delivered,
         stops=countable,
         attention=attention,
         markers=markers,
     )
+
+
+def _expected_back(trip: Trip, estimate: RunEstimate) -> datetime | None:
+    """When the hub expects the vehicle back. A trip that turned back is no longer the run that time was made for."""
+    return None if trip.turned_back_at is not None else estimate.expected_back
 
 
 def _position_text(look: Lookup, estimate: RunEstimate) -> str:
@@ -276,10 +318,15 @@ def _caption(
     look: Lookup, plan: Plan, trip: Trip, estimate: RunEstimate, markers: list[Marker], driver: str | None
 ) -> str:
     who = driver.split()[0] if driver else trip.vehicle_id
+    hub = DEPOT_LABEL.get(plan.depot, plan.depot)
     if trip.finished_at is not None:
-        return f"Run finished at {words.clock(trip.finished_at)}."
+        # Finish trip is tapped at the last dock: the way home is still Relay's estimate, never a record
+        finished = f"Trip finished at {words.clock(trip.finished_at)}."
+        back = _expected_back(trip, estimate)
+        if back is not None and back > trip.finished_at:
+            return f"{finished} Expected back at the {hub} around {words.clock(words.round5(back))}."
+        return finished
     if trip.status is TripStatus.RETURNING:
-        hub = DEPOT_LABEL.get(plan.depot, plan.depot)
         return f"Turned back to the {hub} at {words.clock(trip.turned_back_at or trip.planned_depart)}."
     if trip.departed_at is None:
         return f"Leaves {words.clock(trip.planned_depart)}."
@@ -287,18 +334,23 @@ def _caption(
         since = words.clock(estimate.last_contact_at)
         return f"No contact from {who} since {since}. {_position_text(look, estimate)}".strip()
     to_come = [m for m in markers if m.state in ("next", "pending")]
-    hub = DEPOT_LABEL.get(plan.depot, plan.depot)
     clash = next((m for m in markers if m.state == "conflict"), None)
     if clash is not None:
+        if clash.denied:
+            return (
+                f"{who} says stop {clash.seq}, {clash.place}, was not delivered. It has two copies until it is settled."
+            )
         return f"Stop {clash.seq}, {clash.place}, has two copies until it is settled."
     if not to_come:
-        return f"Every stop is done. {who} is on the way back to the {hub}."
+        # still unloading at the last stop is not on the way back yet
+        here = next((m for m in markers if m.state == "arrived"), None)
+        if here is not None and here.arrived is not None:
+            return f"Reached {here.place}, the last stop, at {words.clock(here.arrived)}."
+        # Finish trip is tapped at the last dock, so until it is, nothing says the truck has left
+        handed = "".join(f" Stop {m.seq} is with {m.moved_to}." for m in markers if m.handed_over)
+        return f"Every stop is done.{handed} {who} has not finished the trip yet."
     risky = [m for m in to_come if m.late_risk]
-    windows = (
-        f"{risky[0].place} is expected after its {words.clock(risky[0].closes)} close."
-        if risky
-        else "Every stop still to come is expected inside its window."
-    )
+    windows = late_words(risky) or "Every stop still to come is expected inside its window."
     delay = look.db.scalar(
         select(ProblemReport)
         .where(ProblemReport.trip_id == trip.id, ProblemReport.reason == ProblemReason.DELAYED)
@@ -310,13 +362,30 @@ def _caption(
         stay = "stays inside its window" if len(to_come) == 1 else "stay inside their windows"
         tail = windows if risky else f"{places} {stay}."
         return f"{who} reported a {delay.delay_min} min delay at {words.clock(delay.reported_at)}. {tail}"
-    reached = [m for m in markers if m.arrived is not None and m.state in ("arrived", "delivered")]
+    reached = [(m, m.arrived) for m in markers if m.arrived is not None and m.state in ("arrived", "delivered")]
     if not reached:
         return f"Left at {words.clock(trip.departed_at)}. {windows}"
-    last = reached[-1]
-    behind = round((last.arrived - last.planned).total_seconds() / 60)  # type: ignore[operator]
+    last, arrived = reached[-1]
+    behind = round((arrived - last.planned).total_seconds() / 60)
     against = f"{behind} min behind plan" if behind > 0 else f"{-behind} min ahead of plan" if behind < 0 else "on plan"
-    return f"Reached {last.place} at {words.clock(last.arrived)}, {against}. {windows}"  # type: ignore[arg-type]
+    return f"Reached {last.place} at {words.clock(arrived)}, {against}. {windows}"
+
+
+def late_words(risky: list[Marker]) -> str:
+    """Every stop expected after its close, by name: "Aranayake is expected after its 7:30 AM close.", "Suduhumpola
+    and Ampitiya are expected after their 7:45 AM and 8:00 AM closes." Empty when none is."""
+    if not risky:
+        return ""
+    if len(risky) == 1:
+        return f"{risky[0].place} is expected after its {words.clock(risky[0].closes)} close."
+    closes = [words.clock(m.closes) for m in risky]
+    if len(set(closes)) == 1:
+        return f"{_and([m.place for m in risky])} are expected after their {closes[0]} close."
+    return f"{_and([m.place for m in risky])} are expected after their {_and(closes)} closes."
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def trip_uuid(value: str) -> uuid.UUID:

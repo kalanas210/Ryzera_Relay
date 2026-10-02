@@ -5,7 +5,7 @@ other stores. The simulator moves them with the scenario clock, through the same
 It is a function of time: `advance(db, now)` brings the world to where it should be at `now`, never backwards,
 and can run any number of times. A load a person has touched (`Trip.claimed_at`) is theirs to finish, but its
 simulated driver still accepts it once it is complete and leaves; the loads of the judges' own driver are left
-alone, and the story autopilot plays those only when a judge skips ahead.
+alone, and the story autopilot plays those when a judge skips ahead or nobody is playing Kasun.
 
 On the road, every other driver arrives and delivers at Relay's expected times from when the truck really left,
 sends each record the way a phone does (services/field.py), checks in each minute so the office never reads the
@@ -119,10 +119,10 @@ def _jitter(trip: Trip, modulo: int) -> int:
     return zlib.crc32(f"{trip.vehicle_id}/{trip.trip_no}".encode()) % modulo
 
 
-def dock_slots(trips: list[Trip], cases: dict[object, int], loaders: list[AppUser]) -> dict[object, DockSlot]:
+def dock_slots(trips: list[Trip], cases: dict[uuid.UUID, int], loaders: list[AppUser]) -> dict[uuid.UUID, DockSlot]:
     """When each load is picked, finished, accepted and leaves. The dock's two other loaders take the loads in
     departure order, in turn."""
-    out = {}
+    out: dict[uuid.UUID, DockSlot] = {}
     for n, trip in enumerate(sorted(trips, key=lambda t: (t.planned_depart, t.vehicle_id, t.trip_no))):
         minutes = max(10, math.ceil(cases[trip.id] / LOAD_RATE))
         slack = NIGHT_SLACK if trip.brand == "Fresh" else DAY_SLACK
@@ -214,7 +214,7 @@ def advance(db: Session, now: datetime) -> None:
                 if trip.claimed_at is None:
                     _load(db, trip, loads[trip.id], slot, now)
                 # a second trip's load waits at the bay until the vehicle is back from the first
-                at_bay = slot.start if previous is None else back_at_hub(previous)
+                at_bay = slot.start if previous is None else records.back_at_hub(previous)
                 if at_bay is not None:
                     _drive(look, plan, trip, loads[trip.id], slot, at_bay, now)
             if trip.departed_at is not None and trip.finished_at is None:
@@ -223,13 +223,7 @@ def advance(db: Session, now: datetime) -> None:
         _on_duty(db, plan, trips, drivers, phones, now)
 
 
-def back_at_hub(trip: Trip) -> datetime | None:
-    """When a vehicle is back at the hub from a trip: its driver finishes the trip there. None while it is out, or
-    has not left."""
-    return trip.finished_at
-
-
-def _hold(db: Session, trips: list[Trip]) -> set[object]:
+def _hold(db: Session, trips: list[Trip]) -> set[uuid.UUID]:
     """Lock the loads this pass may write, reading each trip again under the lock so `claimed_at` is current. A load
     a person's request holds at this moment (`dock.lock_trip`) is passed over, and the next tick plays it."""
     if not trips:
@@ -306,7 +300,8 @@ def _drive(look: Lookup, plan: Plan, trip: Trip, load: Load, slot: DockSlot, at_
 def road(db: Session, plan: Plan, trip: Trip, conditions: Conditions) -> list[Beat]:
     """What the driver of a trip on the road records from here on, at Relay's expected times from when the truck
     really left: each arrival and delivery not yet recorded, a report the story gives the driver, and the trip
-    finished once the truck is back at the hub. A stop moved to another vehicle is skipped: the phone was told."""
+    finished at the last dock, where drivers tap Finish trip (the drive home follows). A trip turned back finishes
+    once it is home. A stop moved to another vehicle is skipped: the phone was told."""
     net = adapters.network(db)
     day = plan.run_date
     district = net.districts[trip.district]
@@ -354,8 +349,7 @@ def road(db: Session, plan: Plan, trip: Trip, conditions: Conditions) -> list[Be
                 )
             )
         visits.append((stop, t))
-    back = t + district.depot_to_district_min * conditions.factor(district.name, t)
-    beats.append(Beat(adapters.at_minutes(day, back), FieldEventKind.TRIP_FINISHED, None, _id(trip.id, "finished")))
+    beats.append(Beat(adapters.at_minutes(day, t), FieldEventKind.TRIP_FINISHED, None, _id(trip.id, "finished")))
     beats.extend(_reports(db, day, trip, visits))
     return sorted(beats, key=lambda b: b.at)  # stable: a report made in the minute of an arrival comes after it
 

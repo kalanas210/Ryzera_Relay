@@ -38,6 +38,10 @@ def test_the_fit_hint_says_why_in_a_few_words(ctx: Context) -> None:
     badulla = Trip("VEH040", 1, ["ORD0098585", "ORD0098587"], 120)
     fits, hint = fit_hint(ctx, ctx.orders["ORD0098596"], badulla, [badulla])
     assert (fits, hint) == (False, "Serves Badulla only")
+    # DSP-02: VEH057's first trip is full as well as in Kandy, and the district is what the hint names
+    kandy = Trip("VEH057", 1, ["ORD0098545", "ORD0098552", "ORD0098554", "ORD0098556", "ORD0098550"], 220)
+    fits, hint = fit_hint(ctx, ctx.orders["ORD0098596"], kandy, [kandy])
+    assert (fits, hint) == (False, "Serves Kandy only")
 
 
 def test_chilled_goods_on_a_dry_truck_are_refused_in_plain_words(ctx: Context) -> None:

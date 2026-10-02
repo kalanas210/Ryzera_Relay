@@ -43,7 +43,7 @@ import {
   useTracker,
 } from "./api";
 import { ConfirmationPanel, DetailRow, NotPlanned, ProofCard } from "./parts";
-import { cases, clock, flaggedLabel, placedAt, sendIssues, shortLines, windowOf } from "./words";
+import { cases, clock, flaggedLabel, issueSentAt, placedAt, sendIssues, shortLines, windowOf } from "./words";
 
 /** One line of the receipt: what was loaded for the store, and what the driver's proof says was handed over. */
 type Line = {
@@ -162,7 +162,7 @@ export function ReceiptPage() {
             title="Issue sent"
             meta={
               <>
-                <span className="latin num">{t.order_ref}</span>, sent {clock(r.reported_at ?? r.confirmed_at)}
+                <span className="latin num">{t.order_ref}</span>, sent {clock(issueSentAt(r))}
               </>
             }
           >
@@ -171,16 +171,16 @@ export function ReceiptPage() {
               : `The dispatcher can see your ${r.issues.length === 1 ? "flag" : "flags"}.`}
           </ConfirmationPanel>
         )}
-        {r.status === "confirmed" && issuesOpen ? (
-          <Card className="flex flex-col gap-3 p-4">
-            <p className="t-body text-asphalt-700">You can still report a problem until {until} today.</p>
-            <Button full icon={CircleAlert} onClick={() => setSent(false)}>
-              Report a problem
-            </Button>
-          </Card>
-        ) : null}
         {t.proof ? null : <ProofCard tracker={t} />}
         {toCome}
+        {r.status === "confirmed" && issuesOpen ? (
+          <div className="flex flex-col items-start gap-1">
+            <Button variant="quiet" compact icon={CircleAlert} className="-ml-3 px-3" onClick={() => setSent(false)}>
+              Report a problem
+            </Button>
+            <p className="t-caption text-asphalt-500">You can still report a problem until {until} today</p>
+          </div>
+        ) : null}
       </PhoneScreen>
     );
   }
@@ -255,7 +255,7 @@ export function ReceiptPage() {
             <span className="latin num">{t.order_ref}</span>.{" "}
             {r.status === "confirmed"
               ? `You confirmed receipt at ${clock(r.confirmed_at)}`
-              : `You sent an issue at ${clock(r.reported_at ?? r.confirmed_at)}`}
+              : `You sent an issue at ${clock(issueSentAt(r))}`}
           </p>
         </div>
         <ProofCard tracker={t} />

@@ -6,7 +6,7 @@ import { Notice } from "@/design/Notice";
 import { Sheet } from "@/design/Sheet";
 import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
-import { formatTime, formatWindow, kg, m3, numberFormat, roundTo5 } from "@/lib/time";
+import { formatTime, formatWindow, kg, kgValue, m3, m3Value, numberFormat, roundTo5, tenths } from "@/lib/time";
 import { type Depot, type MoveOption, type RunMarker, type RunRow, useMove, useMoveOptions } from "./api";
 import { accessWords, type Directory, driverName } from "./model";
 import { EstimateMark } from "./Runs";
@@ -404,7 +404,7 @@ function Checks({
           title="Weight"
           value={option.weight_kg}
           limit={option.weight_cap_kg}
-          label={`${kg(option.weight_kg).replace(" kg", "")} of ${numberFormat.format(option.weight_cap_kg)} kg`}
+          label={`${kgValue(option.weight_kg)} of ${numberFormat.format(option.weight_cap_kg)} kg`}
         />
         <Meter
           size="full"
@@ -412,7 +412,7 @@ function Checks({
           title="Volume"
           value={option.volume_m3}
           limit={option.volume_cap_m3}
-          label={`${m3(option.volume_m3).replace(" m³", "")} of ${option.volume_cap_m3.toFixed(1)} m³`}
+          label={`${m3Value(option.volume_m3)} of ${tenths(option.volume_cap_m3)} m³`}
         />
       </div>
       <Rule tone="info">

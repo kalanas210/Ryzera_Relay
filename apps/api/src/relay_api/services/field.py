@@ -5,12 +5,15 @@ A record is stamped with the time it happened on the phone, never the time it re
 offline at 6:36 AM reads 6:36 AM when it arrives at 7:14. A stop record that clashes with a change the office made
 while the phone was silent (the stop was moved to a backup vehicle, or cancelled) is kept with its evidence and opens
 one question to the driver; every other record is applied as it is. The first answer to that question, the driver's
-or the dispatcher's, settles it.
+or the dispatcher's, settles it. A stop completes once: a later record for a stop already delivered or not delivered
+(a second phone's, or the demo autopilot's) is kept for the audit and changes nothing, so the stop's times and proof
+always come from one delivery.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -18,6 +21,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from relay_api.db import WORKSPACE_KEY
 from relay_api.models import (
     AppUser,
     AuditLog,
@@ -45,6 +49,7 @@ from relay_api.models import (
     Trip,
     TripStatus,
     VehicleDay,
+    Workspace,
 )
 from relay_api.services import dock, words
 from relay_api.services.notify import add_feed_item, notify_store
@@ -80,6 +85,12 @@ class Result:
     reason: str = ""
 
 
+StopHandler = Callable[[Session, datetime, AppUser, Trip, Stop, RecordIn, FieldEvent], None]
+"""Applies an arrival, a delivery or a failed stop: the record names a stop of the trip."""
+TripHandler = Callable[[Session, datetime, AppUser, Trip, Stop | None, RecordIn, FieldEvent], None]
+"""Applies a record about the trip, which may name the stop it was made at."""
+
+
 # ------------------------------------------------------------------------------------------------ the batch
 def receive(db: Session, now: datetime, user: AppUser, device_id: str, records: list[RecordIn]) -> list[Result]:
     """Apply a batch from one phone, in the order the phone saved it."""
@@ -94,11 +105,13 @@ def apply(db: Session, now: datetime, user: AppUser, device_id: str, records: li
     """Each record in turn, as `receive` does once the phone's contact is noted."""
     results = []
     for record in records:
-        with db.begin_nested():  # one bad record never takes the rest of the batch with it
-            try:
+        # One bad record never takes the rest of the batch with it, and leaves nothing half applied: whatever it
+        # changed before Relay found it could not take it is rolled back, and only the rejection is kept.
+        try:
+            with db.begin_nested():
                 results.append(_one(db, now, user, device_id, record))
-            except FieldError as exc:
-                results.append(_reject(db, now, user, device_id, record, str(exc)))
+        except FieldError as exc:
+            results.append(_reject(db, now, user, device_id, record, str(exc)))
         db.flush()
     return results
 
@@ -153,6 +166,48 @@ def running_trip(db: Session, user: AppUser) -> Trip | None:
     )
 
 
+# ------------------------------------------------------------------------------------------------ the demo's switch
+SWITCHED_OFF = "switched_off"
+"""Key in Workspace.state, demo mode only: drivers whose phone the demo bar's "no signal" switch has cut off, by
+username, with the scenario time it went off."""
+
+
+def switched_off(db: Session, user: AppUser) -> datetime | None:
+    """When the demo bar cut this driver's phone off, while it still is. Relay hears nothing from that phone, so the
+    story's autopilot leaves the driver to the judge holding it: what the phone saved meanwhile is still only on it,
+    and a jump that played those stops again would give them two deliveries."""
+    workspace = _this_copy(db)
+    since = (workspace.state.get(SWITCHED_OFF) or {}).get(user.username) if workspace is not None else None
+    return datetime.fromisoformat(since) if since else None
+
+
+def switch_signal(db: Session, user: AppUser, now: datetime, *, on: bool) -> None:
+    """The demo bar's switch went on or off on this driver's phone; a record or a check-in from the phone means it is
+    off too. The copy's state is read again under its lock, so a jump writing it at the same moment keeps its own
+    change."""
+    workspace = _this_copy(db)
+    if workspace is None or (switched_off(db, user) is not None) == on:
+        return
+    locked = db.scalar(
+        select(Workspace)
+        .where(Workspace.id == workspace.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    assert locked is not None
+    cut = dict(locked.state.get(SWITCHED_OFF) or {})
+    if on:
+        cut.setdefault(user.username, now.isoformat())
+    else:
+        cut.pop(user.username, None)
+    locked.state = {**locked.state, SWITCHED_OFF: cut}
+
+
+def _this_copy(db: Session) -> Workspace | None:
+    workspace_id = db.info.get(WORKSPACE_KEY)
+    return db.get(Workspace, workspace_id) if workspace_id is not None else None
+
+
 def _one(db: Session, now: datetime, user: AppUser, device_id: str, record: RecordIn) -> Result:
     existing = db.get(FieldEvent, record.id)
     if existing is not None:
@@ -162,7 +217,8 @@ def _one(db: Session, now: datetime, user: AppUser, device_id: str, record: Reco
     if record.occurred_at > now + timedelta(minutes=5):
         raise FieldError("This record is stamped later than now.")
     if record.kind is FieldEventKind.CHECKIN:
-        return _store(db, now, user, device_id, record, FieldEventOutcome.APPLIED)
+        _store(db, now, user, device_id, record, FieldEventOutcome.APPLIED)
+        return Result(record.id, FieldEventOutcome.APPLIED)
 
     trip = db.get(Trip, record.trip_id) if record.trip_id else None
     if trip is None:
@@ -173,6 +229,8 @@ def _one(db: Session, now: datetime, user: AppUser, device_id: str, record: Reco
     if record.kind in STOP_KINDS:
         if stop is None or stop.trip_id != trip.id:
             raise FieldError("That stop is not on this trip.")
+        if stop.completed_at is not None and stop.status in (StopStatus.DELIVERED, StopStatus.FAILED):
+            return _already_done(db, now, user, device_id, record, stop)
         backup = _clash(db, stop, record.base_version)
         if backup is not None:
             event = _store(db, now, user, device_id, record, FieldEventOutcome.CONFLICT)
@@ -181,19 +239,25 @@ def _one(db: Session, now: datetime, user: AppUser, device_id: str, record: Reco
             _open_question(db, now, user, trip, stop, backup, event)
             return Result(record.id, FieldEventOutcome.CONFLICT)
 
-    handler = {
-        FieldEventKind.LOAD_ACCEPTED: _load_accepted,
-        FieldEventKind.LOAD_DIFFERENCE: _load_difference,
-        FieldEventKind.DEPARTED: _departed,
-        FieldEventKind.ARRIVED: _arrived,
-        FieldEventKind.DELIVERED: _delivered,
-        FieldEventKind.FAILED: _failed,
-        FieldEventKind.PROBLEM: _problem,
-        FieldEventKind.TRIP_FINISHED: _finished,
-        FieldEventKind.CONFLICT_ANSWER: _answer,
-    }[record.kind]
     event = _store(db, now, user, device_id, record, FieldEventOutcome.APPLIED)
-    handler(db, now, user, trip, stop, record, event)
+    if record.kind in STOP_KINDS:
+        assert stop is not None  # a stop record names a stop of this trip, checked above
+        at_stop: dict[FieldEventKind, StopHandler] = {
+            FieldEventKind.ARRIVED: _arrived,
+            FieldEventKind.DELIVERED: _delivered,
+            FieldEventKind.FAILED: _failed,
+        }
+        at_stop[record.kind](db, now, user, trip, stop, record, event)
+    else:
+        on_trip: dict[FieldEventKind, TripHandler] = {
+            FieldEventKind.LOAD_ACCEPTED: _load_accepted,
+            FieldEventKind.LOAD_DIFFERENCE: _load_difference,
+            FieldEventKind.DEPARTED: _departed,
+            FieldEventKind.PROBLEM: _problem,
+            FieldEventKind.TRIP_FINISHED: _finished,
+            FieldEventKind.CONFLICT_ANSWER: _answer,
+        }
+        on_trip[record.kind](db, now, user, trip, stop, record, event)
     return Result(record.id, FieldEventOutcome.APPLIED)
 
 
@@ -235,6 +299,17 @@ def _reject(db: Session, now: datetime, user: AppUser, device_id: str, record: R
         event = _store(db, now, user, device_id, rec, FieldEventOutcome.REJECTED)
         event.reject_reason = reason
     return Result(record.id, FieldEventOutcome.REJECTED, reason)
+
+
+def _already_done(db: Session, now: datetime, user: AppUser, device_id: str, record: RecordIn, stop: Stop) -> Result:
+    """A stop record for a stop another record already completed, from a second phone or the demo's autopilot: the
+    first stands, with its times and its proof. This one is kept for the audit and changes nothing."""
+    assert stop.completed_at is not None
+    done = "delivered" if stop.status is StopStatus.DELIVERED else "not delivered"
+    reason = f"Stop {stop.seq} was already recorded {done} at {words.clock(stop.completed_at)}."
+    event = _store(db, now, user, device_id, record, FieldEventOutcome.DUPLICATE)
+    event.reject_reason = reason
+    return Result(record.id, FieldEventOutcome.DUPLICATE, reason)
 
 
 def _drives(db: Session, user: AppUser, trip: Trip) -> bool:
@@ -323,10 +398,10 @@ def _note_clash(db: Session, conflict: Conflict, event: FieldEvent) -> None:
     elif event.kind is FieldEventKind.DELIVERED:
         note["delivered_at"] = event.occurred_at.isoformat()
         note["receiver"] = str(event.payload.get("receiver") or "")
-        lines = event.payload.get("lines")
+        lines = _handed_lines(event.payload)
         stop = db.get(Stop, event.stop_id) if event.stop_id else None
-        if isinstance(lines, list):
-            note["cases"] = str(sum(int(line.get("qty", 0)) for line in lines))
+        if lines is not None:
+            note["cases"] = str(sum(line["qty"] for line in lines))
         elif stop is not None:  # every line as loaded, which is what "all delivered" means
             note["cases"] = str(sum(line.loaded_qty for line in _lines(db, stop)))
         if event.payload.get("photo_id"):
@@ -337,7 +412,8 @@ def _note_clash(db: Session, conflict: Conflict, event: FieldEvent) -> None:
 
 def settle(db: Session, now: datetime, conflict: Conflict, *, by: AppUser | None, how: str) -> None:
     """The driver said yes, or the dispatcher cancelled the backup's copy: the driver's records stand, the backup
-    turns back and everyone is told. The first answer wins; later ones change nothing."""
+    turns back and everyone is told. The first answer wins; later ones change nothing. `keep_backup` is the other
+    way to settle it."""
     if conflict.status is ConflictStatus.RESOLVED:
         return
     stop = db.get(Stop, conflict.stop_id)
@@ -349,11 +425,9 @@ def settle(db: Session, now: datetime, conflict: Conflict, *, by: AppUser | None
     ).all()
     for event in events:
         event.applied_at = now
-        if event.kind is FieldEventKind.ARRIVED:
-            stop.arrived_at = stop.arrived_at or event.occurred_at
-        elif event.kind is FieldEventKind.DELIVERED:
-            stop.arrived_at = stop.arrived_at or event.occurred_at
-            stop.completed_at = event.occurred_at
+        stop.arrived_at = _earliest(stop.arrived_at, event.occurred_at)
+        if event.kind is FieldEventKind.DELIVERED:
+            stop.completed_at = stop.completed_at or event.occurred_at  # the first delivery, whose proof is kept
     delivered = any(e.kind is FieldEventKind.DELIVERED for e in events)
     stop.status = StopStatus.DELIVERED if delivered else StopStatus.ARRIVED if events else StopStatus.PENDING
     stop.version += 1
@@ -378,6 +452,7 @@ def settle(db: Session, now: datetime, conflict: Conflict, *, by: AppUser | None
         item.handled_at = now
         item.handled_by = by.id if by else None
         item.title = f"Stop {stop.seq} conflict resolved"
+        item.ref = {**item.ref, "resolution": how}
         item.outcome = (
             "The driver answered yes: delivered. The backup's copy is cancelled."
             if how == "driver"
@@ -392,6 +467,72 @@ def settle(db: Session, now: datetime, conflict: Conflict, *, by: AppUser | None
             entity="stop",
             entity_id=str(stop.id),
             summary=f"Stop {stop.seq} settled ({how})",
+        )
+    )
+
+
+def keep_backup(db: Session, now: datetime, conflict: Conflict, *, by: AppUser) -> None:
+    """The dispatcher keeps the backup's copy, as when the driver answered no: the stop stays with the backup, the
+    records the driver's phone saved for it are set aside (kept for the audit, never applied, and the proof made from
+    them is dropped), and the phone is told. The first answer wins; later ones change nothing."""
+    if conflict.status is ConflictStatus.RESOLVED:
+        return
+    stop = db.get(Stop, conflict.stop_id)
+    assert stop is not None
+    copy = db.get(Stop, conflict.backup_stop_id) if conflict.backup_stop_id else None
+    if copy is None or copy.status is StopStatus.CANCELLED:
+        raise FieldError(f"The backup's copy of stop {stop.seq} is already cancelled, so it cannot carry the stop.")
+    events = db.scalars(
+        select(FieldEvent).where(FieldEvent.stop_id == stop.id, FieldEvent.outcome == FieldEventOutcome.CONFLICT)
+    ).all()
+    for event in events:
+        event.outcome = FieldEventOutcome.REJECTED
+        event.reject_reason = f"Set aside: the dispatcher kept the backup's copy of stop {stop.seq}."
+        proof = db.scalar(select(Proof).where(Proof.event_id == event.id))
+        if proof is not None:
+            db.delete(proof)
+    stop.version += 1
+    conflict.status = ConflictStatus.RESOLVED
+    conflict.resolved_at = now
+    conflict.resolved_by = by.id
+    conflict.resolution = "backup"
+    backup_trip = db.get(Trip, copy.trip_id)
+    vehicle = backup_trip.vehicle_id if backup_trip else "the backup"
+    outlet = db.get(Outlet, stop.outlet_id)
+    place = outlet.short_name if outlet else stop.outlet_id
+    driver = db.get(AppUser, conflict.driver_id)
+    if driver is not None:
+        db.add(
+            Notification(
+                user_id=driver.id,
+                kind="stop_kept_by_backup",
+                title=f"Stop {stop.seq} stays with {vehicle}",
+                body=f"{place} goes with {vehicle}. What your phone saved for it is set aside.",
+                data={"stop_id": str(stop.id), "vehicle_id": vehicle},
+                created_at=now,
+                show_after=now,
+            )
+        )
+    said_no = conflict.answer == "no"
+    for item in _items(db, FeedKind.CONFLICT, "conflict_id", conflict.id):
+        item.handled_at = now
+        item.handled_by = by.id
+        item.title = f"Stop {stop.seq} conflict resolved"
+        item.ref = {**item.ref, "resolution": "backup"}
+        item.outcome = (
+            f"The driver answered no: not delivered. {vehicle}'s copy stands."
+            if said_no
+            else f"You kept {vehicle}'s copy. The driver's records for it are set aside."
+        )
+    db.add(
+        AuditLog(
+            at=now,
+            actor_id=by.id,
+            actor_label=by.display_name,
+            action="conflict.settled",
+            entity="stop",
+            entity_id=str(stop.id),
+            summary=f"Stop {stop.seq} settled (backup kept)",
         )
     )
 
@@ -422,7 +563,9 @@ def _items(db: Session, kind: FeedKind, key: str, value: object) -> list[FeedIte
 
 
 # ------------------------------------------------------------------------------------------------ the kinds
-def _load_accepted(db: Session, now: datetime, user: AppUser, trip: Trip, _stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def _load_accepted(
+    db: Session, now: datetime, user: AppUser, trip: Trip, _stop: Stop | None, record: RecordIn, _e: FieldEvent
+) -> None:
     try:
         dock.accept(db, record.occurred_at, user, trip, on="phone")
     except dock.DockError as exc:
@@ -432,7 +575,9 @@ def _load_accepted(db: Session, now: datetime, user: AppUser, trip: Trip, _stop,
             order.status = OrderStatus.LOADED
 
 
-def _load_difference(db: Session, now: datetime, user: AppUser, trip: Trip, _stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def _load_difference(
+    db: Session, now: datetime, user: AppUser, trip: Trip, _stop: Stop | None, record: RecordIn, _e: FieldEvent
+) -> None:
     note = str(record.payload.get("note", "")).strip()[:500]
     handover = db.scalar(select(Handover).where(Handover.trip_id == trip.id))
     if handover is None:
@@ -450,7 +595,9 @@ def _load_difference(db: Session, now: datetime, user: AppUser, trip: Trip, _sto
     )
 
 
-def _departed(db: Session, now: datetime, user: AppUser, trip: Trip, _stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def _departed(
+    db: Session, now: datetime, user: AppUser, trip: Trip, _stop: Stop | None, record: RecordIn, _e: FieldEvent
+) -> None:
     dock.depart(db, record.occurred_at, trip, user)
     for order in _orders(db, trip):
         if order.status in (OrderStatus.ALLOCATED, OrderStatus.LOADED, OrderStatus.RECEIVED):
@@ -464,17 +611,26 @@ def _left_unseen(db: Session, trip: Trip, user: AppUser, record: RecordIn) -> No
         dock.depart(db, min(trip.planned_depart, record.occurred_at), trip, user)
 
 
-def _arrived(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def _earliest(known: datetime | None, at: datetime) -> datetime:
+    """Two phones can both say they arrived: the truck was there from the earlier of the two."""
+    return at if known is None else min(known, at)
+
+
+def _arrived(
+    db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, _e: FieldEvent
+) -> None:
     _left_unseen(db, trip, user, record)
-    stop.arrived_at = stop.arrived_at or record.occurred_at
+    stop.arrived_at = _earliest(stop.arrived_at, record.occurred_at)
     if stop.status in (StopStatus.PENDING, StopStatus.MOVED):
         stop.status = StopStatus.ARRIVED
     _refresh_times(db, now, trip)
 
 
-def _delivered(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, event) -> None:  # type: ignore[no-untyped-def]
+def _delivered(
+    db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, event: FieldEvent
+) -> None:
     _left_unseen(db, trip, user, record)
-    stop.arrived_at = stop.arrived_at or record.occurred_at
+    stop.arrived_at = _earliest(stop.arrived_at, record.occurred_at)  # never later than the delivery
     stop.completed_at = record.occurred_at
     stop.status = StopStatus.DELIVERED
     _proof(db, stop, event, record)
@@ -485,7 +641,9 @@ def _delivered(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop
     _refresh_times(db, now, trip)
 
 
-def _failed(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def _failed(
+    db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, record: RecordIn, _e: FieldEvent
+) -> None:
     reason = str(record.payload.get("reason", "")).strip()[:200]
     stop.status = StopStatus.FAILED
     stop.completed_at = record.occurred_at
@@ -507,13 +665,16 @@ def _failed(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop, r
     _refresh_times(db, now, trip)
 
 
-def _problem(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop | None, record: RecordIn, event) -> None:  # type: ignore[no-untyped-def]
+def _problem(
+    db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop | None, record: RecordIn, event: FieldEvent
+) -> None:
     try:
         reason = ProblemReason(str(record.payload.get("reason")))
     except ValueError as exc:
         raise FieldError("Choose what happened.") from exc
     delay = record.payload.get("delay_min")
     note = str(record.payload.get("note", "")).strip()[:500]
+    lines = record.payload.get("lines")
     db.add(
         ProblemReport(
             event_id=event.id,
@@ -523,7 +684,7 @@ def _problem(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop |
             delay_min=int(delay) if isinstance(delay, int | float) else None,
             note=note,
             reported_at=record.occurred_at,
-            lines=list(record.payload.get("lines", []))[:20],
+            lines=lines[:20] if isinstance(lines, list) else [],
             urgent=bool(record.payload.get("urgent", False)),
         )
     )
@@ -547,12 +708,44 @@ def _problem(db: Session, now: datetime, user: AppUser, trip: Trip, stop: Stop |
     )
 
 
-def _finished(db: Session, now: datetime, user: AppUser, trip: Trip, _stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def _finished(
+    db: Session, now: datetime, user: AppUser, trip: Trip, _stop: Stop | None, record: RecordIn, _e: FieldEvent
+) -> None:
+    """Finish trip is tapped at the last dock: the drive home is still ahead, so the time the hub expects the vehicle
+    back moves to the finish plus the way home, and the driver's phone and the dispatcher's desk both read it. A
+    trip turned back finishes at the hub, where it already is."""
     trip.finished_at = record.occurred_at
+    if trip.turned_back_at is None:
+        trip.expected_back = home_from_last_stop(db, trip, record.occurred_at)
     trip.status = TripStatus.FINISHED
 
 
-def _answer(db: Session, now: datetime, user: AppUser, trip: Trip, _stop, record: RecordIn, _e) -> None:  # type: ignore[no-untyped-def]
+def back_at_hub(trip: Trip) -> datetime | None:
+    """When a vehicle is back at the hub from a trip: its driver finishes the trip at the last dock, and the hub
+    expects it back after the drive home (a trip turned back finishes at the hub). None while it is out, or has not
+    left."""
+    if trip.finished_at is None:
+        return None
+    if trip.turned_back_at is not None or trip.expected_back is None:
+        return trip.finished_at
+    return max(trip.finished_at, trip.expected_back)
+
+
+def home_from_last_stop(db: Session, trip: Trip, leaving: datetime) -> datetime:
+    """When a vehicle that leaves its district's last stop at `leaving` is back at the hub, on the day's roads."""
+    from relay_api.services import network as adapters
+
+    plan = db.get(Plan, trip.plan_id)
+    assert plan is not None
+    district = adapters.network(db).districts[trip.district]
+    conditions = adapters.conditions(db, plan.run_date)
+    t = adapters.minutes_of(plan.run_date, leaving)
+    return adapters.at_minutes(plan.run_date, t + district.depot_to_district_min * conditions.factor(district.name, t))
+
+
+def _answer(
+    db: Session, now: datetime, user: AppUser, trip: Trip, _stop: Stop | None, record: RecordIn, _e: FieldEvent
+) -> None:
     try:
         conflict_id = uuid.UUID(str(record.payload.get("conflict_id")))
     except ValueError as exc:
@@ -573,28 +766,51 @@ def _answer(db: Session, now: datetime, user: AppUser, trip: Trip, _stop, record
 
 # ------------------------------------------------------------------------------------------------ proof and times
 def _proof(db: Session, stop: Stop, event: FieldEvent, record: RecordIn) -> None:
-    proof = db.scalar(select(Proof).where(Proof.stop_id == stop.id))
+    """The stop's proof of delivery, from its first delivery record. A second one (another phone's) never replaces
+    it, so the receiver, the signature and the photo always belong together."""
     payload = record.payload
-    lines = payload.get("lines")
-    if not isinstance(lines, list):
-        lines = [{"case_type": line.case_type, "qty": line.loaded_qty} for line in _lines(db, stop)]
-    values = {
-        "event_id": event.id,
-        "receiver_name": str(payload.get("receiver", "")).strip()[:64],
-        "lines": lines,
-        "all_delivered": bool(payload.get("all_delivered", True)),
-        "signature_svg": (str(payload["signature_svg"])[:20_000] if payload.get("signature_svg") else None),
-        "recorded_at": record.occurred_at,
-    }
+    lines = _handed_lines(payload)
     photo_id = payload.get("photo_id")
+    photo = None
     if photo_id:
-        photo = db.get(Photo, uuid.UUID(str(photo_id)))
-        values["photo_id"] = photo.id if photo else None
-    if proof is None:
-        db.add(Proof(stop_id=stop.id, **values))
-    else:
-        for key, value in values.items():
-            setattr(proof, key, value)
+        try:
+            photo = db.get(Photo, uuid.UUID(str(photo_id)))
+        except ValueError as exc:
+            raise FieldError("No such photo.") from exc
+    if db.scalar(select(Proof.id).where(Proof.stop_id == stop.id)) is not None:
+        return
+    db.add(
+        Proof(
+            stop_id=stop.id,
+            event_id=event.id,
+            receiver_name=str(payload.get("receiver", "")).strip()[:64],
+            lines=lines
+            if lines is not None
+            else [{"case_type": line.case_type, "qty": line.loaded_qty} for line in _lines(db, stop)],
+            all_delivered=bool(payload.get("all_delivered", True)),
+            signature_svg=str(payload["signature_svg"])[:20_000] if payload.get("signature_svg") else None,
+            recorded_at=record.occurred_at,
+            photo_id=photo.id if photo else None,
+        )
+    )
+
+
+def _handed_lines(payload: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """What came off the truck as the delivery record says, when a line was changed at the store; None when the
+    record leaves the lines out, which means every line as loaded."""
+    lines = payload.get("lines")
+    if lines is None:
+        return None
+    if not isinstance(lines, list) or not all(
+        isinstance(line, dict)
+        and isinstance(line.get("case_type"), str)
+        and isinstance(line.get("qty"), int)
+        and not isinstance(line.get("qty"), bool)
+        and line["qty"] >= 0
+        for line in lines
+    ):
+        raise FieldError("The delivered cases could not be read.")
+    return lines
 
 
 def _lines(db: Session, stop: Stop) -> list[LoadLine]:

@@ -1,5 +1,5 @@
 import { Calendar, Check, Info, Lock, RefreshCw, WifiOff } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { useNavigate, useParams } from "react-router";
 import { ApiError } from "@/api/client";
 import { useSimNow } from "@/demo/clock";
@@ -14,6 +14,7 @@ import {
   type StoreOrder,
   type Tracker,
   useAcknowledge,
+  useReadNotice,
   useStoreHome,
   useStoreNotices,
   useTracker,
@@ -43,6 +44,13 @@ export function NoticePage() {
         )
       : undefined;
   const tracker = useTracker(notice?.kind === "short_delivery" ? orderRef : sibling?.order_ref);
+  // opened is read: the dispatcher's record can say when; Got it stays the store's own "I've seen this"
+  const read = useReadNotice();
+  const unread = notice && !notice.read_at ? notice.id : null;
+  const markRead = read.mutate;
+  useEffect(() => {
+    if (unread) markRead(unread);
+  }, [unread, markRead]);
   // back to whatever opened it, or to My orders when it was opened straight from a notification
   const back = () => ((window.history.state as { idx?: number } | null)?.idx ? navigate(-1) : navigate("/store"));
   const header = <BackHeader title="Delivery update" back={back} />;

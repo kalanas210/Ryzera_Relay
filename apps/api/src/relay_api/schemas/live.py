@@ -67,6 +67,9 @@ class FeedItemOut(Schema):
     handled_at: datetime | None
     handled_by: str | None
     outcome: str
+    reviewed_at: datetime | None = None
+    """A settled two-copy stop stays under Now until the dispatcher marks it reviewed."""
+    reviewed_by: str | None = None
     shortfall: ShortfallDetailOut | None
     ref: dict[str, Any] = Field(default_factory=dict)
     """What the item is about (its trip, stop, conflict or backup), so the desk ties it to the right run."""

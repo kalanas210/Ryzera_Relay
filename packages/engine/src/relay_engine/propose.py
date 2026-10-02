@@ -15,6 +15,7 @@ run, and whatever is left is placed on free trip slots in a second, smaller sear
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 
 from relay_engine.clock import (
@@ -317,7 +318,7 @@ def _single(
     option: Option,
     ready: float,
     orders: Mapping[str, Order],
-    lead: set[str] = frozenset(),  # type: ignore[assignment]
+    lead: AbstractSet[str] = frozenset(),
 ) -> Trip:
     seq = sequence_stops(
         run.network, run.conditions, option.outlets, option.brand, ready, latest=_latest(option), lead=tuple(lead)

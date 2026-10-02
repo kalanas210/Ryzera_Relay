@@ -60,7 +60,7 @@ function QuestionCard({
   stop: DriverStop;
   question: Question;
 }) {
-  const { t, clock, cases, place } = useDriverText();
+  const { t, clock, cases, place, placeTo } = useDriverText();
   const { items, save, now } = useDriver();
   const local = stopLocal(items, stop.stop_id);
   const answer = localAnswers(items).get(question.id);
@@ -114,9 +114,9 @@ function QuestionCard({
               vehicle,
               who,
               time: clock(move.at),
-              place: where,
+              placeTo: placeTo(stop.place),
             })
-          : t("question.bodyNoTime", { name, n: stop.seq, vehicle, place: where })}
+          : t("question.bodyNoTime", { name, n: stop.seq, vehicle, placeTo: placeTo(stop.place) })}
       </p>
       <div className="flex flex-col gap-1 rounded-button bg-asphalt-50 p-3">
         <p className="t-label text-asphalt-500">{t("question.yours")}</p>
@@ -205,7 +205,16 @@ export function RunChanges({ run, trip }: { run: DriverRun; trip: DriverTrip }) 
     const move = moveOf(run, stop, settled);
     const name = move.by;
     const relay = server?.trip?.stops.find((s) => s.stop_id === stop.stop_id);
-    if (settled || local.conflict) {
+    if (settled?.resolution === "backup" && relay?.status === "moved" && move.vehicle) {
+      // the office kept the backup's copy: the stop is the other vehicle's, and what this phone saved is set aside
+      out.push(
+        <Notice key={stop.stop_id} tone="info" icon={Info} field title={t("summary.settledTitle", { n: stop.seq })}>
+          {move.at
+            ? t("summary.settledBackup", { name, n: stop.seq, vehicle: move.vehicle, moved: clock(move.at) })
+            : t("summary.settledBackupPlain", { place: place(stop.place).text, vehicle: move.vehicle })}
+        </Notice>,
+      );
+    } else if (settled || local.conflict) {
       // the stop had two copies; once nothing is open and Relay has it delivered, it is settled
       if (questionFor(run, stop.stop_id) || relay?.status !== "delivered") continue;
       const yes = answers.find((i) => i.record?.stop_id === stop.stop_id && i.record.payload.answer === "yes");

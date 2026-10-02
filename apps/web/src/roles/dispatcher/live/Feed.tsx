@@ -30,9 +30,11 @@ import {
   useBackupDecision,
   useDecide,
   useHandle,
+  useReview,
   useSettle,
 } from "./api";
 import {
+  awaitingReview,
   type Directory,
   driverName,
   isEstimated,
@@ -83,14 +85,16 @@ function useMinutesSince(iso: string) {
 const DECISIONS = new Set(["shortfall", "receipt", "conflict"]);
 
 /** The feed: open items under Now, handled ones under Earlier today, newest first. A stop sent with a backup stays
- *  under Now while the backup's copy is live and the driver silent, and gives way to the two-copy item. */
+ *  under Now while the backup's copy is live and the driver silent, and gives way to the two-copy item; a two-copy
+ *  stop settled meanwhile stays under Now until it is marked reviewed. */
 export function FeedGroups({ feed }: { feed: Feed }) {
   const { desk, allInContact, rows } = useEnv();
   const all = [...feed.now, ...feed.earlier];
   const shown = (item: FeedItem) => shownInFeed(item) && !overtaken(item, all);
+  const kept = (item: FeedItem) => movedLive(item, rows) || awaitingReview(item);
   const newest = (a: FeedItem, b: FeedItem) => Date.parse(b.created_at) - Date.parse(a.created_at);
-  const now = [...feed.now, ...feed.earlier.filter((i) => movedLive(i, rows))].filter(shown).sort(newest);
-  const earlier = feed.earlier.filter((i) => shown(i) && !movedLive(i, rows));
+  const now = [...feed.now, ...feed.earlier.filter(kept)].filter(shown).sort(newest);
+  const earlier = feed.earlier.filter((i) => shown(i) && !kept(i));
   return (
     <>
       <h3 className="t-caption text-asphalt-500">Now</h3>
@@ -246,8 +250,10 @@ function Line({
   );
 }
 
-/** Event timeline: time, a dot on the rail, what happened. The last dot is the outcome. */
-function Timeline({ events }: { events: { at: string; text: string }[] }) {
+type TimelineEvent = { at: string; text: string; photo?: { id: string; label: string } | null };
+
+/** Event timeline: time, a dot on the rail, what happened, and the photo taken then. The last dot is the outcome. */
+function Timeline({ events }: { events: TimelineEvent[] }) {
   return (
     <ol className="flex flex-col">
       {events.map((e, i) => {
@@ -262,7 +268,10 @@ function Timeline({ events }: { events: { at: string; text: string }[] }) {
                 className={cx("relative mt-1.5 size-2 rounded-full", last ? "bg-done" : "bg-asphalt-300")}
               />
             </span>
-            <span className="t-dense">{e.text}</span>
+            <span className="flex min-w-0 flex-col gap-2">
+              <span className="t-dense">{e.text}</span>
+              {e.photo ? <RecordPhoto id={e.photo.id} label={e.photo.label} /> : null}
+            </span>
           </li>
         );
       })}
@@ -276,7 +285,7 @@ function RecordPhoto({ id, label }: { id: string; label: string }) {
   if (missing) return null;
   const src = `/api/photos/${id}?as=dispatcher`;
   return (
-    <a href={src} target="_blank" rel="noreferrer" className="shrink-0">
+    <a href={src} target="_blank" rel="noreferrer" className="shrink-0 self-start">
       <img
         src={src}
         alt={label}
@@ -348,7 +357,13 @@ function EstimateRow({
         ) : null}
       </span>
       {move && env.desk && env.onMove && m.state !== "moved" ? (
-        <Button density="desk" variant="quiet" compact onClick={() => env.onMove?.(row, m)}>
+        <Button
+          density="desk"
+          variant="quiet"
+          compact
+          aria-label={`Move stop ${m.seq}, ${m.place}`}
+          onClick={() => env.onMove?.(row, m)}
+        >
           Move
         </Button>
       ) : null}
@@ -458,12 +473,17 @@ function SilenceEntry(props: EntryProps) {
       {nextStore?.estimate ? (
         <Line icon={Store}>
           {nextStore.passed
-            ? `${nextStore.place} sees: The estimate has passed. No word from ${first} since ${contact}.`
-            : `${nextStore.place} sees: Arriving around ${formatTime(nextStore.estimate)}. Last heard from ${first} ${contact}.`}
+            ? `${storeWho(nextStore)} sees: The estimate has passed. No word from ${first} since ${contact}.`
+            : `${storeWho(nextStore)} sees: Arriving around ${formatTime(nextStore.estimate)}. Last heard from ${first} ${contact}.`}
         </Line>
       ) : null}
     </ItemShell>
   );
+}
+
+/** The person at the store who reads the same estimate, by the name they are called, or the store. */
+function storeWho(m: RunMarker): string {
+  return calledName(m.store_contact) || m.place;
 }
 
 // ------------------------------------------------------------------------------------------------ backup
@@ -655,6 +675,7 @@ function ConflictEntry(props: EntryProps) {
   const env = useEnv();
   const who = useWho();
   const settle = useSettle(env.depot);
+  const review = useReview(env.depot);
   const seq = Number(item.title.match(/^Stop (\d+)/)?.[1]);
   const row = itemRows(item, env.rows).find((r) => !r.is_backup);
   const marker = row?.markers.find((m) => m.seq === seq);
@@ -680,11 +701,13 @@ function ConflictEntry(props: EntryProps) {
 
   if (item.handled_at) {
     const byDriver = item.outcome.startsWith("The driver answered yes");
+    // settled the other way: the backup carries the stop and the driver's records for it are set aside
+    const keptBackup = item.ref?.resolution === "backup";
     const outcome =
       marker?.state === "delivered" && marker.recorded
         ? `${first} delivered it at ${formatTime(marker.recorded)}. ${backup}'s copy is cancelled.`
         : item.outcome;
-    const events: { at: string; text: string }[] = [];
+    const events: TimelineEvent[] = [];
     if (moved) {
       const reason = moved.body.includes(": ") ? moved.body.slice(moved.body.indexOf(": ") + 2) : "";
       const actor = who(moved.body.split(" moved ")[0]);
@@ -706,15 +729,26 @@ function ConflictEntry(props: EntryProps) {
     if (delivered) {
       const cases = item.ref?.cases ? `${item.ref.cases} cases` : `stop ${seq}`;
       const receiver = item.ref?.receiver ? `, received by ${item.ref.receiver}` : `, ${marker?.place ?? ""}`;
-      events.push({ at: delivered, text: `${first} delivered ${cases}${receiver}.` });
+      const photo = item.ref?.photo_id
+        ? { id: item.ref.photo_id, label: `${first}'s photo, ${formatTime(delivered)}` }
+        : null;
+      events.push({
+        at: delivered,
+        text: keptBackup
+          ? `${first}'s phone saved a delivery of ${cases}${receiver}.`
+          : `${first} delivered ${cases}${receiver}.`,
+        photo,
+      });
     }
     const turned =
       backupRow?.status === "returning" && backupRow.driver ? ` and ${calledName(backupRow.driver)} turned back` : "";
     events.push({
       at: item.handled_at,
-      text: byDriver
-        ? `${first} confirmed. ${backup}'s copy was cancelled${turned}.`
-        : `${who(item.handled_by)} cancelled ${backup}'s copy. ${first}'s delivery stands.`,
+      text: keptBackup
+        ? `${who(item.handled_by)} kept ${backup}'s copy. ${first}'s records for stop ${seq} are set aside.`
+        : byDriver
+          ? `${first} confirmed. ${backup}'s copy was cancelled${turned}.`
+          : `${who(item.handled_by)} cancelled ${backup}'s copy. ${first}'s delivery stands.`,
     });
     events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     return (
@@ -723,7 +757,7 @@ function ConflictEntry(props: EntryProps) {
         tone="done"
         icon={CircleCheck}
         title={item.title}
-        subtitle={outcome}
+        subtitle={item.reviewed_at ? `Reviewed ${formatTime(item.reviewed_at)}` : outcome}
         right={formatTime(item.handled_at)}
       >
         {meta}
@@ -731,6 +765,26 @@ function ConflictEntry(props: EntryProps) {
         <Section label="What happened">
           <Timeline events={events} />
         </Section>
+        {item.reviewed_at ? (
+          <p className="flex items-center gap-2 t-label text-asphalt-700">
+            <CircleCheck size={16} strokeWidth={1.75} aria-hidden className="shrink-0 text-done" />
+            {who(item.reviewed_by)} marked it reviewed at {formatTime(item.reviewed_at)}.
+          </p>
+        ) : (
+          <>
+            <Button
+              density={env.desk ? "desk" : "store"}
+              variant="primary"
+              full
+              icon={Check}
+              disabled={review.isPending}
+              onClick={() => review.mutate({ itemId: item.id })}
+            >
+              Mark reviewed
+            </Button>
+            {review.error ? <p className="t-dense text-problem">{review.error.message}</p> : null}
+          </>
+        )}
       </ItemShell>
     );
   }
@@ -784,16 +838,22 @@ function ConflictEntry(props: EntryProps) {
           {first} has been asked too. Whichever answer comes first settles it.
         </p>
       )}
-      <Button
-        density={env.desk ? "desk" : "store"}
-        variant="primary"
-        full
-        icon={Check}
-        disabled={settle.isPending || !conflictId}
-        onClick={() => conflictId && settle.mutate({ conflictId })}
-      >
-        Cancel {backup}'s copy
-      </Button>
+      {/* the driver's "no" makes keeping the backup's copy the answer that fits; cancelling it stays possible */}
+      {(marker?.denied ? (["backup", "driver"] as const) : (["driver", "backup"] as const)).map((keep, i) =>
+        keep === "backup" && (!copy || copy.state === "cancelled") ? null : (
+          <Button
+            key={keep}
+            density={env.desk ? "desk" : "store"}
+            variant={i === 0 ? "primary" : "secondary"}
+            full
+            icon={i === 0 ? Check : undefined}
+            disabled={settle.isPending || !conflictId}
+            onClick={() => conflictId && settle.mutate({ conflictId, keep })}
+          >
+            {keep === "backup" ? `Keep ${backup}'s copy` : `Cancel ${backup}'s copy`}
+          </Button>
+        ),
+      )}
       {settle.error ? <p className="t-dense text-problem">{settle.error.message}</p> : null}
     </ItemShell>
   );
@@ -1053,8 +1113,14 @@ function ShortfallRecord({ item, s }: { item: FeedItem; s: ShortfallDetail }) {
   const flagged = `${casesOf(s.qty, lowerFirst(s.case_name))} ${s.kind} on ${s.vehicle_id}, stop ${s.stop_seq}`;
   const found = s.kind === "missing" ? `${s.planned - s.qty} of ${s.planned} on the shelf.` : "Kept off the truck.";
   const decided = s.decided_at ?? item.created_at;
-  const events = [
-    { at: s.flagged_at, text: `${s.flagged_by ?? "The dock"} flagged ${flagged}. ${found}` },
+  const photo = s.photo_id
+    ? {
+        id: s.photo_id,
+        label: `The damaged ${lowerFirst(s.case_name)} ${s.qty === 1 ? "case" : "cases"}, from the dock`,
+      }
+    : null;
+  const events: TimelineEvent[] = [
+    { at: s.flagged_at, text: `${s.flagged_by ?? "The dock"} flagged ${flagged}. ${found}`, photo },
     { at: decided, text: `${who(s.decided_by)} decided: ${lowerFirst(item.outcome)}` },
     {
       at: decided,

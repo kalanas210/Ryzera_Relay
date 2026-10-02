@@ -2,7 +2,10 @@
 arrive later (as scheduled events for the world simulator), and each vehicle's status and driver.
 
 Dilani's two Wednesday orders are left out on purpose: placing them is the first step of the judge
-walkthrough. The demo bar's autopilot places them if a judge skips ahead.
+walkthrough. The story autopilot places them if a judge skips ahead, or at 2:14 PM if nobody is playing Dilani.
+
+MAIN, the copy every browser opens until it starts or joins a private one, is shared by everyone, so its clock is
+held at the start of the story: only a private copy's clock runs and jumps.
 """
 
 from __future__ import annotations
@@ -32,6 +35,9 @@ from relay_api.models import (
 )
 from relay_api.models.base import Base
 from relay_api.seed.reference import read
+
+MAIN = "MAIN"
+"""The shared copy of the day."""
 
 
 def parse_lines(text: str) -> list[tuple[str, int]]:
@@ -112,6 +118,18 @@ def clear_workspace(db: Session, workspace: Workspace) -> None:
             db.execute(delete(table).where(table.c.workspace_id == workspace.id))
 
 
+def held_at_start(workspace: Workspace) -> bool:
+    """The shared copy's clock as it should be: held at Tuesday 2:05 PM."""
+    return workspace.clock_rate == 0 and workspace.clock_anchor_sim == STORY_START
+
+
+def _start_clock(workspace: Workspace, now: datetime) -> None:
+    """The story starts again at 2:05 PM: running in real time in a private copy, held in the shared one."""
+    workspace.clock_anchor_real = now
+    workspace.clock_anchor_sim = STORY_START
+    workspace.clock_rate = 0.0 if workspace.is_default else 1.0
+
+
 def create_workspace(db: Session, seed_dir: Path, code: str, label: str, is_default: bool = False) -> Workspace:
     now = datetime.now(UTC)
     workspace = Workspace(
@@ -120,11 +138,9 @@ def create_workspace(db: Session, seed_dir: Path, code: str, label: str, is_defa
         is_default=is_default,
         created_at=now,
         last_active_at=now,
-        clock_anchor_real=now,
-        clock_anchor_sim=STORY_START,
-        clock_rate=1.0,
         state={"edition": uuid.uuid4().hex[:12]},
     )
+    _start_clock(workspace, now)
     db.add(workspace)
     db.flush()
     seed_workspace(db, seed_dir, workspace)
@@ -133,9 +149,6 @@ def create_workspace(db: Session, seed_dir: Path, code: str, label: str, is_defa
 
 def reset_workspace(db: Session, seed_dir: Path, workspace: Workspace) -> None:
     clear_workspace(db, workspace)
-    now = datetime.now(UTC)
-    workspace.clock_anchor_real = now
-    workspace.clock_anchor_sim = STORY_START
-    workspace.clock_rate = 1.0
+    _start_clock(workspace, datetime.now(UTC))
     workspace.state = {"edition": uuid.uuid4().hex[:12]}
     seed_workspace(db, seed_dir, workspace)

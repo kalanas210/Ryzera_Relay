@@ -151,6 +151,12 @@ function DeskLive({ depot, onDepot }: { depot: Depot; onDepot: (d: "Kandy" | "Pe
 
   const selected =
     picked && vehicles.some((v) => v.vehicle_id === picked) ? picked : defaultSelection(vehicles, items, links, rows);
+  // Once the runs and the feed are in, the run the desk opened on stays picked: marking an item reviewed or a new
+  // estimate changes what needs attention first, never the run in front of the dispatcher.
+  const loaded = !!panel && !!data;
+  useEffect(() => {
+    if (loaded && selected && selected !== picked) setPicked(selected);
+  }, [loaded, selected, picked]);
   const closeDrawer = useCallback(() => setMoving(null), []);
   // The drawer has no scrim, so a click outside it closes it. It opens after the click that asked for it has
   // finished, or that same click, made outside the drawer, would close it again at once.
@@ -220,6 +226,7 @@ function DeskLive({ depot, onDepot }: { depot: Depot; onDepot: (d: "Kandy" | "Pe
               onSelect={setPicked}
               query={query}
               onMove={openMove}
+              toast={toast}
             />
           )}
           <Exceptions feed={data} depot={depot} panel={panel} dir={dir} onMove={openMove} />
@@ -233,15 +240,6 @@ function DeskLive({ depot, onDepot }: { depot: Depot; onDepot: (d: "Kandy" | "Pe
         onClose={closeDrawer}
         onMoved={setToast}
       />
-      {toast ? (
-        <p
-          role="status"
-          className="fixed bottom-6 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-button bg-asphalt-900 px-4 py-3 t-dense text-white shadow-float"
-        >
-          <CircleCheck size={20} strokeWidth={1.75} aria-hidden className="shrink-0" />
-          {toast}
-        </p>
-      ) : null}
     </>
   );
 }
@@ -264,7 +262,7 @@ function Exceptions({
   return (
     <section
       aria-label="Exceptions"
-      className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-card border border-asphalt-200 bg-white max-xl:order-first max-xl:max-h-[560px] xl:sticky xl:top-4 xl:max-h-[calc(100dvh-2rem)]"
+      className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-card border border-asphalt-200 bg-white max-xl:order-first max-xl:max-h-[560px] xl:sticky xl:top-4 xl:max-h-[calc(var(--desk-h,100dvh)_-_2rem)]"
     >
       <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-asphalt-200 px-4 py-2">
         <h2 className="t-h3">Exceptions</h2>

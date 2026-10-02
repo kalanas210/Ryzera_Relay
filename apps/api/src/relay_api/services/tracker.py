@@ -26,6 +26,7 @@ from relay_api.models import (
     LoadLine,
     Order,
     OrderStatus,
+    Outlet,
     Photo,
     Plan,
     PlanStatus,
@@ -249,7 +250,7 @@ def tracker(db: Session, now: datetime, order: Order) -> Tracker:
     return out
 
 
-def _close(plan: Plan, outlet) -> datetime:  # type: ignore[no-untyped-def]
+def _close(plan: Plan, outlet: Outlet) -> datetime:
     from relay_api.services import network as adapters
 
     hh, mm = outlet.window_close.split(":")
@@ -351,11 +352,25 @@ def _dispute(
         depot=plan.depot if plan else "Kandy",
         title=f"{order.outlet_id} reports {words.cases('case', sum(q for _, _, q, _ in clean))} with issues on "
         f"{order.order_ref}",
-        body="; ".join(
-            f"{q} {words.short_case_name(types[c].name).lower()} {k.value.replace('_', ' ')}" for c, k, q, _ in clean
-        ),
+        body=issues_body(types, clean),
         ref={"order_ref": order.order_ref, "receipt_id": str(receipt.id), "trip_id": str(trip.id)},
     )
+
+
+def issues_body(types: dict[str, CaseType], clean: list[Issue]) -> str:
+    """What the store reported, in its own words and word order, as the dispatcher reads it under "From the store",
+    for example: 1 damaged packet foods case and 2 dairy crates not cold. Crushed at the back."""
+    parts = []
+    for code, kind, qty, _ in clean:
+        counted = words.cases(types[code].name, qty)  # "1 packet foods case"
+        if kind is IssueKind.NOT_COLD:
+            parts.append(f"{counted} not cold")
+        else:
+            n, name = counted.split(" ", 1)
+            parts.append(f"{n} {kind.value} {name}")
+    said = parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
+    notes = [note.strip() for _, _, _, note in clean if note.strip()]
+    return " ".join([f"{said}.", *(n if n[-1] in ".!?" else f"{n}." for n in notes)])
 
 
 def report_issues(

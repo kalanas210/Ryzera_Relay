@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -37,6 +38,7 @@ from relay_api.models import (
     VehicleDay,
     VehicleDayStatus,
 )
+from relay_api.services import field as records
 from relay_api.services import network as adapters
 from relay_api.services import words
 from relay_api.services.dock import DEPOT_LABEL, Lookup
@@ -84,9 +86,15 @@ def _stop_load(db: Session, stop: Stop) -> tuple[int, float, float, list[LoadLin
 
 
 def _busy(db: Session, plan: Plan, vehicle_id: str, now: datetime) -> bool:
-    """On the road now, or about to leave on a trip of its own."""
+    """On the road now (a finished trip too, until it is back from its last stop), or about to leave on a trip of
+    its own."""
     for trip in db.scalars(select(Trip).where(Trip.plan_id == plan.id, Trip.vehicle_id == vehicle_id)):
-        if trip.status in (TripStatus.CANCELLED, TripStatus.FINISHED):
+        if trip.status is TripStatus.FINISHED:
+            back = records.back_at_hub(trip)
+            if back is not None and back > now:
+                return True
+            continue
+        if trip.status is TripStatus.CANCELLED:
             continue
         if trip.departed_at is not None and trip.finished_at is None:
             return True
@@ -312,6 +320,12 @@ def backup_for(db: Session, stop: Stop) -> Stop | None:
     return db.scalar(select(Stop).where(Stop.backup_of == stop.id, Stop.status != StopStatus.CANCELLED))
 
 
+def carrier(db: Session, copy: Stop | None) -> str | None:
+    """The vehicle that carries a backup's copy of a stop."""
+    trip = db.get(Trip, copy.trip_id) if copy is not None else None
+    return trip.vehicle_id if trip is not None else None
+
+
 def keep_backup(db: Session, now: datetime, user: AppUser | None, item: FeedItem, note: str) -> None:
     """After a store's receipt, the dispatcher keeps the backup on the road: nobody is told, the note is kept."""
     item.handled_at = now
@@ -387,7 +401,9 @@ def withdraw_copy(db: Session, now: datetime, copy: Stop, *, by: AppUser | None,
     )
 
 
-def _tell_driver(db: Session, now: datetime, driver: AppUser, kind: str, title: str, body: str, data: dict) -> None:  # type: ignore[type-arg]
+def _tell_driver(
+    db: Session, now: datetime, driver: AppUser, kind: str, title: str, body: str, data: dict[str, Any]
+) -> None:
     db.add(
         Notification(
             user_id=driver.id,

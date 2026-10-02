@@ -11,6 +11,7 @@ from relay_api.schemas.common import Schema
 
 LoadState = Literal["not_started", "loading", "ready", "left"]
 LineStatus = Literal["to_load", "in_progress", "checked", "flag_waiting", "decided"]
+GroupState = Literal["done", "loading", "to_load"]
 
 
 class PersonOut(Schema):
@@ -139,7 +140,7 @@ class StopGroupOut(Schema):
     short: int
     moved_from: int | None
     moved_at: datetime | None
-    state: Literal["done", "loading", "to_load"]
+    state: GroupState
     """Done: every line is checked or decided. Loading: the one stop being loaded now, the first in loading order
     with a line still to load or in progress. Any other stop is to_load."""
     lines: list[LoadLineOut]

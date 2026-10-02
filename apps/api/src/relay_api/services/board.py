@@ -3,6 +3,7 @@ orders that wait, and the counts in the plan bar. Recomputed from the stored pla
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from sqlalchemy import select
@@ -36,10 +37,10 @@ from relay_api.schemas.plan import (
 )
 from relay_api.services import network as adapters
 from relay_api.services.ordering import cutoff_for
-from relay_api.services.planning import DEPOT_LABEL, context, run_orders, stored_trips
+from relay_api.services.planning import DEPOT_LABEL, context, resequence, run_orders, stored_trips
 from relay_engine.model import Trip as EngineTrip
 from relay_engine.model import TripReport
-from relay_engine.rules import ampm, evaluate, fit_hint
+from relay_engine.rules import Context, ampm, evaluate, fit_hint
 
 
 def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
@@ -98,60 +99,44 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
                 volume_m3=order.volume_m3,
                 window_open=o.window_open,
                 window_close=o.window_close,
-                deferral=DeferralOut(
-                    kind=d.kind.value,
-                    unavoidable=bool(d.explanation.get("unavoidable")),
-                    rule=d.explanation.get("rule"),
-                    reason=d.reason,
-                    reason_code=d.explanation.get("reason_code"),
-                    suggested_reason=d.explanation.get("suggested_reason"),
-                    to_date=d.to_date,
-                    confirmed_at=d.confirmed_at.astimezone(COLOMBO) if d.confirmed_at else None,
-                    store_notice=d.store_notice,
-                )
-                if d
-                else None,
+                deferral=_deferral_out(d) if d else None,
             )
         )
     # after publishing, deferred orders have moved to the next run; show them from their deferral
     if plan.status is PlanStatus.PUBLISHED:
         for d in deferrals.values():
-            order = db.get(Order, d.order_id)
-            if order is None or order.order_ref in by_ref:
+            moved = db.get(Order, d.order_id)
+            if moved is None or moved.order_ref in by_ref:
                 continue
-            o = outlets[order.outlet_id]
+            o = outlets[moved.outlet_id]
             waiting.append(
                 WaitingOut(
-                    order_ref=order.order_ref,
-                    outlet_id=order.outlet_id,
+                    order_ref=moved.order_ref,
+                    outlet_id=moved.outlet_id,
                     short_name=o.short_name,
-                    brand=order.brand,
-                    temp=order.temp,
-                    units=order.units,
-                    weight_kg=order.weight_kg,
-                    volume_m3=order.volume_m3,
+                    brand=moved.brand,
+                    temp=moved.temp,
+                    units=moved.units,
+                    weight_kg=moved.weight_kg,
+                    volume_m3=moved.volume_m3,
                     window_open=o.window_open,
                     window_close=o.window_close,
-                    deferral=DeferralOut(
-                        kind=d.kind.value,
-                        unavoidable=bool(d.explanation.get("unavoidable")),
-                        rule=d.explanation.get("rule"),
-                        reason=d.reason,
-                        reason_code=d.explanation.get("reason_code"),
-                        suggested_reason=d.explanation.get("suggested_reason"),
-                        to_date=d.to_date,
-                        confirmed_at=d.confirmed_at.astimezone(COLOMBO) if d.confirmed_at else None,
-                        store_notice=d.store_notice,
-                    ),
+                    deferral=_deferral_out(d),
                 )
             )
 
     placed_by_type: dict[str, int] = {}
     for ref in placed:
-        order = by_ref.get(ref)
-        if order is None:
+        on_board = by_ref.get(ref)
+        if on_board is None:
             continue
-        key = "Fresh chilled" if order.temp == "chilled" else "Fresh dry" if order.brand == "Fresh" else order.brand
+        key = (
+            "Fresh chilled"
+            if on_board.temp == "chilled"
+            else "Fresh dry"
+            if on_board.brand == "Fresh"
+            else on_board.brand
+        )
         placed_by_type[key] = placed_by_type.get(key, 0) + 1
 
     peers = [
@@ -162,7 +147,14 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
         }
         for p in db.scalars(select(Plan).where(Plan.run_date == plan.run_date, Plan.id != plan.id))
     ]
-    edited = plan.summary.get("edited_at")
+    edited = _stamp(plan.summary.get("edited_at"))
+    fleet_changed = _stamp(plan.summary.get("fleet_changed_at"))
+    broken = sum(len(r.broken) for r in reports)
+    ready_at = None
+    if plan.status is PlanStatus.DRAFT and plan.proposed_at and not broken:
+        reasons = [d.confirmed_at for d in deferrals.values()]
+        if all(reasons):
+            ready_at = max(m for m in (plan.proposed_at, edited, fleet_changed, *reasons) if m is not None)
     total_orders = len(orders) + (
         sum(1 for w in waiting if w.order_ref not in by_ref) if plan.status is PlanStatus.PUBLISHED else 0
     )
@@ -175,7 +167,9 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
             version=plan.version,
             proposed_at=plan.proposed_at.astimezone(COLOMBO) if plan.proposed_at else None,
             published_at=plan.published_at.astimezone(COLOMBO) if plan.published_at else None,
-            edited_at=datetime.fromisoformat(edited).astimezone(COLOMBO) if edited else None,
+            edited_at=edited,
+            ready_at=ready_at.astimezone(COLOMBO) if ready_at else None,
+            fleet_changed_at=fleet_changed,
         ),
         orders=total_orders,
         served=len(placed),
@@ -185,9 +179,35 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
         placed_by_type=placed_by_type,
         analyses=plan.summary.get("analyses", []),
         can_undo=plan.status is not PlanStatus.PUBLISHED and bool(plan.summary.get("undo")),
-        broken=sum(len(r.broken) for r in reports),
+        broken=broken,
         locked=now >= cutoff_for(plan.run_date),
         published_peers=peers,
+    )
+
+
+def _stamp(value: str | None) -> datetime | None:
+    """A moment kept in the plan's summary, in Sri Lanka time."""
+    return datetime.fromisoformat(value).astimezone(COLOMBO) if value else None
+
+
+def _local(value: datetime | None) -> datetime | None:
+    return value.astimezone(COLOMBO) if value else None
+
+
+def _deferral_out(d: Deferral) -> DeferralOut:
+    """A deferral on the board, with when the store was told and when it pressed Got it."""
+    return DeferralOut(
+        kind=d.kind.value,
+        unavoidable=bool(d.explanation.get("unavoidable")),
+        rule=d.explanation.get("rule"),
+        reason=d.reason,
+        reason_code=d.explanation.get("reason_code"),
+        suggested_reason=d.explanation.get("suggested_reason"),
+        to_date=d.to_date,
+        confirmed_at=_local(d.confirmed_at),
+        store_notice=d.store_notice,
+        notified_at=_local(d.notified_at),
+        acknowledged_at=_local(d.acknowledged_at),
     )
 
 
@@ -210,7 +230,16 @@ def _loads_locked(db: Session, plan: Plan) -> set[tuple[str, int]]:
     }
 
 
-def _trip(plan, report: TripReport, reports, ctx, outlets, by_ref, days, locked) -> TripOut:  # type: ignore[no-untyped-def]
+def _trip(
+    plan: Plan,
+    report: TripReport,
+    reports: Sequence[TripReport],
+    ctx: Context,
+    outlets: Mapping[str, Outlet],
+    by_ref: Mapping[str, Order],
+    days: Mapping[str, VehicleDay],
+    locked: set[tuple[str, int]],
+) -> TripOut:
     day = plan.run_date
     stops = []
     for p, e in zip(report.planned, report.expected, strict=True):
@@ -255,7 +284,7 @@ def _trip(plan, report: TripReport, reports, ctx, outlets, by_ref, days, locked)
     )
 
 
-def _trip_note(report: TripReport, reports, ctx, days) -> str:  # type: ignore[no-untyped-def]
+def _trip_note(report: TripReport, reports: Sequence[TripReport], ctx: Context, days: Mapping[str, VehicleDay]) -> str:
     parts = []
     if not report.usual:
         mine = set(report.trip.order_ids)
@@ -296,19 +325,25 @@ def _lane_note(status: str, note: str, plan: Plan, trips: list[TripReport]) -> s
     return ""
 
 
-def fits(db: Session, plan: Plan, order_ref: str) -> list[FitOut]:
-    """While an order is dragged: for every trip and every empty slot of the depot's running vehicles, would it
-    fit, and if not, why in a few words."""
+def fits(db: Session, plan: Plan, order_refs: Sequence[str]) -> list[FitOut]:
+    """While orders are dragged (one Not placed card, or every order of a stop): for every trip and every empty slot
+    of the depot's running vehicles, would they fit, what the trip would then carry, where they would stop, and if
+    they don't fit, why in a few words. Each slot is judged as the move would leave it."""
     orders = run_orders(db, plan.depot, plan.run_date)
     ctx = context(db, plan, orders)
-    order = ctx.orders.get(order_ref)
-    if order is None:
+    refs = [ref for ref in dict.fromkeys(order_refs) if ref in ctx.orders]
+    if not refs:
         return []
-    trips = list(stored_trips(db, plan))
-    for t in trips:
-        if order_ref in t.order_ids:
-            t.order_ids.remove(order_ref)
-    trips = [t for t in trips if t.order_ids]
+    first = ctx.orders[refs[0]]
+    stored = stored_trips(db, plan)
+    home = next((t.key for t in stored if refs[0] in t.order_ids), None)
+    trips = []
+    for t in stored:
+        if any(ref in t.order_ids for ref in refs):
+            t.order_ids[:] = [o for o in t.order_ids if o not in refs]
+            t.depart = None
+        if t.order_ids:
+            trips.append(t)
     out = []
     for vehicle_id, v in ctx.network.vehicles.items():
         if v.depot != plan.depot:
@@ -321,9 +356,31 @@ def fits(db: Session, plan: Plan, order_ref: str) -> list[FitOut]:
             trip = next((t for t in own if t.trip_no == number), None)
             if trip is None and number > len(own) + 1:
                 continue
-            target = trip or EngineTrip(vehicle_id, number, [])
-            ok, hint = fit_hint(ctx, order, target, trips)
-            out.append(FitOut(vehicle_id=vehicle_id, trip_no=number, fits=ok, hint=hint))
+            existing = trip.order_ids if trip else []
+            aboard = [*existing, *refs]
+            # the engine's words for the first order, with the store's other orders already aboard
+            ok, hint = fit_hint(ctx, first, EngineTrip(vehicle_id, number, [*existing, *refs[1:]]), trips)
+            # the move puts the stops in Relay's order when one keeps every window, so judge that order too
+            moved = EngineTrip(vehicle_id, number, list(aboard))
+            resequence(ctx, moved, trips)
+            if not ok and moved.order_ids != aboard:
+                reports, _ = evaluate(ctx, [*(t for t in trips if t.key != moved.key), moved])
+                if not next(r for r in reports if r.trip.key == moved.key).broken:
+                    ok, hint = True, "Fits"
+            out.append(
+                FitOut(
+                    vehicle_id=vehicle_id,
+                    trip_no=number,
+                    fits=ok,
+                    hint=hint,
+                    weight_kg=round(sum(ctx.orders[o].weight_kg for o in moved.order_ids), 1),
+                    volume_m3=round(sum(ctx.orders[o].volume_m3 for o in moved.order_ids), 3),
+                    weight_cap_kg=v.weight_cap_kg,
+                    volume_cap_m3=v.volume_cap_m3,
+                    stop=moved.order_ids.index(refs[0]) + 1,
+                    current=home == (vehicle_id, number),
+                )
+            )
     return out
 
 

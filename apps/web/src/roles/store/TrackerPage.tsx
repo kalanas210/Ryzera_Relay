@@ -22,7 +22,18 @@ import { calledName } from "@/lib/names";
 import { roundTo5 } from "@/lib/time";
 import { type StoreHome, type Tracker, useStoreHome, useStoreNotices, useTracker } from "./api";
 import { Contents, DriverRow, EstimateMark, NotPlanned, OfflineNotice, RunCard } from "./parts";
-import { around, clock, dockWords, lastHeard, shortLines, shortRow, span, stopsBefore, windowOf } from "./words";
+import {
+  around,
+  clock,
+  dockWords,
+  issueSentAt,
+  lastHeard,
+  shortLines,
+  shortRow,
+  span,
+  stopsBefore,
+  windowOf,
+} from "./words";
 
 /** STM-04 Your delivery: when it will arrive, from the driver's own records. While the driver's phone is quiet it
  *  says so plainly and gives the likely range; once the estimate has passed, the store can confirm receipt itself. */
@@ -109,7 +120,9 @@ function ArrivalCard({ tracker: t, home, now }: { tracker: Tracker; home: StoreH
           ? t.proof?.receiver
             ? `Received by ${t.proof.receiver}. Check the goods, then confirm receipt.`
             : "Check the goods, then confirm receipt."
-          : `You ${t.status === "confirmed" ? "confirmed receipt" : "sent an issue"} at ${r ? clock(r.confirmed_at) : ""}.`;
+          : t.status === "confirmed"
+            ? `You confirmed receipt at ${r ? clock(r.confirmed_at) : ""}.`
+            : `You sent an issue at ${r ? clock(issueSentAt(r)) : ""}.`;
     const chip =
       t.status === "arrived" ? (
         <StatusChip tone="done" icon={MapPin}>

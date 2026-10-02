@@ -1,15 +1,16 @@
-"""The demo bar: the scenario clock, private copies of the day, and reset. Only in demo mode."""
+"""The demo bar: the scenario clock, private copies of the day, and reset. Only in demo mode. The shared walkthrough
+stays at the start of the story for everyone, so only a private copy's clock moves or resets."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from relay_api.clock import set_clock, sim_now
+from relay_api.clock import MOMENTS, set_clock, sim_now
 from relay_api.config import get_settings
 from relay_api.db import get_db, scope_to_workspace
 from relay_api.models import Workspace
@@ -27,6 +28,16 @@ Db = Annotated[Session, Depends(get_db)]
 def _demo_only() -> None:
     if not get_settings().demo_mode:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Demo mode is off")
+
+
+def _private(scope: ScopeDep) -> None:
+    """The shared walkthrough stays at the start of the story for everyone: only a private copy's clock moves."""
+    if scope.workspace.is_default:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This is the shared walkthrough, so its clock stays at Tuesday 2:05 PM. "
+            "Start your own copy to move the clock or start again.",
+        )
 
 
 def state_of(db: Session, workspace: Workspace, played: list[str] | None = None) -> DemoState:
@@ -56,17 +67,34 @@ def get_state(scope: ScopeDep) -> DemoState:
 
 class ClockCommand(BaseModel):
     action: Literal["jump", "advance", "pause", "resume"]
-    to: str | None = Field(default=None, description="A moment key, or an ISO time")
+    to: str | None = Field(default=None, description="A moment key, or an ISO time with its offset")
     minutes: int | None = Field(default=None, ge=1, le=24 * 60)
 
+    @model_validator(mode="after")
+    def _a_jump_names_where(self) -> Self:
+        """A jump goes to a story moment, or to a time with its offset: a time with none could be any timezone."""
+        if self.action != "jump":
+            return self
+        if not self.to:
+            raise ValueError("A jump needs `to`: a story moment, or an ISO time with its offset.")
+        if any(m.key == self.to for m in MOMENTS):
+            return self
+        try:
+            target = datetime.fromisoformat(self.to)
+        except ValueError:
+            raise ValueError(f"No story moment or ISO time called {self.to!r}.") from None
+        if target.tzinfo is None:
+            raise ValueError("Give the time with its offset, for example 2026-04-08T05:20:00+05:30.")
+        return self
 
-@router.post("/clock", response_model=DemoState, dependencies=[Depends(_demo_only)])
+
+@router.post("/clock", response_model=DemoState, dependencies=[Depends(_demo_only), Depends(_private)])
 def move_clock(body: ClockCommand, scope: ScopeDep) -> DemoState:
     ws = scope.workspace
     now = sim_now(ws)
     moment = story.moment_time(body.to or "") if body.action == "jump" else None
     if body.action == "jump":
-        target = moment(scope.db) if moment else datetime.fromisoformat(body.to or "")
+        target = moment(scope.db) if moment else datetime.fromisoformat(body.to or "")  # checked by ClockCommand
         if target < now - timedelta(minutes=1):
             raise HTTPException(status.HTTP_409_CONFLICT, "The clock only moves forward. Reset the day to start again.")
         if moment is None:
@@ -82,7 +110,7 @@ def move_clock(body: ClockCommand, scope: ScopeDep) -> DemoState:
     return state_of(scope.db, ws, played)
 
 
-@router.post("/reset", response_model=DemoState, dependencies=[Depends(_demo_only)])
+@router.post("/reset", response_model=DemoState, dependencies=[Depends(_demo_only), Depends(_private)])
 def reset(scope: ScopeDep) -> DemoState:
     reset_workspace(scope.db, get_settings().seed_dir, scope.workspace)
     scope.db.commit()

@@ -2,7 +2,7 @@ import {
   Camera,
   Check,
   ClipboardList,
-  Info,
+  Info as InfoIcon,
   type LucideIcon,
   MessageSquare,
   Package,
@@ -22,6 +22,7 @@ import { calledName } from "@/lib/names";
 import { PHOTO_TYPES, shrinkPhoto } from "@/lib/photo";
 import { type FlagWrite, type LoadLine, loadKindKey, type StopGroup, type TripLoad, useWithdrawFlag } from "./api";
 import { weekdayName } from "./days";
+import { Swap } from "./parts";
 
 export type SendFlag = (flag: Pick<FlagWrite, "lineId" | "kind" | "qty">, photo: Blob | null) => void;
 
@@ -108,6 +109,21 @@ function NewFlag({
     onClose();
   };
 
+  // The dispatcher decides about the cases still to come: the missing ones, or the damaged ones kept off the truck.
+  const info = (forKind: "missing" | "damaged") => (
+    <p className="flex items-start gap-3 t-body text-asphalt-700">
+      <InfoIcon size={24} strokeWidth={1.75} aria-hidden className="shrink-0" />
+      {forKind === "missing"
+        ? t("flag.info", { name: load.dispatcher ?? "", n: qty })
+        : t("flag.infoDamaged", { name: load.dispatcher ?? "", n: qty })}
+    </p>
+  );
+  const sendButton = (forKind: "missing" | "damaged") => (
+    <Button variant="primary" density="field" full icon={Send} onClick={send}>
+      {forKind === "missing" ? t("flag.sendMissing", { n: qty }) : t("flag.sendDamaged", { n: qty })}
+    </Button>
+  );
+
   return (
     <div className="flex flex-col gap-4 pb-2">
       <p className="flex items-center gap-1.5 t-label text-asphalt-700">
@@ -142,10 +158,18 @@ function NewFlag({
           })}
         </div>
       </fieldset>
+      {/* Missing and Damaged read differently below this point, and Damaged adds the photo. Every text that changes
+          keeps the room of its longer reading, and the sheet is as tall as its taller form from the moment it
+          opens, so tapping Damaged or Missing never moves the choice under the finger that tapped it. */}
       <div className="flex flex-col gap-2">
-        <p className="t-label text-asphalt-700">
-          {kind === "missing" ? t("flag.howManyMissing") : t("flag.howManyDamaged")}
-        </p>
+        <Swap
+          as="div"
+          shown={kind}
+          options={{
+            missing: <p className="t-label text-asphalt-700">{t("flag.howManyMissing")}</p>,
+            damaged: <p className="t-label text-asphalt-700">{t("flag.howManyDamaged")}</p>,
+          }}
+        />
         <div className="flex items-center gap-3">
           <Stepper
             value={qty}
@@ -160,52 +184,70 @@ function NewFlag({
           />
           <span className="num t-label text-asphalt-700">{t("load.of", { n: line.qty })}</span>
         </div>
-        <p className="t-body text-asphalt-700">
-          {kind === "missing" ? t("flag.shelf", { shelf }) : t("flag.damagedHelp")}
-        </p>
+        <Swap
+          as="div"
+          shown={kind}
+          options={{
+            missing: <p className="t-body text-asphalt-700">{t("flag.shelf", { shelf })}</p>,
+            damaged: <p className="t-body text-asphalt-700">{t("flag.damagedHelp")}</p>,
+          }}
+        />
       </div>
-      {kind === "damaged" ? (
-        // a photo is asked for only for damage: there is nothing to photograph when a case is not there
-        <div className="flex flex-col gap-2">
-          <input
-            ref={camera}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden
-            onChange={(event) => {
-              void pickPhoto(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          {photo ? (
-            <div className="flex items-center gap-3">
-              <img src={photo.url} alt={t("flag.photoAlt", { item })} className="size-16 rounded-button object-cover" />
-              <span className="flex items-center gap-1.5 t-body-strong text-done">
-                <Check size={16} strokeWidth={1.75} aria-hidden />
-                {t("flag.photoAdded")}
-              </span>
+      <Swap
+        as="div"
+        shown={kind}
+        options={{
+          missing: (
+            <div className="flex flex-col gap-4">
+              {info("missing")}
+              {sendButton("missing")}
             </div>
-          ) : null}
-          <Button density="field" full icon={Camera} onClick={() => camera.current?.click()}>
-            {photo ? t("flag.photoAgain") : t("flag.addPhoto")}
-          </Button>
-          {photoError ? (
-            <p role="alert" className="t-body-strong text-problem">
-              {t("flag.photoUnreadable")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      <p className="flex items-start gap-3 t-body text-asphalt-700">
-        <Info size={24} strokeWidth={1.75} aria-hidden className="shrink-0" />
-        {t("flag.info", { name: load.dispatcher ?? "", n: qty })}
-      </p>
-      <Button variant="primary" density="field" full icon={Send} onClick={send}>
-        {kind === "missing" ? t("flag.sendMissing", { n: qty }) : t("flag.sendDamaged", { n: qty })}
-      </Button>
+          ),
+          damaged: (
+            <div className="flex flex-col gap-4">
+              {/* a photo is asked for only for damage: there is nothing to photograph when a case is not there */}
+              <div className="flex flex-col gap-2">
+                <input
+                  ref={camera}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-hidden
+                  onChange={(event) => {
+                    void pickPhoto(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+                {photo ? (
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={photo.url}
+                      alt={t("flag.photoAlt", { item })}
+                      className="size-16 rounded-button object-cover"
+                    />
+                    <span className="flex items-center gap-1.5 t-body-strong text-done">
+                      <Check size={16} strokeWidth={1.75} aria-hidden />
+                      {t("flag.photoAdded")}
+                    </span>
+                  </div>
+                ) : null}
+                <Button density="field" full icon={Camera} onClick={() => camera.current?.click()}>
+                  {photo ? t("flag.photoAgain") : t("flag.addPhoto")}
+                </Button>
+                {photoError ? (
+                  <p role="alert" className="t-body-strong text-problem">
+                    {t("flag.photoUnreadable")}
+                  </p>
+                ) : null}
+              </div>
+              {info("damaged")}
+              {sendButton("damaged")}
+            </div>
+          ),
+        }}
+      />
       <span className="sr-only">{group.place}</span>
     </div>
   );

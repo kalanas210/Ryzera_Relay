@@ -18,6 +18,7 @@ import { IconButton } from "@/design/Button";
 import { StatusChip } from "@/design/StatusChip";
 import { useLoaderText } from "@/i18n";
 import { cx } from "@/lib/cx";
+import { calledName } from "@/lib/names";
 import { type DockNotice, type LoadCard, loadKindKey, type Tonight, useTonight, vehicleKindKey } from "./api";
 import { weekdayName } from "./days";
 import { DockHeader, LoaderBar, useDepotDay } from "./LoaderShell";
@@ -59,9 +60,18 @@ export function TonightPage() {
       </div>
       <main className="flex flex-col gap-3 px-4 pt-3 pb-8">
         {!data ? null : !data.published_at ? (
+          // why there is nothing to load yet, and what brings the loads: the dispatcher publishing the day's plan
           <section className="flex flex-col gap-1 rounded-card border border-asphalt-200 bg-white px-4 py-4">
             <h2 className="t-h2">{t("tonight.notPublishedTitle")}</h2>
-            <p className="t-body text-asphalt-700">{t("tonight.notPublished", { depot })}</p>
+            <p className="t-body text-asphalt-700">
+              {data.dispatcher
+                ? t("tonight.notPublished", {
+                    depot,
+                    day: weekdayName(t, data.run_date),
+                    name: calledName(data.dispatcher),
+                  })
+                : t("tonight.notPublishedNoName", { depot, day: weekdayName(t, data.run_date) })}
+            </p>
           </section>
         ) : (
           <TonightBody data={data} dismissed={dismissed} onDismiss={dismiss} />

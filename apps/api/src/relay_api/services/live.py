@@ -4,6 +4,7 @@ reaches the dispatcher on call at home with the decision it needs."""
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from sqlalchemy import select
@@ -25,6 +26,8 @@ def feed(db: Session, now: datetime, depot: str) -> FeedOut:
         depot=depot, depot_label=DEPOT_LABEL.get(depot, depot), run_date=current_run(db, now), now=[], earlier=[]
     )
     for item in items:
+        reviewed = item.ref.get("reviewed_at")
+        reviewer = item.ref.get("reviewed_by")
         row = FeedItemOut(
             id=item.id,
             kind=item.kind.value,
@@ -35,6 +38,8 @@ def feed(db: Session, now: datetime, depot: str) -> FeedOut:
             handled_at=item.handled_at,
             handled_by=look.name(item.handled_by),
             outcome=item.outcome,
+            reviewed_at=datetime.fromisoformat(reviewed) if reviewed else None,
+            reviewed_by=look.name(uuid.UUID(reviewer)) if reviewer else None,
             shortfall=shortfall_detail(look, item.ref.get("shortfall_id")),
             ref=item.ref,
         )

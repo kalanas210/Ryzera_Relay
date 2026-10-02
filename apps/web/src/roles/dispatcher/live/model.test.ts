@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { FeedItem, RunMarker, RunRow } from "./api";
 import {
+  awaitingReview,
   defaultSelection,
   FOLDED,
   feedLinks,
+  heldWords,
+  inOrder,
   itemRows,
   lastRecord,
   markerStatus,
   onTheRoadTo,
   rank,
+  rowCaption,
   runLine,
   shownInFeed,
   silentCaption,
+  stations,
   vehicleRuns,
 } from "./model";
 
@@ -35,6 +40,9 @@ function marker(seq: number, place: string, over: Partial<RunMarker> = {}): RunM
     moved_to: null,
     backup_of: null,
     held: null,
+    denied: false,
+    store_contact: null,
+    handed_over: false,
     ...over,
   };
 }
@@ -54,11 +62,13 @@ function row(over: Partial<RunRow> = {}): RunRow {
     planned_depart: at("03:29"),
     departed_at: at("03:33"),
     finished_at: null,
+    expected_back: null,
     last_contact_at: at("05:41"),
     out_of_contact: false,
     silent_minutes: 0,
     position: "",
     caption: "",
+    risk: "",
     delivered: 0,
     stops: 4,
     attention: 0,
@@ -78,6 +88,8 @@ function item(over: Partial<FeedItem> = {}): FeedItem {
     handled_at: null,
     handled_by: null,
     outcome: "",
+    reviewed_at: null,
+    reviewed_by: null,
     shortfall: null,
     ...over,
   };
@@ -114,6 +126,8 @@ describe("the track's words", () => {
     expect(markerStatus(mawanella!, true).text).toBe("Arrived 5:30");
     expect(markerStatus(hemmathagama!, true).text).toBe("around 6:35");
     expect(markerStatus(aranayake!, true)).toEqual({ text: "Also on VEH060", tone: "attention" });
+    // settled by keeping the backup's copy, the stop is VEH060's alone
+    expect(markerStatus({ ...aranayake!, handed_over: true }, false)).toEqual({ text: "With VEH060", tone: "muted" });
   });
 
   it("shows the next stop to the minute while in contact, and an estimate that passed stays where it was", () => {
@@ -229,5 +243,152 @@ describe("feed items and their runs", () => {
       shownInFeed(item({ kind: "silence", handled_at: at("07:14"), outcome: "Back in contact at 7:14 AM." })),
     ).toBe(false);
     expect(shownInFeed(item({ kind: "silence" }))).toBe(true);
+  });
+});
+
+describe("the end of a trip", () => {
+  /** Kasun at 7:22: all four stops delivered, Finish trip tapped at Aranayake's dock at 7:17. */
+  const finished = row({
+    status: "finished",
+    finished_at: at("07:17"),
+    expected_back: at("09:08"),
+    markers: [
+      marker(1, "Kegalle", { state: "delivered", recorded: at("05:11") }),
+      marker(2, "Mawanella", { state: "delivered", recorded: at("05:59") }),
+      marker(3, "Hemmathagama", { state: "delivered", recorded: at("06:36") }),
+      marker(4, "Aranayake", { state: "delivered", recorded: at("07:09") }),
+    ],
+  });
+  const hub = (r: RunRow) => stations(vehicleRuns([r])[0]!, "Kandy hub", at("07:22")).at(-1);
+
+  it("never draws the finish as an arrival at the hub: the way home is an estimate", () => {
+    expect(hub(finished)).toEqual({ kind: "hub", label: "Hub next", status: "around 9:10", recorded: false });
+  });
+
+  it("gives no time home when the hub's expected time is not after the finish", () => {
+    expect(hub({ ...finished, expected_back: at("07:10") })).toEqual({
+      kind: "hub",
+      label: "Hub next",
+      status: "",
+      recorded: false,
+    });
+    expect(hub({ ...finished, expected_back: null })?.kind).toBe("hub");
+  });
+
+  it("names the next trip instead while the vehicle has one", () => {
+    const second = row({ trip_id: "t2", trip_no: 2, departed_at: null, planned_depart: at("09:30") });
+    const [vehicle] = vehicleRuns([{ ...finished, finished_at: null, status: "on_the_road" }, second]);
+    expect(stations(vehicle!, "Kandy hub", at("07:22")).at(-1)).toEqual({
+      kind: "hub",
+      label: "Then trip 2",
+      status: "Leaves 9:30",
+      recorded: false,
+    });
+  });
+});
+
+describe("a stop with two copies", () => {
+  const twoCopies = marker(4, "Aranayake", { state: "conflict", held: at("07:09") });
+
+  it("shows what the phone holds until it is settled", () => {
+    expect(heldWords(twoCopies, row())).toBe("Delivered 7:09");
+  });
+
+  it("shows the driver's no instead of the phone's delivery", () => {
+    expect(heldWords({ ...twoCopies, denied: true }, row())).toBe("Kasun says not delivered");
+  });
+
+  it("says nothing above a stop that has one copy", () => {
+    expect(heldWords(marker(4, "Aranayake", { state: "delivered", held: at("07:09") }), row())).toBeNull();
+  });
+});
+
+describe("needs attention first", () => {
+  /** 5:20: nothing open, Sampath's delay handled at 4:35, Kasun's shortfall decided at 2:52. */
+  const kasun = row({
+    markers: [
+      marker(1, "Kegalle", { state: "delivered", recorded: at("05:11") }),
+      marker(2, "Mawanella", { state: "next", estimate: at("05:30"), closes: at("07:45") }),
+      marker(3, "Hemmathagama", { estimate: at("06:35"), closes: at("07:45") }),
+      marker(4, "Aranayake", { estimate: at("07:15"), closes: at("07:30") }),
+    ],
+  });
+  const sampath = row({
+    vehicle_id: "VEH042",
+    trip_id: "trip-042",
+    driver: "Sampath Lakmal",
+    planned_depart: at("02:40"),
+    markers: [
+      marker(1, "Palapathwela", { state: "delivered", recorded: at("04:28") }),
+      marker(2, "Rattota", { state: "next", estimate: at("05:35"), closes: at("07:30") }),
+    ],
+  });
+  const later = row({
+    vehicle_id: "VEH042",
+    trip_id: "trip-042b",
+    trip_no: 2,
+    driver: "Sampath Lakmal",
+    departed_at: null,
+    risk: "Kandy Town is expected after its 7:30 AM close.",
+    markers: [marker(1, "Kandy Town", { estimate: at("07:40"), late_risk: true })],
+  });
+  const rows = [sampath, later, kasun];
+  const items = [
+    item({ kind: "delay", title: "Sampath Lakmal reports: Delayed, 45 min", handled_at: at("04:35") }),
+    item({ kind: "shortfall", created_at: at("02:47"), handled_at: at("02:52"), ref: { trip_id: "trip-045" } }),
+  ];
+
+  it("opens on the run with the least room before a close, not the newest handled item", () => {
+    const vehicles = vehicleRuns(rows);
+    const links = feedLinks(items, rows);
+    expect(vehicles.map((v) => rank(v, links))).toEqual([3, 3]);
+    expect(inOrder(vehicles, links).map((v) => v.vehicle_id)).toEqual(["VEH045", "VEH042"]);
+    expect(defaultSelection(vehicles, items, links, rows)).toBe("VEH045");
+  });
+
+  it("still opens on the newest open exception", () => {
+    const open = [item({ kind: "delay", title: "Sampath Lakmal reports: Delayed, 45 min" }), ...items.slice(1)];
+    const vehicles = vehicleRuns(rows);
+    expect(defaultSelection(vehicles, open, feedLinks(open, rows), rows)).toBe("VEH042");
+  });
+
+  it("says every late stop of a later trip apart from this trip's windows", () => {
+    const [vehicle] = vehicleRuns([
+      { ...sampath, caption: "Left at 2:44 AM. Every stop still to come is expected inside its window." },
+      { ...later, risk: "Kandy Town and Ampitiya are expected after their 7:30 AM and 8:00 AM closes." },
+    ]);
+    expect(rowCaption(vehicle!)).toBe(
+      "Left at 2:44 AM. Trip 1 stops are inside their windows. Trip 2: Kandy Town and Ampitiya are expected after " +
+        "their 7:30 AM and 8:00 AM closes.",
+    );
+  });
+});
+
+describe("a settled two-copy stop", () => {
+  const settled = item({ kind: "conflict", title: "Stop 4 conflict resolved", handled_at: at("07:15") });
+
+  it("waits under Now until the dispatcher has reviewed it", () => {
+    expect(awaitingReview(settled)).toBe(true);
+    expect(awaitingReview({ ...settled, reviewed_at: at("07:20") })).toBe(false);
+    expect(awaitingReview({ ...settled, handled_at: null })).toBe(false);
+    expect(awaitingReview({ ...settled, kind: "delay" })).toBe(false);
+  });
+});
+
+describe("a settled two-copy stop on the desk", () => {
+  it("keeps its run in front, and selected, until it is reviewed", () => {
+    const quiet = row({ vehicle_id: "VEH042", trip_id: "trip-042", driver: "Sampath Lakmal" });
+    const kasun = row({ status: "finished", finished_at: at("07:17") });
+    const rows = [quiet, kasun];
+    const settled = item({
+      kind: "conflict",
+      title: "Stop 4 conflict resolved",
+      handled_at: at("07:15"),
+      ref: { trip_id: "trip-045" },
+    });
+    const vehicles = vehicleRuns(rows);
+    expect(defaultSelection(vehicles, [settled], feedLinks([settled], rows), rows)).toBe("VEH045");
+    const reviewed = { ...settled, reviewed_at: at("07:20") };
+    expect(feedLinks([reviewed], rows).open.size).toBe(0);
   });
 });

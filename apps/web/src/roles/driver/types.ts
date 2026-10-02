@@ -88,7 +88,8 @@ export type DriverTrip = {
   planned_back: string;
   expected_back: string | null;
   finished_at: string | null;
-  load: "loading" | "to_accept" | "accepted";
+  /** Nobody has started loading yet, loading, the handover waiting for the driver, or accepted. */
+  load: "not_started" | "loading" | "to_accept" | "accepted";
   loader: string | null;
   handover: Handover;
   shortfalls: Shortfall[];
@@ -154,6 +155,8 @@ export type DriverRun = {
   vehicle_id: string | null;
   published: boolean;
   dispatcher: string | null;
+  /** The dispatcher on call, for "Call Nuwan at dispatch". */
+  dispatcher_phone?: string | null;
   trip: DriverTrip | null;
   later: DriverTrip[];
   /** Open questions, and the settled ones of this run so the phone can say how each was settled. */

@@ -1,8 +1,9 @@
 import { ArrowLeft, Check, CircleCheck, Clock, Info, ListChecks, Send, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/design/Button";
 import { Sheet } from "@/design/Sheet";
 import { dayOf, formatDayLong, formatTime } from "@/lib/time";
+import { typingOrInDialog } from "../DispatcherShell";
 import { type Board, type DepotName, useCheck, usePublish } from "./api";
 
 const DEPOT_LABEL: Record<DepotName, string> = { Kandy: "Kandy hub", Peliyagoda: "Peliyagoda" };
@@ -17,6 +18,20 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
   const running = board.lanes.filter((l) => l.trips.length).length;
   const standby = board.lanes.filter((l) => l.status === "standby");
   const waits = board.waiting;
+
+  // Ctrl Enter, which brought the dispatcher here from the board, now opens the Publish dialog
+  const ready = useRef(false);
+  ready.current = Boolean(!published && data?.can_publish);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter" || event.altKey || event.shiftKey) return;
+      if (!ready.current || typingOrInDialog(event)) return;
+      event.preventDefault();
+      setDialog(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <section className="flex flex-col gap-3 rounded-card border border-asphalt-200 bg-white px-5 py-4">
@@ -38,7 +53,9 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
             <p className="flex items-start gap-2 rounded-button bg-problem-soft px-3 py-2 t-dense">
               <TriangleAlert size={16} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0 text-problem" />
               <span>
-                <strong>{data.broken.length} rules are broken.</strong>{" "}
+                <strong>
+                  {data.broken.length} {data.broken.length === 1 ? "rule is" : "rules are"} broken.
+                </strong>{" "}
                 {data.broken.map((b) => `${b.vehicle_id} trip ${b.trip_no}: ${b.message}`).join(". ")}.
               </span>
             </p>
@@ -82,7 +99,7 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
                           <span className="latin">{e.vehicle_id}</span> trip {e.trip_no}
                         </td>
                         <td className="py-2 pr-3 whitespace-nowrap">
-                          <span className="latin t-dense-strong">{e.outlet_id}</span>
+                          <span className="latin t-dense-strong">{e.outlet_id}</span> {e.short_name}
                         </td>
                         <td className="num py-2 pr-3">{e.closes}</td>
                         <td className="num py-2 pr-3">{e.planned}</td>
@@ -118,6 +135,8 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
                 icon={Send}
                 disabled={!data.can_publish}
                 onClick={() => setDialog(true)}
+                title="Publish plan (Ctrl Enter)"
+                aria-keyshortcuts="Control+Enter"
               >
                 Publish plan
               </Button>

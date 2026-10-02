@@ -24,8 +24,8 @@ import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
 import { type LoadLine, type StopGroup, type TripLoad, useAcceptHere, useComplete, useTripLoad } from "./api";
 import { weekdayName } from "./days";
-import { DockHeader, PersonButton, pinError, useDemoPin } from "./LoaderShell";
-import { StopTitle } from "./parts";
+import { DockHeader, PersonButton, type PinFailure, PinMessage, pinError, useDemoPin } from "./LoaderShell";
+import { StopTitle, useSettledTap } from "./parts";
 
 const PHONE_SILENT_MS = 60_000;
 
@@ -72,6 +72,10 @@ function Handover({ load }: { load: TripLoad }) {
   const silent =
     done && !accepted && now && h.completed_at && now.getTime() - Date.parse(h.completed_at) >= PHONE_SILENT_MS;
   const flagged = load.groups.flatMap((g) => g.lines.filter((l) => l.shortfall).map((l) => ({ group: g, line: l })));
+  // The bottom bar's button sits where Go to handover was, and its next one takes the same place: each waits a
+  // moment before it takes a tap, so a double tap never marks the load complete or leaves the page unseen.
+  const primary = !done ? "complete" : silent && !accepted ? "acceptHere" : "back";
+  const settled = useSettledTap(primary);
 
   let notice: ReactNode;
   if (accepted && h.accepted_at) {
@@ -138,16 +142,17 @@ function Handover({ load }: { load: TripLoad }) {
             <p className="t-caption text-asphalt-500">{t("handover.inStopOrder", { driver: first })}</p>
           </div>
           {/* One grid for the whole table, each row a subgrid, so every row shares the columns. Stop is as wide
-              as its longest place and never wider than the room left, Planned is 45, and Loaded takes the rest: 12
-              of space after Planned, a 40 wide number, then the check or the Short chip, which drops under the
-              number before a place name would have to give way. The first line of every cell is 32 high, the
-              marker's height, and cells sit at the top of the row, so a stop, its Planned and its Loaded figures
-              always share a line, and the row's lines are centered in its 64. */}
+              as its longest place and never wider than the room left, Planned is 45, and Loaded takes the rest: 8
+              of space after Planned, a 36 wide number (room for 4 digits), then the check or the Short chip. At
+              390 wide that is the 130 the "6 short" chip needs beside the number; where a longer chip does not fit
+              (Tamil), it drops under the number before a place name would have to give way. The first line of every
+              cell is 32 high, the marker's height, and cells sit at the top of the row, so a stop, its Planned and
+              its Loaded figures always share a line, and the row's lines are centered in its 64. */}
           <div className="grid grid-cols-[minmax(0,max-content)_45px_minmax(min-content,1fr)] overflow-hidden rounded-card border border-asphalt-200 bg-white">
             <div className="col-span-full grid h-10 grid-cols-subgrid items-center px-3 t-caption text-asphalt-500">
               <span>{t("handover.stop")}</span>
               <span className="text-right">{t("handover.planned")}</span>
-              <span className="pl-3">{t("handover.loadedCol")}</span>
+              <span className="pl-2">{t("handover.loadedCol")}</span>
             </div>
             {h.stops.map((s) => {
               const short = s.planned - s.loaded;
@@ -164,8 +169,8 @@ function Handover({ load }: { load: TripLoad }) {
                     <span className="latin min-w-0 t-body-strong [overflow-wrap:anywhere]">{s.place}</span>
                   </span>
                   <span className="num flex h-8 items-center justify-end t-body">{s.planned}</span>
-                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-3">
-                    <span className="num flex h-8 w-10 shrink-0 items-center justify-end t-body">{s.loaded}</span>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-2">
+                    <span className="num flex h-8 w-9 shrink-0 items-center justify-end t-body">{s.loaded}</span>
                     {short > 0 ? (
                       <StatusChip icon={PackageX} tone="attention" className="bg-white whitespace-nowrap">
                         {t("chips.short", { count: short })}
@@ -180,8 +185,8 @@ function Handover({ load }: { load: TripLoad }) {
             <div className="col-span-full grid grid-cols-subgrid items-center gap-y-1 border-t border-asphalt-200 bg-asphalt-50 px-3 py-3">
               <span className="t-h3">{t("handover.total")}</span>
               <span className="num text-right t-h3">{h.planned_cases}</span>
-              <span className="pl-3">
-                <span className="num block w-10 text-right t-h3">{h.loaded_cases}</span>
+              <span className="pl-2">
+                <span className="num block w-9 text-right t-h3">{h.loaded_cases}</span>
               </span>
               <span className="num col-span-full t-caption text-asphalt-700">
                 {t("handover.weight", {
@@ -242,17 +247,22 @@ function Handover({ load }: { load: TripLoad }) {
               full
               icon={PackageCheck}
               disabled={!allLinesDone || complete.isPending}
-              onClick={() => complete.mutate(undefined)}
+              onClick={settled(() => complete.mutate(undefined))}
             >
               {t("handover.complete")}
             </Button>
           </>
-        ) : silent && !accepted ? (
-          <Button variant="primary" density="field" full icon={PenLine} onClick={() => setPinOpen(true)}>
+        ) : primary === "acceptHere" ? (
+          <Button variant="primary" density="field" full icon={PenLine} onClick={settled(() => setPinOpen(true))}>
             {t("handover.acceptHere", { driver: first })}
           </Button>
         ) : (
-          <Button variant={accepted ? "primary" : "secondary"} density="field" full onClick={() => navigate("/loader")}>
+          <Button
+            variant={accepted ? "primary" : "secondary"}
+            density="field"
+            full
+            onClick={settled(() => navigate("/loader"))}
+          >
             {t("handover.backToLoads")}
           </Button>
         )}
@@ -417,7 +427,7 @@ function DriverPinSheet({
   const { t } = useLoaderText();
   const accept = useAcceptHere(load.trip_id);
   const [pin, setPin] = useState("");
-  const [error, setError] = useState<{ text: string; wrongPin: boolean } | null>(null);
+  const [error, setError] = useState<PinFailure | null>(null);
   const driver = load.driver ?? "";
   const first = calledName(driver);
   const initials = driver
@@ -444,17 +454,16 @@ function DriverPinSheet({
           <PersonButton person={{ username: demo.username ?? driver, display_name: driver, initials }} selected />
         </div>
         <div className="flex flex-col items-center gap-3">
-          {demo.pin ? (
-            <p className="t-caption text-center text-asphalt-500">{t("who.demoPin", { pin: demo.pin })}</p>
-          ) : null}
+          {/* In a walkthrough the demo PIN sits under the dots, and a wrong PIN takes its place, as on sign-in */}
           <PinPad
             value={pin}
-            error={Boolean(error?.wrongPin)}
+            error={Boolean(error?.shown && error.wrongPin)}
             disabled={accept.isPending}
             deleteLabel={t("who.deleteDigit")}
             progressLabel={(entered, total) => t("who.pinProgress", { entered, total })}
+            message={<PinMessage note={demo.pin ? t("who.demoPin", { pin: demo.pin }) : null} error={error} />}
             onChange={(next) => {
-              setError(null);
+              setError((was) => was && { ...was, shown: false });
               setPin(next);
               if (next.length === 4) {
                 accept.mutate(next, {
@@ -470,11 +479,6 @@ function DriverPinSheet({
               }
             }}
           />
-          {error ? (
-            <p role="alert" className="t-body-strong text-center text-problem">
-              {error.text}
-            </p>
-          ) : null}
         </div>
       </div>
     </Sheet>

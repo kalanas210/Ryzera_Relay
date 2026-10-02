@@ -25,15 +25,19 @@ import type { FeedItem, RunMarker, RunRow, RunsPanel } from "./api";
 import {
   type Directory,
   FOLDED,
+  heldWords,
+  inOrder,
   isRecorded,
   itemRows,
   type Links,
   markerStatus,
   onTheRoadTo,
   rank,
+  rowCaption,
   runLine,
+  type Station,
   shortClock,
-  silentCaption,
+  stations,
   type Tone,
   type VehicleRun,
   vehicleWords,
@@ -95,11 +99,24 @@ type PanelProps = {
   onSelect: (vehicleId: string) => void;
   query: string;
   onMove: (row: RunRow, marker: RunMarker) => void;
+  /** A confirmation after a change on the desk; it takes the footnote's place while it shows. */
+  toast: string | null;
 };
 
 /** Runs panel: every Fresh run of the depot's published plan, stop by stop, needing attention first. Progress comes
  *  only from the drivers' records and the stores' receipts. */
-export function RunsPanelView({ panel, vehicles, links, items, dir, selected, onSelect, query, onMove }: PanelProps) {
+export function RunsPanelView({
+  panel,
+  vehicles,
+  links,
+  items,
+  dir,
+  selected,
+  onSelect,
+  query,
+  onMove,
+  toast,
+}: PanelProps) {
   const [unfolded, setUnfolded] = useState(false);
   const q = query.trim().toLowerCase();
   const matches = (v: VehicleRun) =>
@@ -110,7 +127,7 @@ export function RunsPanelView({ panel, vehicles, links, items, dir, selected, on
         t.markers.some((m) => m.outlet_id.toLowerCase().includes(q) || m.place.toLowerCase().includes(q)),
     );
   const shown = q ? vehicles.filter(matches) : vehicles;
-  const ranked = [...shown].sort((a, b) => rank(a, links) - rank(b, links));
+  const ranked = inOrder(shown, links);
   const featured = q ? ranked : ranked.filter((v) => rank(v, links) < FOLDED || v.vehicle_id === selected);
   const folded = q ? [] : ranked.filter((v) => !featured.includes(v));
   const withTrips = new Set(vehicles.map((v) => v.vehicle_id));
@@ -118,9 +135,10 @@ export function RunsPanelView({ panel, vehicles, links, items, dir, selected, on
   const workshop = q ? [] : dir.workshop();
 
   return (
+    // clipped, not hidden: the toast at the foot stays in view while the page scrolls
     <section
       data-runs
-      className="min-w-0 overflow-hidden rounded-card border border-asphalt-200 bg-white"
+      className="min-w-0 overflow-clip rounded-card border border-asphalt-200 bg-white"
       aria-label={`${panel.depot_label} Fresh runs`}
     >
       <header className="flex min-h-12 flex-wrap items-center gap-x-6 gap-y-1 border-b border-asphalt-200 px-4 py-2">
@@ -198,10 +216,20 @@ export function RunsPanelView({ panel, vehicles, links, items, dir, selected, on
           ))}
         </div>
       ) : null}
-      <p className="border-t border-asphalt-200 px-4 py-3 t-caption text-asphalt-500">
-        Progress comes from each driver's stop records, not from tracking. When a phone stops reaching Relay, its row
-        keeps the last record and the time of last contact, and every time after that is an estimate.
-      </p>
+      {toast ? (
+        <p
+          role="status"
+          className="sticky bottom-4 z-50 mx-auto my-2 flex w-[calc(100%-2rem)] max-w-[680px] items-center gap-2 rounded-button bg-asphalt-900 px-4 py-3 t-dense text-white shadow-float"
+        >
+          <Check size={20} strokeWidth={1.75} aria-hidden className="shrink-0" />
+          {toast}
+        </p>
+      ) : (
+        <p className="border-t border-asphalt-200 px-4 py-3 t-caption text-asphalt-500">
+          Progress comes from each driver's stop records, not from tracking. When a phone stops reaching Relay, its row
+          keeps the last record and the time of last contact, and every time after that is an estimate.
+        </p>
+      )}
     </section>
   );
 }
@@ -270,7 +298,6 @@ function RunRowView({
 }) {
   const [menu, setMenu] = useState(false);
   const row = vehicle.current;
-  const silent = row.out_of_contact;
   const movable =
     row.departed_at && !row.finished_at && !row.is_backup
       ? row.markers.filter((m) => m.state === "next" || m.state === "pending")
@@ -279,28 +306,32 @@ function RunRowView({
   const late = row.markers.some((m) => m.late_risk);
   const kind = dir.vehicle(row.vehicle_id, row.vehicle_kind);
   const KindIcon = row.temp === "chilled" ? Snowflake : kind.endsWith("van") ? Van : Truck;
-  const laterRisk = vehicle.later?.markers.find((m) => m.late_risk);
-  const caption = captionOf(row, silent, vehicle.later, laterRisk);
+  const caption = rowCaption(vehicle);
 
+  // The row is a group with one select button. The button's cover reaches across the row, so a click anywhere picks
+  // the run, while the stop track stays a list a screen reader can walk. The menu sits above the cover.
   return (
     <div
       className={cx(
         "relative grid grid-cols-[minmax(0,1fr)_32px] gap-x-4 border-b border-asphalt-200 px-4 lg:grid-cols-[200px_minmax(0,1fr)_128px_32px]",
         compact ? "py-2" : "py-3",
-        selected && "bg-petrol-50",
+        selected ? "bg-petrol-50" : "hover:bg-asphalt-50",
       )}
     >
       {selected ? <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-petrol-700" /> : null}
-      <button
-        type="button"
-        data-run-row
-        aria-pressed={selected}
-        onClick={() => onSelect(row.vehicle_id)}
-        onKeyDown={(event) => moveFocus(event, "[data-run-row]")}
-        className="grid min-w-0 grid-cols-subgrid gap-x-4 gap-y-2 text-left max-lg:col-span-1 max-lg:grid-cols-1 lg:col-span-3"
-      >
+      <div className="grid min-w-0 grid-cols-subgrid gap-x-4 gap-y-2 max-lg:col-span-1 max-lg:grid-cols-1 lg:col-span-3">
         <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="latin t-h3">{row.vehicle_id}</span>
+          <button
+            type="button"
+            data-run-row
+            aria-pressed={selected}
+            aria-label={row.driver ? `${row.vehicle_id}, ${row.driver}` : row.vehicle_id}
+            onClick={() => onSelect(row.vehicle_id)}
+            onKeyDown={(event) => moveFocus(event, "[data-run-row]")}
+            className="latin self-start text-left t-h3 after:absolute after:inset-0 after:z-30 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-petrol-700"
+          >
+            {row.vehicle_id}
+          </button>
           {compact ? null : (
             <>
               {row.driver ? <span className="latin truncate t-dense">{row.driver}</span> : null}
@@ -326,8 +357,8 @@ function RunRowView({
           {compact ? null : <span className="t-label text-asphalt-700">{caption}</span>}
         </span>
         <LastSynced row={row} items={items} compact={compact} />
-      </button>
-      <div className="flex justify-end pt-0.5">
+      </div>
+      <div className="relative z-40 flex justify-end self-start pt-0.5">
         {movable.length && !compact ? (
           <IconButton
             icon={Ellipsis}
@@ -339,7 +370,7 @@ function RunRowView({
         ) : null}
       </div>
       {menu && movable.length ? (
-        <div className="col-span-full mt-2 flex flex-wrap items-center gap-2 rounded-button border border-asphalt-200 bg-white px-3 py-2">
+        <div className="relative z-40 col-span-full mt-2 flex flex-wrap items-center gap-2 rounded-button border border-asphalt-200 bg-white px-3 py-2">
           <span className="t-label text-asphalt-700">Move a stop to another vehicle:</span>
           {movable.map((m) => (
             <Button
@@ -358,18 +389,6 @@ function RunRowView({
       ) : null}
     </div>
   );
-}
-
-/** The row's caption. A later trip's late stop is said apart from this trip's windows, so the two never read as one
- *  contradiction ("every stop is inside its window" next to "expected after its close"). */
-function captionOf(row: RunRow, silent: boolean, later: RunRow | null, laterRisk: RunMarker | undefined): string {
-  if (silent) return silentCaption(row);
-  if (!later || !laterRisk) return row.caption;
-  const own = row.caption.replace(
-    "Every stop still to come is expected inside its window.",
-    `Trip ${row.trip_no} stops are inside their windows.`,
-  );
-  return `${own} Trip ${later.trip_no}: ${laterRisk.place} is expected after its ${formatTime(laterRisk.closes)} close.`;
 }
 
 /** Last synced: the last time the phone reached Relay, which is not the last stop event. While a phone is silent it
@@ -430,41 +449,6 @@ function syncNotes(row: RunRow, items: FeedItem[]): string[] {
   return delay ? [`Delay at ${formatTime(delay.created_at)}`] : [];
 }
 
-type Station = { kind: "stop"; marker: RunMarker } | { kind: "hub"; label: string; status: string; recorded: boolean };
-
-function stations(vehicle: VehicleRun, depotLabel: string, now: string): Station[] {
-  const row = vehicle.current;
-  const out: Station[] = [];
-  if (row.is_backup) {
-    out.push({
-      kind: "hub",
-      label: depotLabel,
-      status: row.departed_at ? `Left ${shortClock(row.departed_at)}` : "Loading at the dock",
-      recorded: !!row.departed_at,
-    });
-  }
-  for (const marker of row.markers) out.push({ kind: "stop", marker });
-  // A stop moved to a backup is still the driver's until someone settles it, so the hub is not next yet.
-  const allDone = row.markers.every((m) => isRecorded(m) || m.receipt_at);
-  if (vehicle.later) {
-    // a planned time already gone by is not a promise: the second trip leaves once the first is back
-    const due = Date.parse(vehicle.later.planned_depart) <= Date.parse(now);
-    out.push({
-      kind: "hub",
-      label: `Then trip ${vehicle.later.trip_no}`,
-      status: due ? "Leaves after this trip" : `Leaves ${shortClock(vehicle.later.planned_depart)}`,
-      recorded: false,
-    });
-  } else if (row.finished_at) {
-    out.push({ kind: "hub", label: "Back at the hub", status: shortClock(row.finished_at), recorded: true });
-  } else if (row.status === "returning") {
-    out.push({ kind: "hub", label: "Back to the hub", status: "Turned back", recorded: false });
-  } else if (row.departed_at && allDone) {
-    out.push({ kind: "hub", label: "Hub next", status: "", recorded: false });
-  }
-  return out;
-}
-
 /** Stop track: recorded stops solid, with a solid line into them; estimates dashed, with a dashed line. While a phone
  *  is silent, the estimated vehicle sits on the line to the stop Relay thinks it is driving to. */
 function Track({
@@ -487,7 +471,12 @@ function Track({
   const solid = (s: Station) => (s.kind === "hub" ? s.recorded : isRecorded(s.marker) || !!s.marker.receipt_at);
   const line = size === 28 ? "top-[13px]" : "top-[11px]";
   return (
-    <ol className="flex min-w-0 items-start" aria-label={`${row.vehicle_id} stops`}>
+    // Seven stops and the hub are wider than the column: that track scrolls on its own rather than cut a name short,
+    // and sits above the row's select cover so it can be scrolled
+    <ol
+      className={cx("flex min-w-0 items-start", list.length >= LONG_TRACK && "relative z-40 overflow-x-auto pb-1")}
+      aria-label={`${row.vehicle_id} stops`}
+    >
       {list.map((s, i) => {
         const next = list[i + 1];
         const full = s.kind === "stop" ? markerStatus(s.marker, silent) : { text: s.status, tone: "muted" as Tone };
@@ -497,14 +486,14 @@ function Track({
             ? { ...full, text: shortClock(s.marker.recorded) }
             : full;
         const conflict = s.kind === "stop" && s.marker.state === "conflict";
+        const held = s.kind === "stop" ? heldWords(s.marker, row) : null;
         const backupRisk = s.kind === "stop" && row.is_backup && s.marker.late_risk;
         return (
           <li
             key={s.kind === "stop" ? s.marker.stop_id : `hub-${i}`}
-            // a hub takes a narrow fixed column, and each stop a share of the rest as long as its name, so
-            // "Hemmathagama" is read in full beside "Kegalle"
-            className={cx("relative flex min-w-0 flex-col items-center gap-1", s.kind === "hub" && "w-20 flex-none")}
-            style={s.kind === "stop" ? { flex: `${Math.max(6, s.marker.place.length)} 1 0%` } : undefined}
+            // a hub takes a narrow fixed column and the stops share the rest evenly, never narrower than their
+            // longest word, so "Suduhumpola" is read in full beside "Hantana"; longer labels wrap at their spaces
+            className={cx("relative flex flex-col items-center gap-1", s.kind === "hub" ? "w-20 flex-none" : "flex-1")}
           >
             {i > 0 ? (
               <span
@@ -529,27 +518,17 @@ function Track({
             <span className={cx("relative z-10 flex items-center justify-center", size === 28 ? "h-7" : "h-6")}>
               {s.kind === "stop" ? <DeskMarker m={s.marker} size={size} silent={silent} /> : <HubMarker />}
             </span>
-            {s.kind === "stop" && roadTo === s.marker.place ? <EstimatedVehicle size={size} /> : null}
+            {s.kind === "stop" && roadTo === s.marker.place ? <EstimatedVehicle size={size} first={i === 0} /> : null}
             {compact ? null : (
-              <span
-                className={cx(
-                  "max-w-full px-1 t-caption text-asphalt-900",
-                  s.kind === "hub" ? "text-center leading-tight" : "truncate",
-                )}
-                title={s.kind === "stop" ? s.marker.place : s.label}
-              >
+              <span className={cx("px-1 text-center t-caption text-asphalt-900", s.kind === "hub" && "leading-tight")}>
                 {s.kind === "stop" ? s.marker.place : s.label}
               </span>
             )}
-            {conflict && s.marker.held ? (
-              <span className="num px-1 t-caption text-asphalt-700">Delivered {shortClock(s.marker.held)}</span>
-            ) : null}
+            {held ? <span className="num px-1 text-center t-caption text-asphalt-700">{held}</span> : null}
             {conflict ? (
               <StatusChip kind="twoCopies" density="desk" />
             ) : status.text ? (
-              <span className={cx("num max-w-full truncate px-1 t-caption", TONE_TEXT[status.tone])} title={full.text}>
-                {status.text}
-              </span>
+              <span className={cx("num px-1 text-center t-caption", TONE_TEXT[status.tone])}>{status.text}</span>
             ) : null}
             {backupRisk && !compact ? <StatusChip kind="lateRisk" density="desk" /> : null}
           </li>
@@ -558,6 +537,9 @@ function Track({
     </ol>
   );
 }
+
+/** Markers on a track too long for the Stops column at desk width with every name whole. */
+const LONG_TRACK = 8;
 
 const TONE_TEXT: Record<Tone, string> = {
   plain: "text-asphalt-700",
@@ -674,14 +656,16 @@ function HubMarker() {
 }
 
 /** Where Relay estimates a silent vehicle is: on the line before the stop it is probably driving to. */
-function EstimatedVehicle({ size }: { size: 24 | 28 }) {
+function EstimatedVehicle({ size, first }: { size: 24 | 28; first: boolean }) {
   return (
     <span
       role="img"
       aria-label="Estimated position"
       title="Estimated position, not tracked"
       className={cx(
-        "absolute top-0 left-0 z-20 inline-flex -translate-x-1/2 items-center justify-center rounded-full border-[1.5px] border-dashed border-asphalt-500 bg-white text-asphalt-700",
+        "absolute top-0 left-0 z-20 inline-flex items-center justify-center rounded-full border-[1.5px] border-dashed border-asphalt-500 bg-white text-asphalt-700",
+        // on the way to the first stop it sits at the start of the track, inside it
+        !first && "-translate-x-1/2",
         size === 28 ? "size-7" : "size-6",
       )}
     >

@@ -44,15 +44,19 @@ export function Segmented<T extends string>({ value, onChange, segments, label, 
             type="button"
             role="radio"
             aria-checked={selected}
-            disabled={s.disabled}
+            // aria-disabled, not disabled: the segment keeps its hover and focus, so its tooltip can say why it's off
+            aria-disabled={s.disabled || undefined}
             title={s.title}
-            onClick={() => onChange(s.value)}
+            onClick={() => {
+              if (!s.disabled) onChange(s.value);
+            }}
             className={cx(
               "flex flex-1 items-center justify-center gap-2 rounded-chip px-3 whitespace-nowrap",
               selected
                 ? "border border-asphalt-300 bg-white t-label-strong text-asphalt-900"
-                : "t-label text-asphalt-700 hover:text-asphalt-900",
-              s.disabled && "text-asphalt-300",
+                : s.disabled
+                  ? "cursor-not-allowed t-label text-asphalt-300"
+                  : "t-label text-asphalt-700 hover:text-asphalt-900",
             )}
           >
             {Icon ? (

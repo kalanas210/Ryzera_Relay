@@ -110,7 +110,13 @@ export function ProofPage() {
   if (!found) return <Navigate to="/driver" replace />;
   const { trip, stop } = found;
   const back = `/driver/stops/${stop.stop_id}`;
-  const header = <DriverHeader back={back} title={t("stop.title", { n: stop.seq, total: trip.stops.length })} />;
+  const header = (
+    <DriverHeader
+      back={back}
+      backLabel={t("header.backToStop", { n: stop.seq })}
+      title={t("stop.title", { n: stop.seq, total: trip.stops.length })}
+    />
+  );
   if (stop.status === "delivered" && !busy) return <Navigate to={back} replace />;
   if (!draft) return <PhoneScreen header={header}>{null}</PhoneScreen>;
 

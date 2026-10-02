@@ -1,12 +1,27 @@
-import { CircleAlert, LogOut, MapPin, Navigation, PackageCheck, Plus, Timer, Truck, User } from "lucide-react";
-import { useNavigate } from "react-router";
+import {
+  Bell,
+  ChevronRight,
+  CircleAlert,
+  LogOut,
+  MapPin,
+  Navigation,
+  PackageCheck,
+  Plus,
+  Timer,
+  Truck,
+  User,
+} from "lucide-react";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router";
 import { ApiError } from "@/api/client";
 import { useMe, useSignOut } from "@/app/session";
 import { useSimNow } from "@/demo/clock";
 import { Button } from "@/design/Button";
 import { Notice } from "@/design/Notice";
 import { Card, HomeHeader, PhoneScreen } from "@/design/Phone";
+import { Sheet } from "@/design/Sheet";
 import { StatusChip } from "@/design/StatusChip";
+import { cx } from "@/lib/cx";
 import { calledName } from "@/lib/names";
 import { dayOf, daysBetween, formatDayLong, formatDuration, formatWeekday, isoDay } from "@/lib/time";
 import {
@@ -26,10 +41,15 @@ import {
   clock,
   contents,
   daySummary,
+  dayWhen,
+  eveningOf,
   hubName,
+  issueSentAt,
   issuesSentence,
   lastHeard,
   noticeFor,
+  noticeLine,
+  openReminder,
   placedLine,
   shortLines,
   shortRow,
@@ -68,10 +88,17 @@ export function MyOrders() {
   const movedTo = focusOrders.find((o) => o.run_date !== o.requested_date && o.requested_date === focus);
   const summary = daySummary(states, movedTo ? formatWeekday(dayOf(movedTo.run_date)) : null);
   const failed = (home.isRefetchError && home.error instanceof ApiError && home.error.offline) || trackerFailed;
+  const reminder = openReminder(notices.data ?? [], data, now);
 
   return (
     <PhoneScreen header={<HomeHeader title="My orders" meta={`${data.outlet.name}, ${data.outlet.outlet_id}`} />}>
       <OfflineNotice failed={failed} knownAt={data.now} />
+      {reminder ? (
+        <AttentionRow to={`/store/notices/${reminder.id}`}>
+          {reminder.title}. Orders for {formatWeekday(dayOf(data.ordering_for))} close at {clock(data.cutoff)}.
+        </AttentionRow>
+      ) : null}
+      <Updates home={data} notices={notices.data ?? []} />
       <div className="flex flex-col gap-0.5">
         <p className="t-label text-asphalt-700">{dayLabel}</p>
         <h2 className="t-h2">{summary}</h2>
@@ -79,8 +106,8 @@ export function MyOrders() {
 
       {focusOrders.length === 0 ? (
         <p className="t-body text-asphalt-700">
-          Orders for {formatWeekday(dayOf(data.ordering_for))} close at 4:00 PM. Place one now and you'll get a
-          confirmation straight away.
+          Orders for {formatWeekday(dayOf(data.ordering_for))} close at {clock(data.cutoff)}. Place one now and you'll
+          get a confirmation straight away.
         </p>
       ) : null}
 
@@ -156,12 +183,19 @@ function OrderCard({
     ? notices.find((n) => n.kind === "order_deferred" && n.data.deferral_id === order.deferral?.id)
     : undefined;
   const track = `/store/orders/${order.order_ref}/track`;
+  // until its cutoff a received order can still be changed; at 4:00 PM the row goes and the meta says Locked
+  const changeable =
+    state === "received" &&
+    !order.locked &&
+    order.status === "received" &&
+    order.run_date === order.requested_date &&
+    Date.parse(order.locks_at) > now.getTime();
   const receipt = `/store/orders/${order.order_ref}/receipt`;
   const proof = tracker?.proof;
 
   let chip = <StatusChip kind="received" />;
   let headline = `${formatWeekday(dayOf(order.run_date))}, ${window}`;
-  let subline = "Delivery time shows here this evening";
+  let subline = `Delivery time shows here ${eveningOf(order.locks_at, now)}`;
   if (movedTo) {
     chip = <StatusChip kind="deferred">Moved to {formatWeekday(movedTo)}</StatusChip>;
     headline = `Now ${formatDayLong(movedTo)}`;
@@ -220,10 +254,12 @@ function OrderCard({
         headline = proof
           ? `Delivered ${clock(proof.delivered_at)}`
           : r
-            ? `${state === "confirmed" ? "Receipt confirmed" : "Issue sent"} ${clock(r.confirmed_at)}`
+            ? state === "confirmed"
+              ? `Receipt confirmed ${clock(r.confirmed_at)}`
+              : `Issue sent ${clock(issueSentAt(r))}`
             : "Receipt confirmed";
         if (state === "disputed" && r) {
-          subline = `You reported ${issuesSentence(r.issues, names)} at ${clock(r.confirmed_at)}.`;
+          subline = `You reported ${issuesSentence(r.issues, names)} at ${clock(issueSentAt(r))}.`;
         } else if (r && proof?.sent_at) {
           subline = `You confirmed receipt at ${clock(r.confirmed_at)}. ${driver}'s proof arrived at ${clock(proof.sent_at)}.`;
         } else if (r) {
@@ -253,14 +289,14 @@ function OrderCard({
       {movedFrom ? (
         <InfoNote>
           {order.deferral?.kind === "cutoff"
-            ? `Moved here from ${formatWeekday(movedFrom)}: it reached Waypoint after 4:00 PM.`
+            ? `Moved here from ${formatWeekday(movedFrom)}: it reached Waypoint after ${clock(order.locks_at)}.`
             : `Moved here from ${formatWeekday(movedFrom)}'s run.`}
         </InfoNote>
       ) : null}
       {movedTo && order.deferral ? (
         <Notice tone="attention" compact field>
           {order.deferral.kind === "cutoff"
-            ? "It reached Waypoint after 4:00 PM, so it goes on the next run."
+            ? `It reached Waypoint after ${clock(order.locks_at)}, so it goes on the next run.`
             : order.deferral.store_notice.split("\n\n")[0]}
         </Notice>
       ) : null}
@@ -299,6 +335,7 @@ function OrderCard({
         <LinkRow to={receipt}>{proof ? `See the receipt and ${driver}'s proof` : "See your receipt"}</LinkRow>
       ) : null}
       {movedTo && deferralNotice ? <LinkRow to={`/store/notices/${deferralNotice.id}`}>Read the notice</LinkRow> : null}
+      {changeable ? <LinkRow to={`/store/order?change=${order.order_ref}`}>Change this order</LinkRow> : null}
     </Card>
   );
 }
@@ -321,7 +358,9 @@ function CutoffLine({ home, now }: { home: StoreHome; now: Date }) {
       >
         {timer(urgent)}
         <div>
-          <p className="t-label">Orders for {day} close at 4:00 PM</p>
+          <p className="t-label">
+            Orders for {day} close at {clock(cutoff)}
+          </p>
           <p className="t-h3 num">{formatDuration(minutesLeft)} left</p>
         </div>
       </div>
@@ -331,7 +370,9 @@ function CutoffLine({ home, now }: { home: StoreHome; now: Date }) {
     return (
       <div className="flex min-h-12 items-center gap-3 rounded-card border border-asphalt-200 bg-white px-4 py-3">
         {timer()}
-        <p className="t-body">Orders for {day} close today at 4:00 PM</p>
+        <p className="t-body">
+          Orders for {day} close today at {clock(cutoff)}
+        </p>
       </div>
     );
   }
@@ -341,16 +382,63 @@ function CutoffLine({ home, now }: { home: StoreHome; now: Date }) {
       <div>
         <p className="t-label">New orders now go on {day}'s run</p>
         <p className="t-body text-asphalt-700">
-          Orders for {day} close {cutoffWhen(cutoff, now)} at 4:00 PM
+          Orders for {day} close {dayWhen(cutoff, now)} at {clock(cutoff)}
         </p>
       </div>
     </div>
   );
 }
 
-function cutoffWhen(cutoff: Date, now: Date): string {
-  const days = daysBetween(now, cutoff);
-  if (days <= 0) return "today";
-  if (days === 1) return "tomorrow";
-  return `on ${formatWeekday(cutoff)}`;
+/** Updates: every notice the store has had, newest first, with how many are still unread. Each opens in full, which
+ *  marks it read. */
+function Updates({ home, notices }: { home: StoreHome; notices: StoreNotice[] }) {
+  const [open, setOpen] = useState(false);
+  if (!notices.length) return null;
+  const unread = home.unread_notices;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex min-h-12 items-center gap-3 rounded-card border border-asphalt-200 bg-white px-4 py-2 text-left"
+      >
+        <Bell size={20} strokeWidth={1.75} aria-hidden className="shrink-0 text-asphalt-700" />
+        <span className="min-w-0 flex-1 t-body-strong text-asphalt-900">Updates</span>
+        {unread ? (
+          <span className="num rounded-chip bg-petrol-50 px-2 py-0.5 t-label-strong text-petrol-700">{unread} new</span>
+        ) : null}
+        <ChevronRight size={20} strokeWidth={1.75} aria-hidden className="shrink-0 text-asphalt-700" />
+      </button>
+      <Sheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Updates"
+        meta={unread ? `${unread} new` : "Newest first"}
+      >
+        <ul className="flex flex-col">
+          {notices.map((n) => (
+            <li key={n.id} className="border-b border-asphalt-200 last:border-b-0">
+              <Link to={`/store/notices/${n.id}`} className="flex min-h-14 items-start gap-3 py-3">
+                <span
+                  aria-hidden
+                  className={cx("mt-2 size-2 shrink-0 rounded-full", n.read_at ? "bg-transparent" : "bg-petrol-700")}
+                />
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className={cx("text-asphalt-900", n.read_at ? "t-body" : "t-body-strong")}>
+                    {n.read_at ? null : <span className="sr-only">New. </span>}
+                    {n.title}
+                  </span>
+                  <span className="t-label text-asphalt-700">{noticeLine(n, home)}</span>
+                  <span className="t-caption text-asphalt-500">
+                    {clock(n.created_at)}, {formatDayLong(n.created_at)}
+                  </span>
+                </span>
+                <ChevronRight size={20} strokeWidth={1.75} aria-hidden className="mt-0.5 shrink-0 text-asphalt-700" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </Sheet>
+    </>
+  );
 }

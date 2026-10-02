@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
-import type { StoreOrder, Tracker } from "./api";
+import type { Notice, StoreHome, StoreOrder, Tracker } from "./api";
 import {
   around,
   cardState,
   clock,
+  closesLine,
   daySummary,
+  dayWhen,
+  defaultTemp,
+  eveningOf,
   flaggedLabel,
+  issueSentAt,
   issuesSentence,
+  noticeLine,
+  openReminder,
   placedLine,
   sendIssues,
   shortRow,
@@ -27,6 +34,7 @@ const dry: StoreOrder = {
   status: "allocated",
   placed_at: "2026-04-07T14:14:00+05:30",
   locked: true,
+  locks_at: "2026-04-07T16:00:00+05:30",
   lines: [{ case_type: "rice_dhal", name: "Rice and dhal case", qty: 36, carried_qty: 0, carried_from: null }],
   deferral: null,
 };
@@ -98,9 +106,37 @@ describe("store times", () => {
     expect(span("2026-04-08T11:40:00+05:30", "2026-04-08T12:20:00+05:30")).toBe("11:40\u00a0AM to 12:20\u00a0PM");
   });
 
-  it("say Locked only on the day the order was placed", () => {
-    expect(placedLine(dry, new Date("2026-04-07T19:30:00+05:30"))).toBe("Placed 2:14\u00a0PM. Locked at 4:00 PM.");
+  it("say Locked only on the day the order was placed, and never for one that came in after its cutoff", () => {
+    expect(placedLine(dry, new Date("2026-04-07T19:30:00+05:30"))).toBe("Placed 2:14\u00a0PM. Locked at 4:00\u00a0PM.");
     expect(placedLine(dry, new Date("2026-04-08T05:20:00+05:30"))).toBe("Placed Tuesday 2:14\u00a0PM");
+    const late = { ...dry, placed_at: "2026-04-07T16:05:00+05:30", run_date: "2026-04-09" };
+    expect(placedLine(late, new Date("2026-04-07T19:30:00+05:30"))).toBe("Placed 4:05\u00a0PM");
+  });
+
+  it("say when a cutoff falls from now, with the PM kept on its line", () => {
+    const tuesdayEvening = new Date("2026-04-07T19:30:00+05:30");
+    const wednesdayFour = "2026-04-08T16:00:00+05:30";
+    expect(dayWhen(wednesdayFour, tuesdayEvening)).toBe("tomorrow");
+    expect(dayWhen(wednesdayFour, new Date("2026-04-08T05:20:00+05:30"))).toBe("today");
+    expect(dayWhen("2026-04-10T16:00:00+05:30", tuesdayEvening)).toBe("on Friday");
+    expect(closesLine("2026-04-09", wednesdayFour, tuesdayEvening)).toBe(
+      "Orders for Thursday close tomorrow at 4:00\u00a0PM.",
+    );
+    expect(closesLine("2026-04-08", "2026-04-07T16:00:00+05:30", new Date("2026-04-07T14:10:00+05:30"))).toBe(
+      "Orders for Wednesday close at 4:00\u00a0PM.",
+    );
+    expect(eveningOf(wednesdayFour, tuesdayEvening)).toBe("tomorrow evening");
+    expect(eveningOf("2026-04-07T16:00:00+05:30", new Date("2026-04-07T14:10:00+05:30"))).toBe("this evening");
+  });
+});
+
+describe("a new order", () => {
+  it("starts on a type the store has not sent yet that day, chilled before dry", () => {
+    expect(defaultTemp(["chilled", "ambient"], [])).toBe("chilled");
+    expect(defaultTemp(["chilled", "ambient"], [{ temp: "chilled" }])).toBe("ambient");
+    expect(defaultTemp(["chilled", "ambient"], [{ temp: "ambient" }])).toBe("chilled");
+    expect(defaultTemp(["chilled", "ambient"], [{ temp: "ambient" }, { temp: "chilled" }])).toBe("chilled");
+    expect(defaultTemp(["ambient"], [{ temp: "ambient" }])).toBe("ambient"); // a store with dry goods only
   });
 });
 
@@ -130,5 +166,66 @@ describe("store words", () => {
         names,
       ),
     ).toBe("1 damaged packet foods case and 2 dairy crates not cold");
+  });
+
+  it("time an issue sent after confirming by when it was sent, not by the receipt", () => {
+    expect(issueSentAt({ confirmed_at: "2026-04-08T06:41:00+05:30", reported_at: "2026-04-08T07:22:00+05:30" })).toBe(
+      "2026-04-08T07:22:00+05:30",
+    );
+    expect(issueSentAt({ confirmed_at: "2026-04-08T06:41:00+05:30", reported_at: null })).toBe(
+      "2026-04-08T06:41:00+05:30",
+    );
+  });
+
+  it("list each update the way the lock screen says it", () => {
+    const home = {
+      outlet: { window_open: "04:00", window_close: "07:45" },
+      orders: [{ ...dry, order_ref: "ORD0098596", temp: "chilled", run_date: "2026-04-09" }],
+    } as unknown as StoreHome;
+    const notice = (over: Partial<Notice>): Notice => ({
+      id: "n",
+      kind: "order_received",
+      title: "",
+      body: "",
+      data: {},
+      created_at: "2026-04-07T18:40:00+05:30",
+      read_at: null,
+      acknowledged_at: null,
+      ...over,
+    });
+    expect(noticeLine(notice({ kind: "order_deferred", data: { order_ref: "ORD0098596" } }), home)).toBe(
+      "Your chilled order ORD0098596 moves to Thursday 9 April, 4:00\u00a0to\u00a07:45\u00a0AM.",
+    );
+    expect(noticeLine(notice({ kind: "short_delivery", data: { added_day: "2026-04-09" } }), home)).toBe(
+      "They come Thursday.",
+    );
+    expect(noticeLine(notice({ body: "Your dry order ORD0098595 is expected around 5:20 AM.\n\nMore." }), home)).toBe(
+      "Your dry order ORD0098595 is expected around 5:20 AM.",
+    );
+  });
+
+  it("keep the dispatcher's reminder in front only while it can still be acted on", () => {
+    const reminder: Notice = {
+      id: "r",
+      kind: "cutoff_reminder",
+      title: "Your Wednesday order isn't in yet",
+      body: "",
+      data: { run_date: "2026-04-08", cutoff: "2026-04-07T16:00:00+05:30" },
+      created_at: "2026-04-07T15:12:00+05:30",
+      read_at: null,
+      acknowledged_at: null,
+    };
+    const home = {
+      ordering_for: "2026-04-08",
+      cutoff: "2026-04-07T16:00:00+05:30",
+      orders: [],
+    } as unknown as StoreHome;
+    const at = (hhmm: string) => new Date(`2026-04-07T${hhmm}:00+05:30`);
+    expect(openReminder([reminder], home, at("15:20"))?.id).toBe("r");
+    // read, past the cutoff, or answered with an order: it steps back into Updates
+    expect(openReminder([{ ...reminder, read_at: "2026-04-07T15:21:00+05:30" }], home, at("15:30"))).toBeUndefined();
+    expect(openReminder([reminder], home, at("16:00"))).toBeUndefined();
+    const sent = { ...home, orders: [{ ...dry, requested_date: "2026-04-08" }] } as StoreHome;
+    expect(openReminder([reminder], sent, at("15:30"))).toBeUndefined();
   });
 });

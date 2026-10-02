@@ -1,9 +1,11 @@
 """The engine's answers, kept by their exact inputs.
 
 The planning engine is deterministic: the same orders, vehicles, conditions and usual runs always give the same
-plan. A proposal takes about fifteen seconds, and every judge's private copy of the day asks the same first
+plan. A search takes 20 to 40 seconds on a desktop, and every judge's private copy of the day asks the same first
 question, so the answer is stored under a hash of everything the engine reads, including the engine's own source.
-Change any input, or the engine, and the key changes with it.
+Change any input, or the engine, and the key changes with it. `relay-api serve` fills the story day's first
+answers in the background (see relay_api.cli.warm); a new fleet or new orders still make the engine search, and
+the plan board shows that wait.
 """
 
 from __future__ import annotations

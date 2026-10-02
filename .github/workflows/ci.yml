@@ -44,6 +44,8 @@ jobs:
         run: uv run ruff check .
       - name: Format
         run: uv run ruff format --check apps packages
+      - name: Types
+        run: uv run mypy apps/api/src packages/engine/src
       - name: Tests
         run: uv run pytest
 

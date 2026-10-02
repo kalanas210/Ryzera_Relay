@@ -22,7 +22,9 @@ type Props = {
   /** "801.6 of 1,040 kg" */
   label: string;
   caption?: string;
-  size?: "full" | "compact";
+  /** full: the trip detail's 2 x 2 grid. compact: a trip card's line, icon, bar and value. fuel: a lane's vehicle
+   *  block, "Fuel" and the value over the bar. */
+  size?: "full" | "compact" | "fuel";
   title?: string;
   className?: string;
 };
@@ -62,21 +64,39 @@ export function Meter({ measure, value, limit, label, caption, size = "compact",
       </div>
     );
   }
+  const bar = (
+    // biome-ignore lint/a11y/useSemanticElements: the native meter can't take the design's three states reliably
+    <div
+      className={cx(
+        "h-1 overflow-hidden rounded-full bg-asphalt-100",
+        // a narrow card gives up bar before it gives up a digit of the value
+        size === "fuel" ? "w-full" : "w-16 min-w-6 shrink",
+      )}
+      role="meter"
+      aria-valuenow={value}
+      aria-valuemin={0}
+      aria-valuemax={limit}
+      aria-label={title}
+    >
+      <div className={cx("h-full rounded-full", BAR[state])} style={{ width: `${state === "over" ? 100 : pct}%` }} />
+    </div>
+  );
+  if (size === "fuel") {
+    return (
+      <div className={cx("flex flex-col gap-1", className)} title={title}>
+        <div className="flex items-baseline justify-between gap-2 t-caption">
+          <span className="text-asphalt-500">Fuel</span>
+          <span className={cx("num whitespace-nowrap", TEXT[state])}>{label}</span>
+        </div>
+        {bar}
+      </div>
+    );
+  }
   return (
     <div className={cx("flex items-center gap-2", className)} title={title}>
       <Icon size={16} strokeWidth={1.75} aria-hidden className="shrink-0 text-asphalt-500" />
-      {/* biome-ignore lint/a11y/useSemanticElements: the native meter can't take the design's three states reliably */}
-      <div
-        className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-asphalt-100"
-        role="meter"
-        aria-valuenow={value}
-        aria-valuemin={0}
-        aria-valuemax={limit}
-        aria-label={title}
-      >
-        <div className={cx("h-full rounded-full", BAR[state])} style={{ width: `${state === "over" ? 100 : pct}%` }} />
-      </div>
-      <span className={cx("num t-caption truncate", TEXT[state])}>{label}</span>
+      {bar}
+      <span className={cx("num shrink-0 t-caption whitespace-nowrap", TEXT[state])}>{label}</span>
     </div>
   );
 }

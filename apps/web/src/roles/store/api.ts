@@ -16,6 +16,8 @@ export type StoreOrder = {
   status: string;
   placed_at: string;
   locked: boolean;
+  /** When orders for its requested day close: the store can change it until then. */
+  locks_at: string;
   lines: { case_type: string; name: string; qty: number; carried_qty: number; carried_from: string | null }[];
   deferral: {
     id: string;
@@ -42,8 +44,13 @@ export type StoreHome = {
     window_close: string;
   };
   now: string;
+  /** The run a new order joins right now. */
   ordering_for: string;
+  /** When orders for `ordering_for` close. */
   cutoff: string;
+  /** The run whose orders closed at 4:00 PM today, while new orders go on the one after it. */
+  closed_for: string | null;
+  closed_at: string | null;
   next_run: string;
   orders: StoreOrder[];
   case_types: CaseType[];
@@ -60,14 +67,29 @@ export function useStoreHome() {
   });
 }
 
+/** Send order. Sent straight away (not paused while the browser thinks it is offline), so a failed send says so and
+ *  the counts wait on the phone. `for_date` is the run the form showed; Relay's receive time still decides the run. */
 export function usePlaceOrder() {
   const client = useQueryClient();
   return useMutation({
+    networkMode: "always",
     mutationFn: (input: {
       temp: "ambient" | "chilled";
       lines: { case_type: string; qty: number }[];
       client_ref: string;
+      for_date: string;
     }) => api.post<StoreOrder>("/api/store/orders", input, { role }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["store"] }),
+  });
+}
+
+/** Save changes to an order before its cutoff; refused (409) from 4:00 PM. Sent straight away, like Send order. */
+export function useChangeOrder(orderRef: string) {
+  const client = useQueryClient();
+  return useMutation({
+    networkMode: "always",
+    mutationFn: (input: { lines: { case_type: string; qty: number }[] }) =>
+      api.patch<StoreOrder>(`/api/store/orders/${encodeURIComponent(orderRef)}`, input, { role }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["store"] }),
   });
 }
@@ -84,6 +106,7 @@ export type Notice = {
     | "new_time"
     | "delivered"
     | "backup_sent"
+    | "cutoff_reminder"
     | (string & {});
   title: string;
   body: string;
@@ -195,6 +218,20 @@ export function useTrackers(orderRefs: string[]): {
       waiting: results.some((r) => r.isPending && r.fetchStatus === "fetching"),
       failed: results.some((r) => r.isError),
     }),
+  });
+}
+
+/** Opening a notice marks it read, so the dispatcher's record can say when the store read it. */
+export function useReadNotice() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (noticeId: string) => api.post<Notice>(`/api/store/notices/${noticeId}/read`, {}, { role }),
+    onSuccess: (notice) => {
+      client.setQueryData<Notice[]>(["store", "notices"], (list) =>
+        list?.map((n) => (n.id === notice.id ? notice : n)),
+      );
+      void client.invalidateQueries({ queryKey: ["store", "home"] });
+    },
   });
 }
 

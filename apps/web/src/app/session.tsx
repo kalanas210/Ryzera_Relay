@@ -90,10 +90,13 @@ export function useSignOut(role: Role) {
   });
 }
 
+/** The demo bar's state. Asked as the role on screen, so Relay knows who is being played in this copy: the story
+ *  leaves a character to the judge playing them, even on a driver's phone with its signal switched off. */
 export function useDemoState() {
+  const role = useContext(RoleContext) ?? undefined;
   return useQuery<DemoState, ApiError>({
     queryKey: ["demo"],
-    queryFn: ({ signal }) => api.get<DemoState>("/api/demo/state", { signal }),
+    queryFn: ({ signal }) => api.get<DemoState>("/api/demo/state", { role, signal }),
     refetchInterval: 15_000,
     staleTime: 5_000,
   });

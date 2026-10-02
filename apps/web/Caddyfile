@@ -8,6 +8,11 @@
 	encode zstd gzip
 
 	handle /api/* {
+		# the largest thing anyone sends is a photo, shrunk on the phone and capped at 1.5 MB by the API: a bigger
+		# body is turned away here with 413 before the API has to read it
+		request_body {
+			max_size 2MB
+		}
 		reverse_proxy {$API_UPSTREAM:api:8000} {
 			# live updates stream as server-sent events
 			flush_interval -1

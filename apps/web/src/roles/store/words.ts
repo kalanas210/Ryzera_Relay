@@ -89,10 +89,56 @@ export function placedAt(order: StoreOrder, now: Date): string {
 }
 
 /** The card's meta after the order ID: "Placed 2:14 PM. Locked at 4:00 PM." while the delivery is still to come
- *  tomorrow; "Placed Tuesday 2:14 PM" on later days, with no Locked. */
+ *  tomorrow; "Placed Tuesday 2:14 PM" on later days, with no Locked. An order that reached Waypoint after its cutoff
+ *  was never open to change, so it says nothing of locking. */
 export function placedLine(order: StoreOrder, now: Date): string {
   const sameDay = daysBetween(order.placed_at, now) === 0;
-  return `${placedAt(order, now)}${sameDay && order.locked ? ". Locked at 4:00 PM." : ""}`;
+  const lockedSince = order.locked && Date.parse(order.placed_at) < Date.parse(order.locks_at);
+  return `${placedAt(order, now)}${sameDay && lockedSince ? `. Locked at ${clock(order.locks_at)}.` : ""}`;
+}
+
+/** When a cutoff falls, said from today: "today", "tomorrow" or "on Monday". */
+export function dayWhen(at: string | Date, now: Date): string {
+  const days = daysBetween(now, at);
+  if (days <= 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `on ${formatWeekday(at)}`;
+}
+
+/** "this evening", "tomorrow evening": when the plan for a run is published, the evening its orders close. */
+export function eveningOf(closesAt: string | Date, now: Date): string {
+  const when = dayWhen(closesAt, now);
+  return when === "today" ? "this evening" : `${when} evening`;
+}
+
+/** "Orders for Thursday close tomorrow at 4:00 PM." On the day itself, "Orders for Wednesday close at 4:00 PM." */
+export function closesLine(run: string, closesAt: string, now: Date): string {
+  const when = dayWhen(closesAt, now);
+  return `Orders for ${formatWeekday(dayOf(run))} close ${when === "today" ? "" : `${when} `}at ${clock(closesAt)}.`;
+}
+
+/** "a", "a and b", "a, b and c" */
+export function andList(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+export type Temp = "ambient" | "chilled";
+
+/** How a store names an order's type: Fresh stores send dry and chilled orders separately. */
+export function kindOf(temp: Temp): "dry" | "chilled" {
+  return temp === "chilled" ? "chilled" : "dry";
+}
+
+/** The type a new order starts on: the first type the store has no order for yet that day, chilled before dry as
+ *  the form is drawn; once it has both, chilled. */
+export function defaultTemp(temps: Temp[], already: { temp: Temp }[]): Temp {
+  return temps.find((t) => !already.some((o) => o.temp === t)) ?? temps[0] ?? "chilled";
+}
+
+/** When an issue reached the dispatcher: one reported after confirming carries its own time, not the receipt's. */
+export function issueSentAt(receipt: { confirmed_at: string; reported_at: string | null }): string {
+  return receipt.reported_at ?? receipt.confirmed_at;
 }
 
 /** "1 stop before you", or that the store is next. */
@@ -129,12 +175,12 @@ export function issuesSentence(
   issues: { case_type: string; kind: IssueKind; qty: number }[],
   names: Record<string, string>,
 ) {
-  const parts = issues.map((i) => {
-    const name = plural(names[i.case_type] ?? i.case_type, i.qty);
-    return i.kind === "not_cold" ? `${i.qty} ${name} not cold` : `${i.qty} ${ISSUE_WORDS[i.kind]} ${name}`;
-  });
-  if (parts.length <= 1) return parts[0] ?? "";
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return andList(
+    issues.map((i) => {
+      const name = plural(names[i.case_type] ?? i.case_type, i.qty);
+      return i.kind === "not_cold" ? `${i.qty} ${name} not cold` : `${i.qty} ${ISSUE_WORDS[i.kind]} ${name}`;
+    }),
+  );
 }
 
 /** "Send 1 issue", "Send 2 issues" */
@@ -171,6 +217,28 @@ export function daySummary(states: CardState[], movedTo: string | null): string 
   }
   if (moved) parts.push(`${moved} moved to ${movedTo ?? "a later day"}`);
   return parts.join(", ");
+}
+
+/** A notice's line in Updates, as the lock screen says it: a deferral by the day it now comes, a short delivery by
+ *  when the cases follow, any other by the first lines of what was sent. */
+export function noticeLine(notice: Notice, home: StoreHome): string {
+  const order = home.orders.find((o) => o.order_ref === notice.data.order_ref);
+  if (notice.kind === "order_deferred" && order) {
+    return `Your ${kindOf(order.temp)} order ${order.order_ref} moves to ${formatDayLong(dayOf(order.run_date))}, ${windowOf(home.outlet)}.`;
+  }
+  if (notice.kind === "short_delivery") {
+    const day = notice.data.added_day;
+    return typeof day === "string" ? `They come ${formatWeekday(dayOf(day))}.` : "They won't be replaced.";
+  }
+  return notice.body.split("\n\n")[0] ?? "";
+}
+
+/** The dispatcher's reminder to order, while it still matters: unread, for the day orders are open for, before
+ *  that day's cutoff, and with nothing sent for that day yet. */
+export function openReminder(notices: Notice[], home: StoreHome, now: Date): Notice | undefined {
+  if (now >= new Date(home.cutoff)) return undefined;
+  if (home.orders.some((o) => o.requested_date === home.ordering_for)) return undefined;
+  return notices.find((n) => n.kind === "cutoff_reminder" && !n.read_at && n.data.run_date === home.ordering_for);
 }
 
 /** The newest notice of a kind about one order. */

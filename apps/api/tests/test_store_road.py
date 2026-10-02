@@ -65,6 +65,8 @@ def test_a_problem_found_after_confirming_still_reaches_the_dispatcher(new_copy:
     disputes = [i for i in feed["now"] if i["kind"] == "dispute"]
     assert len(disputes) == 1
     assert disputes[0]["ref"]["order_ref"] == DRY_ORDER
+    # in the store's own words and word order, with its note, as the dispatcher reads it under "From the store"
+    assert disputes[0]["body"] == "1 damaged packet foods case. Crushed at the back."
 
     # nothing to report without a receipt to add it to
     copy.post("/api/store/orders/ORD0098596/issues", later | {"client_ref": "no-receipt-yet"}, "store_manager", 409)

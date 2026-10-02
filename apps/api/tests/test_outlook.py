@@ -171,7 +171,9 @@ def test_the_run_row_agrees_with_the_queue_and_the_drawer(new_copy: Callable[[],
 
 
 def test_the_run_row_follows_the_plan_board_when_a_vehicle_comes_back(new_copy: Callable[[], Copy]) -> None:
-    copy = _at_6_45(new_copy)
+    copy = new_copy()
+    copy.jump("plan")  # 4:35 PM: the Kandy plan is still a draft, so its fleet can change
+    copy.sign_in("nuwan", "dispatcher")
     back = copy.client.patch(
         "/api/dispatch/plan/vehicles/VEH058?depot=Kandy",
         json={"run_date": "2026-04-08", "status": "available"},

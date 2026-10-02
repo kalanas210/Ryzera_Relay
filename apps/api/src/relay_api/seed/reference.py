@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from relay_api.models import (
     AppUser,
+    Base,
     CalendarDay,
     CaseType,
     District,
@@ -296,7 +297,7 @@ def _hub_stock(seed: Path) -> list[dict[str, Any]]:
 
 
 # In dependency order: a table is loaded after the tables it refers to.
-TABLES: list[tuple[type, Rows]] = [
+TABLES: list[tuple[type[Base], Rows]] = [
     (District, _districts),
     (Outlet, _outlets),
     (Vehicle, _vehicles),
@@ -321,13 +322,12 @@ def load_reference(db: Session, seed_dir: Path) -> list[str]:
     """Fill every empty network table. Returns the tables it filled."""
     filled = []
     for model, rows in TABLES:
-        table = model.__table__  # type: ignore[attr-defined]
-        if db.execute(select(table).limit(1)).first() is not None:
+        if db.execute(select(model.__table__).limit(1)).first() is not None:
             continue
         data = rows(seed_dir)
         for start in range(0, len(data), 2000):
             db.execute(insert(model), data[start : start + 2000])
-        filled.append(table.name)
+        filled.append(model.__tablename__)
     return filled
 
 

@@ -22,6 +22,7 @@ import { newRecordId } from "@/offline/outbox";
 import { photoSize } from "./device";
 import { minuteIso } from "./local";
 import {
+  CallButton,
   ChoiceChip,
   ConfirmPanel,
   DriverHeader,
@@ -116,12 +117,21 @@ function ReasonList({ run, trip, stop }: { run: DriverRun; trip: DriverTrip; sto
         ))}
       </nav>
       {name ? (
-        <div className="mt-4 flex flex-col gap-1 border-t border-asphalt-200 pt-4">
-          <p className="flex items-start gap-2 t-body text-asphalt-700">
-            <Phone size={16} strokeWidth={1.75} aria-hidden className="mt-1 shrink-0" />
-            {t("report.emergency", { name })}
-          </p>
-          <p className="t-label text-asphalt-500">{t("report.emergencyHelp")}</p>
+        <div className="mt-4 flex flex-col gap-2 border-t border-asphalt-200 pt-4">
+          {run.dispatcher_phone ? (
+            <>
+              <CallButton phone={run.dispatcher_phone}>{t("report.call", { name })}</CallButton>
+              <p className="t-label text-asphalt-500">{t("report.callHelp")}</p>
+            </>
+          ) : (
+            <>
+              <p className="flex items-start gap-2 t-body text-asphalt-700">
+                <Phone size={16} strokeWidth={1.75} aria-hidden className="mt-1 shrink-0" />
+                {t("report.emergency", { name })}
+              </p>
+              <p className="t-label text-asphalt-500">{t("report.emergencyHelp")}</p>
+            </>
+          )}
         </div>
       ) : null}
     </PhoneScreen>
@@ -142,7 +152,7 @@ function ReasonForm({
   now: Date;
 }) {
   const { t, caseShort, caseItem } = useDriverText();
-  const { save, savePhoto } = useDriver();
+  const { save, savePhoto, offline } = useDriver();
   const about = useAbout(trip, stop);
   const name = calledName(run.dispatcher);
   const [delay, setDelay] = useState<number | "more" | null>(null);
@@ -216,14 +226,21 @@ function ReasonForm({
   };
 
   const back = `/driver/report${stop ? `?stop=${stop.stop_id}` : ""}`;
+  // a truck that cannot move needs a call first: the call becomes the screen's one primary
+  const callFirst = r === "vehicle_problem" && canMove === "no" && Boolean(run.dispatcher_phone) && Boolean(name);
   return (
     <PhoneScreen
-      header={<DriverHeader back={back} />}
+      header={<DriverHeader back={back} backLabel={t("header.backToProblems")} />}
       bar={
         <>
+          {callFirst && run.dispatcher_phone ? (
+            <CallButton phone={run.dispatcher_phone} primary>
+              {t("report.call", { name })}
+            </CallButton>
+          ) : null}
           <Helper icon={Info}>{t("report.helper")}</Helper>
           <Button
-            variant="primary"
+            variant={callFirst ? "secondary" : "primary"}
             density="field"
             full
             icon={Send}
@@ -259,7 +276,10 @@ function ReasonForm({
               </ChoiceChip>
             </div>
           </fieldset>
-          <Notice tone="info">{t("report.delayInfo", { name })}</Notice>
+          {/* with no signal the report waits on the phone, so the dispatcher does not see it straight away */}
+          <Notice tone="info">
+            {offline ? t("report.delayInfoOffline", { name }) : t("report.delayInfo", { name })}
+          </Notice>
         </section>
       ) : null}
 

@@ -3,6 +3,7 @@ import { Check, CircleAlert, Info, PackageCheck, PackageX, Send, Truck, User } f
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { api } from "@/api/client";
+import { useDemoState } from "@/app/session";
 import { Button } from "@/design/Button";
 import { Notice } from "@/design/Notice";
 import { PhoneScreen } from "@/design/Phone";
@@ -45,15 +46,36 @@ export function RunPage() {
     return (
       <PhoneScreen header={header}>
         <OfflineNotice />
-        <Notice tone="info" field>
-          {run.published || !run.vehicle_id ? t("run.noRun") : t("run.notPublished")}
-        </Notice>
+        {run.published || !run.vehicle_id ? (
+          <Notice tone="info" field>
+            {t("run.noRun")}
+          </Notice>
+        ) : (
+          <NotPublished run={run} />
+        )}
         <LanguageRow />
       </PhoneScreen>
     );
   }
   if (trip.load === "to_accept") return <AcceptLoad run={run} trip={trip} />;
   return <Run run={run} trip={trip} now={now} />;
+}
+
+/** The hub's plan for the run is still a draft: which day, and who publishes it. In the demo, how to get there. */
+function NotPublished({ run }: { run: DriverRun }) {
+  const { t, weekday } = useDriverText();
+  const demo = useDemoState().data;
+  const name = calledName(run.dispatcher);
+  return (
+    <Notice tone="info" field title={t("run.notPublishedTitle", { day: weekday(run.run_date) })}>
+      <p>{name ? t("run.notPublished", { name }) : t("run.notPublishedNoName")}</p>
+      {demo?.demo_mode && demo.next ? (
+        <p className="mt-1 t-label text-asphalt-700">
+          {name ? t("run.demoPublish", { name }) : t("run.demoPublishNoName")}
+        </p>
+      ) : null}
+    </Notice>
+  );
 }
 
 /** Once the load is accepted the run takes the screen's place: it starts at the top, with the next stop in view. */
@@ -105,7 +127,8 @@ function TripStrip({ run, trip, next }: { run: DriverRun; trip: DriverTrip; next
         {accepted && trip.handover.accepted_at ? (
           <>{t("trip.accepted", { time: clock(trip.handover.accepted_at) })} · </>
         ) : null}
-        <span className="whitespace-nowrap">{leave}</span>
+        {/* a line of its own when it does not fit after the load, wrapped inside when wider than the screen (Tamil) */}
+        <span className="inline-block max-w-full">{leave}</span>
       </p>
     </div>
   );
@@ -118,6 +141,7 @@ function Run({ run, trip, now }: { run: DriverRun; trip: DriverTrip; now: Date }
   const questionOpen = useOpenQuestion(run);
   const next = nextStop(trip, items);
   const accepted = trip.load === "accepted";
+  const loading = trip.load === "not_started" || trip.load === "loading";
   const leaving = accepted && !trip.departed_at && !trip.finished_at;
   const loaderName = calledName(trip.loader);
 
@@ -142,13 +166,17 @@ function Run({ run, trip, now }: { run: DriverRun; trip: DriverTrip; now: Date }
       }
     >
       <QuestionCards run={run} trip={trip} />
-      <TripStrip run={run} trip={trip} next={next} />
+      <TripStrip run={run} trip={trip} next={loading ? null : next} />
       <OfflineNotice />
       <ReadNotices run={run} />
       <LocationNotice />
       <Rejected run={run} trip={trip} />
       <RunChanges run={run} trip={trip} />
-      {trip.load === "loading" ? (
+      {trip.load === "not_started" ? (
+        <Notice tone="info" field title={t("run.notStartedTitle", { vehicle: trip.vehicle_id })}>
+          {t("run.loadingBody")}
+        </Notice>
+      ) : trip.load === "loading" ? (
         <Notice
           tone="info"
           field
@@ -187,7 +215,7 @@ function Run({ run, trip, now }: { run: DriverRun; trip: DriverTrip; now: Date }
           {trip.stops.map((stop, i) => (
             <div key={stop.stop_id}>
               {i > 0 ? <div aria-hidden className="ml-[60px] h-px bg-asphalt-200" /> : null}
-              <StopRow run={run} stop={stop} next={trip.load === "loading" ? null : next} />
+              <StopRow run={run} stop={stop} next={loading ? null : next} />
             </div>
           ))}
         </div>

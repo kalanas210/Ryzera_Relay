@@ -31,6 +31,8 @@ const home: StoreHome = {
   now: "2026-04-08T06:42:00+05:30",
   ordering_for: "2026-04-09",
   cutoff: "2026-04-08T16:00:00+05:30",
+  closed_for: null,
+  closed_at: null,
   next_run: "2026-04-08",
   orders: [
     {
@@ -46,6 +48,7 @@ const home: StoreHome = {
       status: "allocated",
       placed_at: "2026-04-07T14:14:00+05:30",
       locked: true,
+      locks_at: "2026-04-07T16:00:00+05:30",
       lines: [],
       deferral: null,
     },
@@ -62,6 +65,7 @@ const home: StoreHome = {
       status: "received",
       placed_at: "2026-04-07T11:00:00+05:30",
       locked: false,
+      locks_at: "2026-04-08T16:00:00+05:30",
       lines: [],
       deferral: null,
     },
@@ -201,5 +205,35 @@ describe("Confirm receipt", () => {
     expect(await screen.findByRole("heading", { name: "Issue sent" })).toBeInTheDocument();
     const [, second] = post.mock.calls[1] as [string, { client_ref: string }];
     expect(second.client_ref).toBe(first.client_ref);
+  });
+
+  it("after Everything arrived, offers a quiet Report a problem below what is still to come", async () => {
+    const confirmed: Tracker = {
+      ...pastEstimate,
+      status: "confirmed",
+      can_confirm: false,
+      receipt: {
+        status: "confirmed",
+        confirmed_at: "2026-04-08T06:42:00+05:30",
+        before_driver_proof: true,
+        issues: [],
+        reported_at: null,
+      },
+    };
+    vi.spyOn(api, "post").mockResolvedValueOnce(confirmed as never);
+    openReceipt();
+    const send = await screen.findByRole("button", { name: "Everything arrived" });
+    const before = vi.mocked(api.get).getMockImplementation();
+    vi.mocked(api.get).mockImplementation(async (p: string, o) =>
+      p.endsWith("/tracker") ? (confirmed as never) : (before?.(p, o) as never),
+    );
+    fireEvent.click(send);
+
+    expect(await screen.findByRole("heading", { name: "Receipt confirmed" })).toBeInTheDocument();
+    const toCome = screen.getByRole("heading", { name: "Still to come on Thursday 9 April" });
+    const report = screen.getByRole("button", { name: "Report a problem" });
+    expect(toCome.compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(report.closest("section")).toBeNull(); // not a card of its own
+    expect(report.nextElementSibling).toHaveTextContent("You can still report a problem until 4:00 PM today");
   });
 });

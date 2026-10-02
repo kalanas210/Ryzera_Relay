@@ -1,10 +1,23 @@
-import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronDown, ChevronRight, Clock, Lock, Phone, Send, Snowflake, Warehouse } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleCheck,
+  Clock,
+  Lock,
+  Phone,
+  Send,
+  Snowflake,
+  Warehouse,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { api } from "@/api/client";
 import { useSimNow } from "@/demo/clock";
 import { Button } from "@/design/Button";
+import { ErrorState } from "@/design/ErrorState";
 import { StatusChip } from "@/design/StatusChip";
 import { cx } from "@/lib/cx";
 import {
@@ -15,8 +28,9 @@ import {
   formatWeekday,
   formatWindow,
   kg,
+  kgValue,
   m3,
-  numberFormat,
+  m3Value,
 } from "@/lib/time";
 import { type Depot, DeskHeader, useDepot } from "./DispatcherShell";
 
@@ -40,7 +54,7 @@ type Row = {
   status: string;
   flags: Flag[];
 };
-type Queue = {
+export type Queue = {
   run_date: string;
   now: string;
   cutoff: string;
@@ -54,6 +68,10 @@ type Queue = {
     depot: string;
     temps: string[];
     pattern: string;
+    /** The last Remind for this run. */
+    reminded_at: string | null;
+    /** The store manager's number: Call shows only when the store's record has one. */
+    phone: string | null;
   }[];
   fresh_outlets_expected: number;
   fresh_outlets_ordered: number;
@@ -93,9 +111,39 @@ export function useQueue() {
   });
 }
 
+/** Remind and Remind all: a notice in each store's Relay app with the cutoff. Answers with the stores reminded. */
+function useRemind() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (outletIds: string[]) =>
+      api.post<{ outlet_id: string; reminded_at: string }[]>(
+        "/api/dispatch/reminders",
+        { outlet_ids: outletIds },
+        { role: "dispatcher" },
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["dispatch", "queue"] }),
+  });
+}
+
+/** Relay sends a store one reminder in any 10 minutes; Remind again in that time would send nothing new. */
+const REMIND_AGAIN_MS = 10 * 60_000;
+
+// The spec's columns (Order 92, Outlet 176, Type 84, Cases 48, kg 64, m³ 60, Window 140), each with the 8 px gap
+// before it, 16 px at the card's edge and an 8 px spacer before Window, so neighbouring numbers never touch.
+const COL = {
+  order: "w-[108px] pl-4",
+  outlet: "w-[184px] pl-2",
+  type: "w-[92px] pl-2",
+  cases: "w-14 pl-2 text-right",
+  kg: "w-[72px] pl-2 text-right",
+  m3: "w-[68px] pl-2 text-right",
+  window: "w-[156px] pl-4",
+  flags: "pl-2 pr-4",
+} as const;
+
 /** DSP-01 Order queue: every order for tomorrow as it arrives, with the facts that limit how it travels. */
 export function QueuePage() {
-  const { data } = useQueue();
+  const { data, errorUpdateCount, refetch, isFetching } = useQueue();
   const [depot, setDepot] = useDepot();
   const [tab, setTab] = useState<Tab>("all");
   const now = useSimNow(15_000);
@@ -106,6 +154,24 @@ export function QueuePage() {
     [data, depot],
   );
 
+  // once a load has failed, the error stays until the queue arrives: a query with no data goes back to pending each
+  // time it fetches again, so the error alone would flash away on every try
+  if (!data && errorUpdateCount > 0) {
+    return (
+      <>
+        <DeskHeader title="Order queue" depot={depot} onDepot={setDepot} />
+        <div className="p-4 md:px-6">
+          <ErrorState
+            title="Relay could not load the order queue."
+            onRetry={() => void refetch()}
+            retrying={isFetching}
+          >
+            Relay tries again every 10 seconds.
+          </ErrorState>
+        </div>
+      </>
+    );
+  }
   if (!data || !now) return <DeskHeader title="Order queue" />;
 
   const day = dayOf(data.run_date);
@@ -232,7 +298,7 @@ export function QueuePage() {
             {locked ? (
               <CutoffSummary data={data} depot={depot} count={count} />
             ) : (
-              <NotOrdered data={data} depot={depot} weekday={weekday} />
+              <NotOrdered data={data} depot={depot} weekday={weekday} now={now} />
             )}
           </aside>
         </div>
@@ -249,14 +315,14 @@ function QueueTable({ rows, depot, workshop }: { rows: Row[]; depot: Depot; work
       <table className="w-full min-w-[860px] border-collapse t-dense">
         <thead className="sticky top-0 z-10 bg-asphalt-50 t-caption text-asphalt-500">
           <tr className="h-9 text-left">
-            <th className="pl-4 font-medium">Order</th>
-            <th className="font-medium">Outlet</th>
-            <th className="font-medium">Type</th>
-            <th className="text-right font-medium">Cases</th>
-            <th className="text-right font-medium">kg</th>
-            <th className="pr-2 text-right font-medium">m³</th>
-            <th className="pl-2 font-medium">Window</th>
-            <th className="pr-4 font-medium">Flags</th>
+            <th className={cx(COL.order, "font-medium")}>Order</th>
+            <th className={cx(COL.outlet, "font-medium")}>Outlet</th>
+            <th className={cx(COL.type, "font-medium")}>Type</th>
+            <th className={cx(COL.cases, "font-medium")}>Cases</th>
+            <th className={cx(COL.kg, "font-medium")}>kg</th>
+            <th className={cx(COL.m3, "font-medium")}>m³</th>
+            <th className={cx(COL.window, "font-medium")}>Window</th>
+            <th className={cx(COL.flags, "font-medium")}>Flags</th>
           </tr>
         </thead>
         {depots.map((d) => {
@@ -289,22 +355,24 @@ function QueueTable({ rows, depot, workshop }: { rows: Row[]; depot: Depot; work
                 ? null
                 : group.map((r) => (
                     <tr key={r.id} className="h-10 border-b border-asphalt-100 hover:bg-asphalt-100">
-                      <td className="latin num pl-4 whitespace-nowrap">{r.order_ref}</td>
-                      <td className="whitespace-nowrap">
+                      <td className={cx(COL.order, "latin num whitespace-nowrap")}>{r.order_ref}</td>
+                      <td className={cx(COL.outlet, "whitespace-nowrap")}>
                         <span className="latin t-dense-strong">{r.outlet_id}</span> {r.short_name}
                       </td>
-                      <td>
+                      <td className={COL.type}>
                         {r.temp === "chilled" ? (
                           <StatusChip kind="chilled" density="desk" />
                         ) : (
                           <span className="text-asphalt-700">{r.brand === "Fresh" ? "Dry" : r.brand}</span>
                         )}
                       </td>
-                      <td className="num text-right">{r.units}</td>
-                      <td className="num text-right">{numberFormat.format(r.weight_kg)}</td>
-                      <td className="num pr-2 text-right">{r.volume_m3.toFixed(3)}</td>
-                      <td className="num pl-2 whitespace-nowrap">{formatWindow(r.window_open, r.window_close)}</td>
-                      <td className="pr-4">
+                      <td className={cx(COL.cases, "num")}>{r.units}</td>
+                      <td className={cx(COL.kg, "num")}>{kgValue(r.weight_kg)}</td>
+                      <td className={cx(COL.m3, "num")}>{m3Value(r.volume_m3)}</td>
+                      <td className={cx(COL.window, "num whitespace-nowrap")}>
+                        {formatWindow(r.window_open, r.window_close)}
+                      </td>
+                      <td className={COL.flags}>
                         <span className="flex flex-wrap gap-1 py-1">
                           {r.flags.map((f) => (
                             <StatusChip key={f.kind} density="desk" kind={FLAG_CHIP[f.kind]}>
@@ -370,8 +438,36 @@ function LateOrders({ late, weekday }: { late: Queue["late"]; weekday: string })
   );
 }
 
-function NotOrdered({ data, depot, weekday }: { data: Queue; depot: Depot; weekday: string }) {
+/** The Not ordered panel: Remind, Remind all and Call before the cutoff. */
+export function NotOrdered({ data, depot, weekday, now }: { data: Queue; depot: Depot; weekday: string; now: Date }) {
   const list = data.not_ordered.filter((n) => depot === "All" || n.depot === depot);
+  const remind = useRemind();
+  const [toast, setToast] = useState<string | null>(null);
+  const recent = (n: Queue["not_ordered"][number]) =>
+    n.reminded_at !== null && now.getTime() - new Date(n.reminded_at).getTime() < REMIND_AGAIN_MS;
+  const due = list.filter((n) => !recent(n));
+  const anyPhone = list.some((n) => n.phone);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), 6_000);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+
+  const send = (ids: string[]) =>
+    remind.mutate(ids, {
+      onSuccess: (sent) => {
+        const first = list.find((n) => n.outlet_id === sent[0]?.outlet_id);
+        setToast(
+          sent.length === 0
+            ? "Every store on the list has ordered since. Nothing was sent."
+            : sent.length === 1 && first
+              ? `Reminder sent to ${first.outlet_id} ${first.short_name}.`
+              : `Reminders sent to ${sent.length} stores.`,
+        );
+      },
+    });
+
   return (
     <section className="flex flex-col gap-3 rounded-card border border-asphalt-200 bg-white p-4">
       <div className="flex items-center gap-2">
@@ -388,38 +484,83 @@ function NotOrdered({ data, depot, weekday }: { data: Queue; depot: Depot; weekd
               <span className="min-w-0 flex-1 t-dense">
                 <span className="latin t-dense-strong">{n.outlet_id}</span> {n.short_name}
               </span>
-              <Button
-                density="desk"
-                compact
-                icon={Send}
-                className="h-8 px-2.5"
-                title="Send a reminder to the store's Relay app"
-              >
-                Remind
-              </Button>
-              <Button density="desk" compact variant="quiet" icon={Phone} className="h-8 px-2.5">
-                Call
-              </Button>
+              {recent(n) ? (
+                <span className="num inline-flex h-8 items-center gap-1 px-1 t-caption text-done">
+                  <Check size={16} strokeWidth={1.75} aria-hidden />
+                  Reminded {formatTime(n.reminded_at!)}
+                </span>
+              ) : (
+                <Button
+                  density="desk"
+                  compact
+                  icon={Send}
+                  className="h-8 px-2.5"
+                  title="Send a reminder to the store's Relay app"
+                  aria-label={`${n.reminded_at ? "Remind again" : "Remind"} ${n.outlet_id} ${n.short_name}`}
+                  disabled={remind.isPending}
+                  onClick={() => send([n.outlet_id])}
+                >
+                  {n.reminded_at ? "Remind again" : "Remind"}
+                </Button>
+              )}
+              {n.phone ? (
+                <a
+                  href={`tel:${n.phone}`}
+                  aria-label={`Call ${n.outlet_id} ${n.short_name}`}
+                  className="inline-flex h-8 items-center gap-2 rounded-button px-2.5 t-dense-strong text-asphalt-900 hover:bg-asphalt-100"
+                >
+                  <Phone size={20} strokeWidth={1.75} aria-hidden />
+                  Call
+                </a>
+              ) : null}
             </div>
             <p className="t-caption text-asphalt-500">
               {DEPOT_LABEL[n.depot]} · {n.pattern}
+              {n.reminded_at && !recent(n) ? (
+                <span className="num"> · Reminded {formatTime(n.reminded_at)}</span>
+              ) : null}
             </p>
           </li>
         ))}
       </ul>
       {list.length ? (
         <>
-          <Button density="desk" variant="primary" icon={Send} full>
-            Remind all {list.length}
+          <Button
+            density="desk"
+            variant="primary"
+            icon={Send}
+            full
+            disabled={remind.isPending || due.length === 0}
+            onClick={() => send(due.map((n) => n.outlet_id))}
+          >
+            {due.length === 0
+              ? `All ${list.length} reminded`
+              : due.length === list.length
+                ? `Remind all ${list.length}`
+                : `Remind the other ${due.length}`}
           </Button>
+          {remind.error ? (
+            <p className="t-caption text-problem" role="alert">
+              {remind.error.message}
+            </p>
+          ) : null}
           <p className="t-caption text-asphalt-500">
-            A reminder appears in the store's Relay app with the 4:00 PM cutoff. Call uses the number on the outlet
-            record.
+            A reminder appears in the store's Relay app with the 4:00 PM cutoff.
+            {anyPhone ? " Call uses the number on the store's record." : ""}
           </p>
         </>
       ) : (
         <p className="t-dense text-asphalt-700">Every Fresh outlet has ordered.</p>
       )}
+      {toast ? (
+        <p
+          role="status"
+          className="fixed bottom-6 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-button bg-asphalt-900 px-4 py-3 t-dense text-white shadow-float"
+        >
+          <CircleCheck size={20} strokeWidth={1.75} aria-hidden className="shrink-0" />
+          {toast}
+        </p>
+      ) : null}
     </section>
   );
 }

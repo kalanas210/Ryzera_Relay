@@ -7,9 +7,11 @@
  *
  *  No signal means any of: the browser is offline, the last request found no connection, the story's scripted
  *  outage for this driver is running on the scenario clock, or the demo bar's switch is on. The switch blocks every
- *  request from the driver screens. Inside the scripted outage Relay itself takes nothing from the phone; the phone
- *  still reads the demo's stand-in for its own memory (the run as it last saw it, and what a demo jump recorded for
- *  its driver) and hands that stand-in what it saves, so a jump never plays a stop the phone already holds.
+ *  request from the driver screens; only the demo's own channel tells Relay it is on, so the story's autopilot leaves
+ *  this driver to the phone in the judge's hand and a jump never plays a stop that may be waiting on it. Inside the
+ *  scripted outage Relay itself takes nothing from the phone; the phone still reads the demo's stand-in for its own
+ *  memory (the run as it last saw it, and what a demo jump recorded for its driver) and hands that stand-in what it
+ *  saves, so a jump never plays a stop the phone already holds.
  *
  *  What the phone keeps belongs to one copy of the day: when the demo bar starts a new copy or resets this one, the
  *  kept run, the outbox and the drafts of the old copy are let go. */
@@ -317,8 +319,11 @@ export function DriverSync({ children }: { children: ReactNode }) {
           contact(at);
           return { outcome: out.outcome, at };
         } catch (error) {
-          // Relay read the photo and cannot take it (too large, not a picture): it leaves the queue with the reason
-          if (error instanceof ApiError && error.status === 422) return { outcome: "rejected", reason: error.message };
+          // Relay cannot take the photo (too large, not a picture): sending it again never helps, so it leaves the
+          // queue with the reason
+          if (error instanceof ApiError && (error.status === 422 || error.status === 413)) {
+            return { outcome: "rejected", reason: error.message };
+          }
           throw failed(error);
         }
       },
@@ -439,6 +444,36 @@ export function DriverSync({ children }: { children: ReactNode }) {
     },
     [kick],
   );
+
+  // The demo bar's switch, said on the demo's own channel until Relay has it. With the switch off at the start there
+  // is nothing to say: the phone's first check-in tells Relay it has signal.
+  const said = useRef<string | null>(null);
+  const [sayAgain, setSayAgain] = useState(0);
+  const demoMode = Boolean(demo?.demo_mode);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sayAgain is the retry after a failed attempt
+  useEffect(() => {
+    if (!demoMode || !username || !copy || copy === "phone") return;
+    const word = `${copy}:${forced.on}`;
+    if (said.current === word) return;
+    if (said.current === null && !forced.on) {
+      said.current = word;
+      return;
+    }
+    let live = true;
+    let retry = 0;
+    api.put("/api/driver/signal", { on: forced.on }, { role }).then(
+      () => {
+        if (live) said.current = word;
+      },
+      () => {
+        if (live) retry = window.setTimeout(() => setSayAgain((n) => n + 1), 15_000);
+      },
+    );
+    return () => {
+      live = false;
+      window.clearTimeout(retry);
+    };
+  }, [demoMode, username, copy, forced.on, sayAgain]);
 
   // In the story's storm, what this phone saves is handed to the demo's stand-in for its memory, so a demo jump
   // leaves those stops to it. Relay applies nothing from it until the signal returns.

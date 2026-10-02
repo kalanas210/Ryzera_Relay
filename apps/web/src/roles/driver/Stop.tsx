@@ -112,7 +112,7 @@ export function StopPage() {
       }
       bar={bar ?? undefined}
     >
-      <OutletBlock stop={stop} next={next} />
+      <OutletBlock stop={stop} next={next} now={now} />
       <StopState run={run} stop={stop} local={local} />
       <WindowPanel run={run} stop={stop} now={now} toCome={toCome} />
       <DropOff trip={trip} stop={stop} />
@@ -121,8 +121,8 @@ export function StopPage() {
 }
 
 /** The outlet block: marker, place, store and, before Arrived, both named times. */
-function OutletBlock({ stop, next }: { stop: DriverStop; next: DriverStop | null }) {
-  const { t, storeName, clock, around } = useDriverText();
+function OutletBlock({ stop, next, now }: { stop: DriverStop; next: DriverStop | null; now: Date }) {
+  const { t, storeName, clock, expectedAt } = useDriverText();
   const state = stop.status === "arrived" ? "next" : markerState(stop, next);
   return (
     <div className="flex items-start gap-3">
@@ -138,7 +138,7 @@ function OutletBlock({ stop, next }: { stop: DriverStop; next: DriverStop | null
           <p className="t-label text-asphalt-500">
             {t("stop.times", {
               planned: clock(stop.planned),
-              expected: stop.expected ? around(stop.expected) : clock(stop.planned),
+              expected: stop.expected ? expectedAt(stop, now) : clock(stop.planned),
             })}
           </p>
         ) : null}

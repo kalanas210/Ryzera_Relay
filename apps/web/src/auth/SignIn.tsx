@@ -1,5 +1,5 @@
 import { LayoutDashboard, type LucideIcon, Package, Store, Truck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import type { Role } from "@/api/client";
 import type { Account } from "@/api/types";
@@ -43,6 +43,9 @@ export function SignIn() {
   const [role, setRole] = useState<Role | null>(wanted);
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
+  // a tap on a role brings its sign-in into view: on a phone it opens below the four cards, out of sight
+  const form = useRef<HTMLElement>(null);
+  const [picked, setPicked] = useState(0);
 
   const people = (accounts.data ?? []).filter((a) => a.role === role);
   const chosen = people.find((a) => a.username === username);
@@ -55,6 +58,12 @@ export function SignIn() {
       setSecret("");
     }
   }, [role, people, username]);
+
+  useEffect(() => {
+    if (!picked) return;
+    form.current?.scrollIntoView({ block: "nearest" });
+    form.current?.querySelector<HTMLInputElement>("input[type=password]")?.focus({ preventScroll: true });
+  }, [picked]);
 
   const submit = (pin?: string) =>
     signIn.mutate(usesPin ? { username, pin: pin ?? secret } : { username, password: secret }, {
@@ -90,6 +99,7 @@ export function SignIn() {
                     setRole(r);
                     setSecret("");
                     signIn.reset();
+                    setPicked((n) => n + 1);
                   }}
                   className={cx(
                     "flex min-h-[88px] items-start gap-3 rounded-card border bg-white p-4 text-left transition-colors",
@@ -122,7 +132,11 @@ export function SignIn() {
         </section>
 
         {role ? (
-          <section className="rounded-card border border-asphalt-200 bg-white p-4 md:p-6" aria-live="polite">
+          <section
+            ref={form}
+            className="scroll-mb-4 rounded-card border border-asphalt-200 bg-white p-4 md:p-6"
+            aria-live="polite"
+          >
             {usesPin ? (
               <LoaderPin
                 people={people}

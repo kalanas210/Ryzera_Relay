@@ -1,7 +1,8 @@
-"""Placing an order, and the 4:00 PM cutoff.
+"""Placing an order, changing it, and the 4:00 PM cutoff.
 
 Orders for the next delivery day close at 4:00 PM. An order that arrives later is still confirmed
-at once, but it goes on the following run, and the store is told so in the same moment.
+at once, but it goes on the following run, and the store is told so in the same moment. Until the
+cutoff a store can change what it ordered; from then on the order is the dispatcher's to plan.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from relay_api.clock import COLOMBO
 from relay_api.config import get_settings
 from relay_api.models import (
     AppUser,
+    AuditLog,
     CalendarDay,
     CaseType,
     Deferral,
@@ -50,11 +52,15 @@ def cutoff_for(run_date: date) -> datetime:
     return datetime(day_before.year, day_before.month, day_before.day, CUTOFF_HOUR, tzinfo=COLOMBO)
 
 
+def closed_run(db: Session, now: datetime) -> date | None:
+    """The run whose orders closed at 4:00 PM today, while new orders go on the one after it; None before then."""
+    first = next_operating_day(db, now.astimezone(COLOMBO).date())
+    return first if now >= cutoff_for(first) else None
+
+
 def delivery_day_for(db: Session, now: datetime) -> date:
     """The run a store is ordering for right now: tomorrow's until 4:00 PM, the one after that later on."""
-    today = now.astimezone(COLOMBO).date()
-    first = next_operating_day(db, today)
-    return first if now < cutoff_for(first) else next_operating_day(db, first)
+    return next_operating_day(db, closed_run(db, now) or now.astimezone(COLOMBO).date())
 
 
 def current_run(db: Session, now: datetime) -> date:
@@ -108,8 +114,9 @@ def place_order(
     else:
         units, kg, m3 = size
 
+    # Relay's receive time decides the run: a late order joins the run taking orders now, never one already closed
     late = now >= cutoff_for(requested_date)
-    run_date = next_operating_day(db, requested_date) if late else requested_date
+    run_date = delivery_day_for(db, now) if late else requested_date
     order = Order(
         id=uuid.uuid4(),
         order_ref=order_ref or order_ref_for(db, requested_date, outlet.outlet_id, temp),
@@ -151,7 +158,7 @@ def place_order(
                 notified_at=now,
             )
         )
-        notify_store(
+        told = notify_store(
             db,
             outlet.outlet_id,
             now,
@@ -161,7 +168,7 @@ def place_order(
             data={"order_ref": order.order_ref, "run_label": run_label},
         )
     else:
-        notify_store(
+        told = notify_store(
             db,
             outlet.outlet_id,
             now,
@@ -170,6 +177,56 @@ def place_order(
             body=f"Your {kind} order {order.order_ref} for {_day(requested_date)} is confirmed.",
             data={"order_ref": order.order_ref},
         )
+    if placed_by is not None:
+        told.read_at = now  # the store read it on the confirmation screen, so it is no news to them
+    return order
+
+
+class OrderClosed(Exception):
+    """A change Relay cannot take, in words for the store."""
+
+
+def change_order(db: Session, now: datetime, order: Order, lines: Sequence[LineInput], *, changed_by: AppUser) -> Order:
+    """The store's new counts, until the cutoff for the day it ordered for. Cases Waypoint carried onto the order
+    from an earlier short delivery are not the store's to remove: they stay on top of its own counts."""
+    if now >= cutoff_for(order.requested_date):
+        raise OrderClosed(
+            f"Orders for {_day(order.requested_date)} closed at 4:00 PM, so this order can't be changed now."
+        )
+    if order.status is not OrderStatus.RECEIVED or order.run_date != order.requested_date:
+        raise OrderClosed("The dispatcher is already planning this order, so it can't be changed now.")
+    carried = {line.case_type: (line.carried_qty, line.carried_from) for line in order.lines if line.carried_qty}
+    own = {line.case_type: line.qty for line in lines}
+    types = {c.code: c for c in db.scalars(select(CaseType))}
+    before = order.units
+    new_lines = []
+    for i, code in enumerate([*own, *(code for code in carried if code not in own)]):
+        carried_qty, carried_from = carried.get(code, (0, None))
+        new_lines.append(
+            OrderLine(
+                position=i,
+                case_type=code,
+                qty=own.get(code, 0) + carried_qty,
+                carried_qty=carried_qty,
+                carried_from=carried_from,
+            )
+        )
+    order.lines = new_lines
+    order.units = sum(line.qty for line in order.lines)
+    order.weight_kg = round(sum(line.qty * types[line.case_type].kg for line in order.lines), 1)
+    order.volume_m3 = round(sum(line.qty * types[line.case_type].m3 for line in order.lines), 3)
+    db.add(
+        AuditLog(
+            at=now,
+            actor_id=changed_by.id,
+            actor_label=changed_by.display_name,
+            action="order.changed",
+            entity="order",
+            entity_id=order.order_ref,
+            summary=f"{order.order_ref} changed by the store, from {before} to {order.units} cases",
+        )
+    )
+    db.flush()
     return order
 
 

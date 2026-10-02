@@ -68,9 +68,13 @@ export type FeedItem = {
   handled_at: string | null;
   handled_by: string | null;
   outcome: string;
+  /** A settled two-copy stop stays under Now until the dispatcher marks it reviewed. */
+  reviewed_at: string | null;
+  reviewed_by: string | null;
   shortfall: ShortfallDetail | null;
   /** What the item is about (trip_id, stop_id, conflict_id, backup_trip_id, and on a two-copy item the driver's own
-   *  records for the stop: arrived_at, delivered_at, receiver, photo_id). */
+   *  records for the stop: arrived_at, delivered_at, receiver, photo_id; once settled, whose copy stands:
+   *  resolution "driver", "dispatcher" or "backup"). */
   ref?: Record<string, string | null>;
 };
 
@@ -94,7 +98,8 @@ export type RunMarker = {
   planned: string;
   closes: string;
   recorded: string | null;
-  /** Rounded to 5 minutes; null once the stop is done. */
+  /** To the minute while the phone is in contact; while it is silent, the time the store reads, to 5 minutes.
+   *  Null once the stop is done. */
   estimate: string | null;
   /** The likely range, only while the driver is out of contact. */
   range: [string, string] | null;
@@ -109,6 +114,12 @@ export type RunMarker = {
   backup_of: string | null;
   /** While the stop has two copies: when the driver's phone says it was delivered, held until it is settled. */
   held: string | null;
+  /** While the stop has two copies: the driver answered no, so the delivery the phone holds was not made. */
+  denied: boolean;
+  /** The store's manager, who reads the same estimate. */
+  store_contact: string | null;
+  /** A moved stop that is the backup's alone: its two-copy question was settled by keeping the backup's copy. */
+  handed_over: boolean;
 };
 
 export type RunRow = {
@@ -124,13 +135,18 @@ export type RunRow = {
   status: string;
   planned_depart: string;
   departed_at: string | null;
+  /** When the driver tapped Finish trip, often at the last store's dock: never read as back at the hub. */
   finished_at: string | null;
+  /** When the hub expects the vehicle back, the same time the driver's phone shows. Relay never records the return. */
+  expected_back: string | null;
   /** The last time the driver's phone reached Relay, from a check-in or a record. */
   last_contact_at: string | null;
   out_of_contact: boolean;
   silent_minutes: number;
   position: string;
   caption: string;
+  /** Every stop still to come that is expected after its close, in words; empty when none is. */
+  risk: string;
   delivered: number;
   stops: number;
   /** 0 nothing, 1 watch, 2 needs the dispatcher. */
@@ -258,10 +274,19 @@ export function useBackupDecision(depot: Depot) {
   );
 }
 
+/** Settle a two-copy stop: keep the driver's delivery (the backup's copy is cancelled), or keep the backup's copy. */
 export function useSettle(depot: Depot) {
-  return useLiveChange<{ conflictId: string }>(depot, (input) =>
-    api.post<RunsPanel>(`/api/dispatch/live/conflicts/${input.conflictId}/settle`, {}, { role }),
+  return useLiveChange<{ conflictId: string; keep: "driver" | "backup" }>(depot, (input) =>
+    api.post<RunsPanel>(`/api/dispatch/live/conflicts/${input.conflictId}/settle`, { keep: input.keep }, { role }),
   );
+}
+
+/** A settled two-copy stop, read: it leaves Now for Earlier today. */
+export function useReview(depot: Depot) {
+  return useLiveChange<{ itemId: string }>(depot, async (input) => {
+    await api.post<void>(`/api/dispatch/live/feed/${input.itemId}/review`, {}, { role });
+    return undefined;
+  });
 }
 
 export function useHandle(depot: Depot) {

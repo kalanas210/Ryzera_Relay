@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,7 +46,9 @@ class StopEstimate:
     delivered_at: datetime | None = None
     receipt_at: datetime | None = None
     estimate: datetime | None = None
-    """Rounded to 5 minutes; None once the stop is done."""
+    """Rounded to 5 minutes, as the driver and the store read it ("around 6:35 AM"); None once the stop is done."""
+    exact: datetime | None = None
+    """The same estimate to the minute, as the dispatcher's desk shows it while the phone is in contact."""
     passed: bool = False
     """The estimate has gone by with no word; it is never pushed later."""
     range: tuple[datetime, datetime] | None = None
@@ -71,7 +73,7 @@ class RunEstimate:
     stops: list[StopEstimate] = field(default_factory=list)
 
 
-def driver_of(db: Session, trip: Trip, run_date) -> uuid.UUID | None:  # type: ignore[no-untyped-def]
+def driver_of(db: Session, trip: Trip, run_date: date) -> uuid.UUID | None:
     day = db.scalar(select(VehicleDay).where(VehicleDay.vehicle_id == trip.vehicle_id, VehicleDay.run_date == run_date))
     return day.driver_id if day else None
 
@@ -99,7 +101,7 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
     out = [StopEstimate(s.id, s.seq, s.outlet_id, s.status) for s in stops]
     by_stop = {e.stop_id: e for e in out}
     for event in events:
-        row = by_stop.get(event.stop_id)  # type: ignore[arg-type]
+        row = by_stop.get(event.stop_id) if event.stop_id is not None else None
         if row is None:
             continue
         if event.kind is FieldEventKind.ARRIVED:
@@ -144,6 +146,7 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
         times = estimate_after(net, conditions, brand, [r.outlet_id for r in remaining], last)
         for row, t in zip(remaining, times, strict=True):
             row.estimate = adapters.at_minutes(run_date, round5(t))
+            row.exact = adapters.at_minutes(run_date, t)
             row.passed = row.estimate < now
             if out_of_contact:
                 low, high = likely_range(t, silent, now_min)
@@ -152,8 +155,9 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
     else:
         for row, s in zip(out, stops, strict=True):
             if not row.done and row.arrived_at is None and s.expected_arrival is not None:
-                # the plan's expected time, read like every estimate: to 5 minutes
+                # the plan's expected time, read like every estimate: to 5 minutes, and to the minute on the desk
                 row.estimate = adapters.at_minutes(run_date, round5(adapters.minutes_of(run_date, s.expected_arrival)))
+                row.exact = adapters.at_minutes(run_date, adapters.minutes_of(run_date, s.expected_arrival))
         where = ("at_depot", None)
     return RunEstimate(
         trip_id=trip.id,

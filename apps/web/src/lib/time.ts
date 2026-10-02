@@ -102,8 +102,16 @@ export function roundTo5(value: string | Date): Date {
   return new Date(Math.round(ms / five) * five);
 }
 
+/** Whole numbers with thousands: a vehicle's weight limit, "6,180"; minutes, "270". */
 export const numberFormat = new Intl.NumberFormat("en-US");
-export const kg = (value: number) =>
-  `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)} kg`;
-export const m3 = (value: number) =>
-  `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(value)} m³`;
+const oneDecimal = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const threeDecimals = new Intl.NumberFormat("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+/** A weight as the data gives it, to a tenth of a kilo, with no unit: "1,171.0" (tables and meters). */
+export const kgValue = (value: number) => oneDecimal.format(value);
+/** A volume as the data gives it, to the litre, with no unit: "4.212". */
+export const m3Value = (value: number) => threeDecimals.format(value);
+/** One decimal: a vehicle's volume limit "7.0", litres of fuel "159.9". */
+export const tenths = (value: number) => oneDecimal.format(value);
+export const kg = (value: number) => `${kgValue(value)} kg`;
+export const m3 = (value: number) => `${m3Value(value)} m³`;

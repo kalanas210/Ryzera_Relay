@@ -7,8 +7,10 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from relay_api.clock import COLOMBO
 from relay_api.models import (
@@ -27,7 +29,8 @@ from relay_api.models import (
 from relay_api.schemas.common import Schema
 from relay_api.schemas.outlook import OutlookOut
 from relay_api.security import require
-from relay_api.services.ordering import current_run, cutoff_for
+from relay_api.services.notify import last_reminders, remind_to_order
+from relay_api.services.ordering import current_run, cutoff_for, next_operating_day
 from relay_api.services.outlook import capacity_outlook
 from relay_api.workspaces import ScopeDep
 
@@ -73,6 +76,10 @@ class NotOrdered(Schema):
     depot: str
     temps: list[str]
     pattern: str
+    reminded_at: datetime | None
+    """The last Remind for this run, if the dispatcher sent one."""
+    phone: str | None
+    """The store manager's number, when the store's record has one; Call needs it."""
 
 
 class ChilledSummary(Schema):
@@ -184,18 +191,10 @@ def queue(scope: ScopeDep, _user: Dispatcher, run_date: Annotated[date | None, Q
         ).all()
     ]
 
-    expected: dict[str, set[str]] = {}
-    for s in db.scalars(select(OrderStream).where(OrderStream.dow_name == day.strftime("%a"))):
-        if outlets[s.outlet_id].brand == "Fresh":
-            expected.setdefault(s.outlet_id, set()).add(s.temp)
-    ordered = {o.outlet_id for o in db.scalars(select(Order).where(Order.requested_date == day))}
+    expected = _expected_fresh(db, day, outlets)
     in_time = {o.outlet_id for o in orders}
-    weekday = _day_name(day)
-
-    def pattern(temps: set[str]) -> str:
-        what = "dry and chilled" if len(temps) == 2 else "dry only" if "ambient" in temps else "chilled only"
-        return f"Orders {what} on {weekday}s"
-
+    reminded = last_reminders(db, day, now)
+    phones = _store_phones(db)
     not_ordered = [
         NotOrdered(
             outlet_id=oid,
@@ -203,10 +202,11 @@ def queue(scope: ScopeDep, _user: Dispatcher, run_date: Annotated[date | None, Q
             short_name=outlets[oid].short_name,
             depot=outlets[oid].depot,
             temps=sorted(temps),
-            pattern=pattern(temps),
+            pattern=f"Orders {_what(temps)} on {_day_name(day)}s",
+            reminded_at=reminded[oid].astimezone(COLOMBO) if oid in reminded else None,
+            phone=phones.get(oid),
         )
-        for oid, temps in sorted(expected.items())
-        if oid not in ordered
+        for oid, temps in _not_ordered(db, day, expected).items()
     ]
 
     days = {vd.vehicle_id: vd for vd in db.scalars(select(VehicleDay).where(VehicleDay.run_date == day))}
@@ -243,6 +243,77 @@ def queue(scope: ScopeDep, _user: Dispatcher, run_date: Annotated[date | None, Q
 
 def _day_name(d: date) -> str:
     return d.strftime("%A")
+
+
+def _expected_fresh(db: Session, day: date, outlets: dict[str, Outlet]) -> dict[str, set[str]]:
+    """The Fresh outlets that usually order on this weekday, with the temperatures they order."""
+    expected: dict[str, set[str]] = {}
+    for s in db.scalars(select(OrderStream).where(OrderStream.dow_name == day.strftime("%a"))):
+        if outlets[s.outlet_id].brand == "Fresh":
+            expected.setdefault(s.outlet_id, set()).add(s.temp)
+    return expected
+
+
+def _not_ordered(db: Session, day: date, expected: dict[str, set[str]]) -> dict[str, set[str]]:
+    """Expected Fresh outlets with no order for the run yet, in outlet order."""
+    ordered = {o.outlet_id for o in db.scalars(select(Order).where(Order.requested_date == day))}
+    return {oid: temps for oid, temps in sorted(expected.items()) if oid not in ordered}
+
+
+def _what(temps: set[str]) -> str:
+    return "dry and chilled" if len(temps) == 2 else "dry only" if "ambient" in temps else "chilled only"
+
+
+def _usual(temps: set[str]) -> str:
+    """What the store's reminder says it usually sends: "dry and chilled orders", "chilled order"."""
+    return "dry and chilled orders" if len(temps) == 2 else "dry order" if "ambient" in temps else "chilled order"
+
+
+def _store_phones(db: Session) -> dict[str, str]:
+    return {
+        u.outlet_id: u.phone
+        for u in db.scalars(select(AppUser).where(AppUser.role == Role.STORE_MANAGER, AppUser.phone.is_not(None)))
+        if u.outlet_id and u.phone
+    }
+
+
+class RemindIn(BaseModel):
+    outlet_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class Reminded(Schema):
+    outlet_id: str
+    reminded_at: datetime
+
+
+@router.post("/reminders", response_model=list[Reminded])
+def remind(body: RemindIn, scope: ScopeDep, _user: Dispatcher) -> list[Reminded]:
+    """DSP-01 Remind and Remind all: a notice in each store's Relay app with the 4:00 PM cutoff. Only stores still
+    missing an order for the run are reminded; one that ordered meanwhile is left out of the answer."""
+    db, now = scope.db, scope.now
+    day = current_run(db, now)
+    cutoff = cutoff_for(day)
+    if now >= cutoff:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Orders for {_day_name(day)} closed at 4:00 PM. Late orders go on the next run by themselves.",
+        )
+    outlets = {o.outlet_id: o for o in db.scalars(select(Outlet))}
+    missing = _not_ordered(db, day, _expected_fresh(db, day, outlets))
+    last = last_reminders(db, day, now)
+    then = next_operating_day(db, day)
+    out = [
+        Reminded(
+            outlet_id=oid,
+            reminded_at=remind_to_order(
+                db, oid, now, run_date=day, cutoff=cutoff, then=then, usual=_usual(missing[oid]), last=last.get(oid)
+            ).astimezone(COLOMBO),
+        )
+        for oid in dict.fromkeys(body.outlet_ids)
+        if oid in missing
+    ]
+    db.commit()
+    return out
 
 
 @router.get("/outlook", response_model=OutlookOut)

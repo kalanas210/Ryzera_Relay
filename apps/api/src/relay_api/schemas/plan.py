@@ -78,6 +78,10 @@ class DeferralOut(Schema):
     to_date: date
     confirmed_at: datetime | None
     store_notice: str
+    notified_at: datetime | None = None
+    """When the store was sent the notice: the plan's publish."""
+    acknowledged_at: datetime | None = None
+    """When the store pressed Got it on the notice: the dispatcher's "Seen 6:41 PM"."""
 
 
 class WaitingOut(Schema):
@@ -103,6 +107,11 @@ class PlanOut(Schema):
     proposed_at: datetime | None
     published_at: datetime | None
     edited_at: datetime | None
+    """The last hand move, while the board differs from Relay's proposal."""
+    ready_at: datetime | None
+    """When the draft last became publishable: every rule kept and every waiting order given a reason."""
+    fleet_changed_at: datetime | None
+    """A vehicle went to the workshop, back into service or onto standby after the proposal."""
 
 
 class BoardOut(Schema):
@@ -126,3 +135,12 @@ class FitOut(Schema):
     trip_no: int
     fits: bool
     hint: str
+    weight_kg: float
+    """What the trip would carry with the dragged orders on it."""
+    volume_m3: float
+    weight_cap_kg: float
+    volume_cap_m3: float
+    stop: int
+    """Where the first dragged order would ride, counting from 1, once Relay puts the stops in order."""
+    current: bool
+    """The trip the dragged orders are on now."""

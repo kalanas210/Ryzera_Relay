@@ -1,5 +1,5 @@
 """The dock: tonight's loads at a hub (LDR-01), one load in the order it goes on the truck (LDR-02), a shortfall
-flagged for the dispatcher and his answer (LDR-03), and the handover the driver accepts (LDR-04).
+flagged for the dispatcher and the answer (LDR-03), and the handover the driver accepts (LDR-04).
 
 Publishing writes the load lines: one per case type per stop, the last stop first and the heaviest case type
 first within a stop. Every count on these screens is a sum over those lines, so the dock, the dispatcher and the
@@ -52,6 +52,7 @@ from relay_api.models import (
 from relay_api.schemas.dock import (
     DepartedOut,
     DockNoticeOut,
+    GroupState,
     HandoverOut,
     HandoverStopOut,
     LoadCardOut,
@@ -450,6 +451,7 @@ def trip_load(db: Session, trip: Trip) -> TripLoadOut:
     for stop in in_order:
         order_ref = load.refs[stop.id]
         lines = lines_of[stop.id]
+        state: GroupState
         if lines and all(line.status in DONE for line in lines):
             state = "done"
         elif stop.id == loading_now:
@@ -514,7 +516,7 @@ def _line(look: Lookup, line: LoadLine, shortfall: Shortfall | None) -> LoadLine
         case_type=line.case_type,
         qty=line.planned_qty,
         loaded=line.loaded_qty,
-        status=line.status.value,  # type: ignore[arg-type]
+        status=line.status.value,
         changed_by_plan=line.changed_by_plan,
         shortfall=_shortfall(look, shortfall) if shortfall else None,
     )
@@ -530,11 +532,11 @@ def _shortfall(look: Lookup, s: Shortfall) -> ShortfallOut:
     manager = look.store_manager(stop.outlet_id) if stop else None
     return ShortfallOut(
         id=s.id,
-        kind=s.kind.value,  # type: ignore[arg-type]
+        kind=s.kind.value,
         qty=s.qty,
         flagged_at=s.flagged_at,
         flagged_by=look.name(s.flagged_by),
-        decision=s.decision.value if s.decision else None,  # type: ignore[arg-type]
+        decision=s.decision.value if s.decision else None,
         decided_at=s.decided_at,
         decided_by=look.name(s.decided_by),
         added_to_order_ref=s.added_to_order_ref,
@@ -589,7 +591,7 @@ def _open_trip(db: Session, line: LoadLine) -> Trip:
         raise DockError(f"{trip.vehicle_id} has left the hub.")
     handover = db.scalar(select(Handover).where(Handover.trip_id == trip.id).execution_options(populate_existing=True))
     if handover is not None and handover.completed_at:
-        raise DockError("This load is marked complete. Ask the dispatcher to reopen it.")
+        raise DockError("This load is marked complete, so its lines can no longer change.")
     return trip
 
 

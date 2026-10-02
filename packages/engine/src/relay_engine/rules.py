@@ -325,7 +325,8 @@ def _report(
 
 
 def fit_hint(ctx: Context, order: Order, trip: Trip, trips: Sequence[Trip]) -> tuple[bool, str]:
-    """While an order is dragged: would it fit on this trip, and if not, the first reason in a few words."""
+    """While an order is dragged: would it fit on this trip, and if not, the reason in a few words. A trip that
+    serves another district says so before anything else: no change of load would make it fit."""
     candidate = Trip(trip.vehicle_id, trip.trip_no, [*trip.order_ids, order.order_id], trip.depart)
     others = [t for t in trips if t.key != trip.key]
     reports, _ = evaluate(ctx, [*others, candidate])
@@ -335,7 +336,7 @@ def fit_hint(ctx: Context, order: Order, trip: Trip, trips: Sequence[Trip]) -> t
         return True, "Fits"
     first = broken[0]
     network = ctx.network
-    if first.rule == 6 and trip.order_ids:
+    if trip.order_ids and any(r.rule == 6 for r in broken):
         existing = ctx.orders[trip.order_ids[0]]
         return False, f"Serves {network.outlets[existing.outlet_id].district} only"
     if {r.rule for r in broken} >= {1, 2}:

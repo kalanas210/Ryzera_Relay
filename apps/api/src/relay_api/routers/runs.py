@@ -1,5 +1,6 @@
 """Live runs on the dispatcher's desk (DSP-04 desktop, DEG-03, DEG-05): the runs panel, moving a stop to a backup
-while its driver is silent, keeping or cancelling that backup, settling a two-copy stop, and marking feed items."""
+while its driver is silent, keeping or cancelling that backup, settling a two-copy stop and marking it reviewed, and
+marking feed items handled."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from relay_api.models import AppUser, Conflict, FeedItem, Role, Stop, Trip
+from relay_api.models import AppUser, Conflict, FeedItem, FeedKind, Role, Stop, Trip
 from relay_api.security import require
 from relay_api.services import backup, field, runs
 from relay_api.workspaces import Scope, ScopeDep
@@ -83,11 +84,23 @@ def decide_backup(item_id: uuid.UUID, body: BackupIn, scope: ScopeDep, user: Dis
     return runs.panel(scope.db, scope.now, item.depot).as_dict()
 
 
+class SettleIn(BaseModel):
+    keep: Literal["driver", "backup"] = "driver"
+    """Whose copy stands: the driver's delivery (the backup's copy is cancelled), or the backup's (the driver's
+    records for the stop are set aside, as when the driver answered no)."""
+
+
 @router.post("/conflicts/{conflict_id}/settle")
-def settle(conflict_id: uuid.UUID, scope: ScopeDep, user: Dispatcher) -> dict[str, Any]:
-    """Cancel the backup's copy of a two-copy stop: the driver's delivery stands."""
+def settle(conflict_id: uuid.UUID, scope: ScopeDep, user: Dispatcher, body: SettleIn | None = None) -> dict[str, Any]:
+    """Settle a two-copy stop: keep the driver's delivery and cancel the backup's copy, or keep the backup's copy."""
     conflict: Conflict = _get(scope, Conflict, conflict_id, "conflict")
-    field.settle(scope.db, scope.now, conflict, by=user, how="dispatcher")
+    if body is not None and body.keep == "backup":
+        try:
+            field.keep_backup(scope.db, scope.now, conflict, by=user)
+        except field.FieldError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    else:
+        field.settle(scope.db, scope.now, conflict, by=user, how="dispatcher")
     scope.db.commit()
     stop: Stop = _get(scope, Stop, conflict.stop_id, "stop")
     trip: Trip = _get(scope, Trip, stop.trip_id, "trip")
@@ -106,6 +119,19 @@ def handle(item_id: uuid.UUID, body: HandleIn, scope: ScopeDep, user: Dispatcher
         item.handled_at = scope.now
         item.handled_by = user.id
         item.outcome = item.outcome or ("Marked as handled." + (f" {body.note.strip()}" if body.note.strip() else ""))
+    scope.db.commit()
+
+
+@router.post("/feed/{item_id}/review", status_code=status.HTTP_204_NO_CONTENT)
+def review(item_id: uuid.UUID, scope: ScopeDep, user: Dispatcher) -> None:
+    """Mark a settled two-copy stop reviewed: the dispatcher has read how it was settled, so it leaves Now for
+    Earlier today with the time. A second review changes nothing."""
+    item: FeedItem = _get(scope, FeedItem, item_id, "item")
+    if item.kind is not FeedKind.CONFLICT or item.handled_at is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only a settled two-copy stop is marked reviewed.")
+    if not item.ref.get("reviewed_at"):
+        # a new dict, so the change to the JSON column is seen
+        item.ref = {**item.ref, "reviewed_at": scope.now.isoformat(), "reviewed_by": str(user.id)}
     scope.db.commit()
 
 

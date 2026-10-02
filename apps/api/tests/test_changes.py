@@ -67,17 +67,17 @@ def test_the_later_trips_stores_hear_their_new_time(new_copy: Callable[[], Copy]
 
 def test_a_loaded_truck_keeps_its_stop_order(new_copy: Callable[[], Copy]) -> None:
     copy = new_copy()
-    copy.jump("handover")
-    copy.sign_in("rizwan", "loader")
+    copy.jump("2026-04-08T03:05:00+05:30")
     copy.sign_in("nuwan", "dispatcher")
     board = _board(copy)
     path = f"/api/dispatch/plan/{board['plan']['id']}/trips/VEH045/1/reorder"
     body = _earlier(_trip(board, "VEH045", 1), 2)
     copy.post(f"{path}/preview", body, "dispatcher")  # still open at the dock
 
+    copy.jump("handover")  # Rizwan marks the load complete a minute before Kasun reaches the dock
+    copy.sign_in("rizwan", "loader")
     tonight = copy.get("/api/dock/loads", "loader")
-    card = next(c for c in tonight["loading"] + tonight["to_load"] if c["vehicle_id"] == "VEH045")
-    copy.post(f"/api/dock/trips/{card['trip_id']}/complete", None, "loader")
+    assert any(c["vehicle_id"] == "VEH045" for c in tonight["ready"])
     # the board stops offering a new order for the packed truck, and only for it
     board = _board(copy)
     assert _trip(board, "VEH045", 1)["load_locked"]

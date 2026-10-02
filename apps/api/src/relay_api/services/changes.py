@@ -9,6 +9,7 @@ vehicle is refused, and so is one for a truck that is already loaded.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -355,7 +356,7 @@ def reorder(
     return change
 
 
-def _reload_order(db: Session, trip: Trip, moved_refs: set[str], orders: dict) -> None:  # type: ignore[type-arg]
+def _reload_order(db: Session, trip: Trip, moved_refs: set[str], orders: dict[uuid.UUID, Order]) -> None:
     """Loading order follows the new stop order: the last stop first, heaviest case type first. A line already on
     the truck for a stop that moved is marked, because it may sit in the wrong place."""
     ranks = {c.code: c.load_rank for c in db.scalars(select(CaseType))}

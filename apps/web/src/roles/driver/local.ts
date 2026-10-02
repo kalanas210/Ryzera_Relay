@@ -5,8 +5,9 @@
  *  Records only move a stop forward (pending, then arrived, then delivered or not delivered); a record Relay refused
  *  changes nothing. A delivery that clashed with an office change (the stop was moved to a backup while the phone
  *  was silent) still shows as delivered here: it is the driver's own record, and the question card asks about it.
- *  Only a "no" to that question takes it back. The same holds when Relay has the clashing record and this phone does
- *  not (a demo jump played the stop): the question carries it. */
+ *  A "no" cancels nothing either: the stop waits for the dispatcher, and only a settlement that keeps the other
+ *  vehicle's copy takes the record back. The same holds when Relay has the clashing record and this phone does not
+ *  (a demo jump played the stop): the question carries it. */
 import type { FieldRecord, Outcome, PhotoRecord, Queued, Sent } from "@/offline/outbox";
 import type { DriverRun, DriverStop, DriverTrip, Question, StopStatus } from "./types";
 
@@ -92,20 +93,29 @@ export function localAnswers(items: LocalItem[]): Map<string, { answer: "yes" | 
   return out;
 }
 
-/** Stops whose question was answered "no", here or on Relay: the phone's record for them is set aside. */
-function answeredNo(run: DriverRun, items: LocalItem[]): Set<string> {
+/** Open questions the driver answered "no", here or on Relay. Nothing is cancelled on a "no": the record stays, the
+ *  backup carries on, and the driver waits at the dock for the dispatcher's call. */
+export function answeredNo(run: DriverRun, items: LocalItem[]): Question[] {
   const answers = localAnswers(items);
-  const out = new Set<string>();
-  for (const q of run.questions) {
-    if (q.answer === "no" || answers.get(q.id)?.answer === "no") out.add(q.stop_id);
-  }
-  return out;
+  return run.questions.filter(
+    (q) => q.status !== "resolved" && (answers.get(q.id)?.answer ?? (q.answer === "no" ? "no" : null)) === "no",
+  );
+}
+
+/** Stops whose two-copy question was settled without Relay keeping this phone's delivery: the office kept the
+ *  other vehicle's copy, so the phone's own records for them are set aside. */
+function settledElsewhere(run: DriverRun): Set<string> {
+  const relay = new Map([run.trip, ...run.later].flatMap((t) => t?.stops ?? []).map((s) => [s.stop_id, s.status]));
+  return new Set(
+    run.questions.filter((q) => q.status === "resolved" && relay.get(q.stop_id) !== "delivered").map((q) => q.stop_id),
+  );
 }
 
 export function overlay(run: DriverRun, items: LocalItem[]): DriverRun {
   const records = usable(items);
-  const setAside = answeredNo(run, items);
-  const asked = run.questions.filter((q) => q.status !== "resolved" && q.delivered_at && !setAside.has(q.stop_id));
+  const setAside = settledElsewhere(run);
+  // an open question keeps the driver's delivery, answered or not: only the office's decision takes it back
+  const asked = run.questions.filter((q) => q.status !== "resolved" && q.delivered_at);
   if (!records.length && !asked.length) return run;
   const apply = (trip: DriverTrip): DriverTrip => applyQuestions(applyTrip(trip, records, setAside), asked);
   return { ...run, trip: run.trip ? apply(run.trip) : null, later: run.later.map(apply) };
@@ -269,10 +279,16 @@ export function ownStops(trip: DriverTrip): DriverStop[] {
   return trip.stops.filter((s) => s.status !== "moved" && s.status !== "cancelled");
 }
 
-/** When the stop's records saved with no signal reached Relay: this phone's own answer, or Relay's for a stop the
- *  phone did not record itself. */
+/** When the stop's records saved with no signal had all reached Relay: the later of this phone's own answer and
+ *  Relay's, which also covers what a demo jump recorded for the driver (an arrival this phone sent at 5:37 and a
+ *  delivery that reached the office at 7:14 make the stop's 7:14). */
 export function sentAt(stop: DriverStop, local: StopLocal): string | null {
-  return local.sentAt ?? stop.sent_at ?? null;
+  return latest([local.sentAt, stop.sent_at]);
+}
+
+/** The latest of some times, whichever way each is written; null when there is none. */
+export function latest(times: (string | null | undefined)[]): string | null {
+  return times.reduce<string | null>((best, t) => (t && (!best || Date.parse(t) > Date.parse(best)) ? t : best), null);
 }
 
 /** The open question about a stop, if Relay has asked one. */
@@ -284,6 +300,11 @@ export function questionFor(run: DriverRun, stopId: string): Question | undefine
 export function awaitingAnswer(run: DriverRun, items: LocalItem[], stopId: string): boolean {
   const q = questionFor(run, stopId);
   return Boolean(q && !q.answer && !localAnswers(items).has(q.id));
+}
+
+/** The driver said "no" about this stop and the dispatcher has not settled it yet. */
+export function waitingForCall(run: DriverRun, items: LocalItem[], stopId: string): boolean {
+  return answeredNo(run, items).some((q) => q.stop_id === stopId);
 }
 
 export type WindowState = { state: "soon" | "open" | "closing" | "closed"; minutes: number; closesAt: Date };
@@ -313,6 +334,12 @@ export function windowState(runDate: string, open: string, close: string, now: D
 /** A scenario time stamped to the whole minute, as the driver reads the clock. */
 export function minuteIso(now: Date): string {
   return new Date(minute(now) * 60_000).toISOString();
+}
+
+/** A stop still to come whose expected time has gone by on the clock. The phone never pushes Relay's time later, so
+ *  the screens say it has passed rather than show a time behind the clock as if it were still ahead. */
+export function expectedPassed(stop: Pick<DriverStop, "status" | "expected">, now: Date): boolean {
+  return stop.status === "pending" && stop.expected !== null && minute(now) > minute(round5(stop.expected));
 }
 
 /** Round to the nearest 5 minutes: Expected times are always "around". */

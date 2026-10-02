@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api/client";
-import type { Feed, FeedItem, RunMarker, RunRow } from "./api";
+import type { Feed, FeedItem, RunMarker, RunRow, ShortfallDetail } from "./api";
 import { FeedEnvProvider, FeedGroups } from "./Feed";
 import { Directory } from "./model";
 
@@ -26,6 +26,9 @@ function marker(seq: number, place: string, over: Partial<RunMarker> = {}): RunM
     moved_to: null,
     backup_of: null,
     held: null,
+    denied: false,
+    store_contact: null,
+    handed_over: false,
     ...over,
   };
 }
@@ -44,11 +47,13 @@ const kasun: RunRow = {
   planned_depart: at("03:29"),
   departed_at: at("03:33"),
   finished_at: null,
+  expected_back: null,
   last_contact_at: at("05:41"),
   out_of_contact: true,
   silent_minutes: 24,
   position: "Probably still unloading at Mawanella.",
   caption: "",
+  risk: "",
   delivered: 1,
   stops: 4,
   attention: 2,
@@ -60,6 +65,7 @@ const kasun: RunRow = {
       estimate: at("06:35"),
       range: [at("06:05"), at("07:05")],
       closes: at("07:45"),
+      store_contact: "Dilani Jayawardena",
     }),
     marker(4, "Aranayake", { estimate: at("07:15"), range: [at("06:45"), at("07:45")] }),
   ],
@@ -76,6 +82,8 @@ function item(over: Partial<FeedItem>): FeedItem {
     handled_at: null,
     handled_by: null,
     outcome: "",
+    reviewed_at: null,
+    reviewed_by: null,
     shortfall: null,
     ...over,
   };
@@ -83,8 +91,8 @@ function item(over: Partial<FeedItem>): FeedItem {
 
 let client: QueryClient;
 
-function show(items: FeedItem[], rows: RunRow[] = [kasun]) {
-  const feed: Feed = { depot: "Kandy", depot_label: "Kandy hub", run_date: "2026-04-08", now: items, earlier: [] };
+function show(items: FeedItem[], rows: RunRow[] = [kasun], earlier: FeedItem[] = []) {
+  const feed: Feed = { depot: "Kandy", depot_label: "Kandy hub", run_date: "2026-04-08", now: items, earlier };
   return render(
     <QueryClientProvider client={client}>
       <FeedEnvProvider
@@ -93,7 +101,7 @@ function show(items: FeedItem[], rows: RunRow[] = [kasun]) {
           depotLabel: "Kandy hub",
           desk: true,
           rows,
-          items,
+          items: [...items, ...earlier],
           dir: new Directory(undefined),
           allInContact: false,
           onMove: () => {},
@@ -125,9 +133,12 @@ describe("a silent run in the feed", () => {
     expect(screen.getByText("likely 6:05 to 7:05")).toBeInTheDocument();
     expect(screen.getByText("Aranayake's likely range already runs past its 7:30 AM close.")).toBeInTheDocument();
     expect(
-      screen.getByText("Hemmathagama sees: Arriving around 6:35 AM. Last heard from Kasun 5:41 AM."),
+      screen.getByText("Dilani sees: Arriving around 6:35 AM. Last heard from Kasun 5:41 AM."),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Move" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^Move stop/ }).map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Move stop 3, Hemmathagama",
+      "Move stop 4, Aranayake",
+    ]);
     expect(screen.queryByRole("button", { name: /call/i })).toBeNull();
   });
 });
@@ -191,10 +202,134 @@ describe("decisions the feed asks for", () => {
     expect(screen.getByRole("button", { name: "Cancel VEH060's copy" })).toBeDisabled();
     unmount();
 
-    show([twoCopies({ conflict_id: "c-1", trip_id: "trip-045", stop_id: "stop-4" })], [conflicted, backup]);
+    const ref = { conflict_id: "c-1", trip_id: "trip-045", stop_id: "stop-4" };
+    const second = show([twoCopies(ref)], [conflicted, backup]);
     fireEvent.click(screen.getByRole("button", { name: "Cancel VEH060's copy" }));
     await waitFor(() =>
-      expect(post).toHaveBeenCalledWith("/api/dispatch/live/conflicts/c-1/settle", {}, { role: "dispatcher" }),
+      expect(post).toHaveBeenCalledWith(
+        "/api/dispatch/live/conflicts/c-1/settle",
+        { keep: "driver" },
+        { role: "dispatcher" },
+      ),
     );
+    second.unmount();
+
+    // once Kasun says it was not delivered, keeping the backup's copy comes first
+    const denied = {
+      ...kasun,
+      markers: kasun.markers.map((m) => (m.seq === 4 ? { ...m, state: "conflict" as const, denied: true } : m)),
+    };
+    show([twoCopies(ref)], [denied, backup]);
+    const [first] = screen.getAllByRole("button", { name: /VEH060's copy$/ });
+    expect(first).toHaveTextContent("Keep VEH060's copy");
+    fireEvent.click(first!);
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/api/dispatch/live/conflicts/c-1/settle",
+        { keep: "backup" },
+        { role: "dispatcher" },
+      ),
+    );
+  });
+});
+
+describe("the record of what was decided", () => {
+  it("names the store's manager, or the store when Relay has nobody there", () => {
+    const silence = item({ title: "No contact from Kasun since 5:41 AM", ref: { trip_id: "trip-045" } });
+    const nobody = { ...kasun, markers: kasun.markers.map((m) => ({ ...m, store_contact: null })) };
+    show([silence], [nobody]);
+    expect(screen.getByText(/^Hemmathagama sees: Arriving around 6:35 AM/)).toBeInTheDocument();
+  });
+
+  it("keeps a settled two-copy stop under Now until it is marked reviewed", async () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue(undefined);
+    const settled = item({
+      id: "conflict-1",
+      kind: "conflict",
+      title: "Stop 4 conflict resolved",
+      created_at: at("07:14"),
+      handled_at: at("07:15"),
+      outcome: "The driver answered yes: delivered. The backup's copy is cancelled.",
+      ref: {
+        conflict_id: "c-1",
+        trip_id: "trip-045",
+        stop_id: "stop-4",
+        photo_id: "photo-1",
+        delivered_at: at("07:09"),
+      },
+    });
+    const { unmount } = show([], [kasun], [settled]);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Now"]);
+    expect(screen.getByRole("img", { name: "Kasun's photo, 7:09 AM" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/api/dispatch/live/feed/conflict-1/review", {}, { role: "dispatcher" }),
+    );
+    unmount();
+
+    show([], [kasun], [{ ...settled, reviewed_at: at("07:20"), reviewed_by: "Nuwan Perera" }]);
+    expect(screen.getByText("Earlier today")).toBeInTheDocument();
+    expect(screen.getByText(/marked it reviewed at 7:20 AM/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Stop 4 conflict resolved/ }));
+    expect(screen.getByText("Reviewed 7:20 AM")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mark reviewed" })).toBeNull();
+  });
+
+  it("shows the dock's photo of damaged cases in a decided shortfall", () => {
+    const shortfall: ShortfallDetail = {
+      id: "s-1",
+      kind: "damaged",
+      qty: 2,
+      planned: 30,
+      case_type: "RD",
+      case_name: "Rice and dhal",
+      temp_label: "Dry",
+      vehicle_id: "VEH045",
+      trip_no: 1,
+      stop_seq: 3,
+      order_ref: "ORD0098595",
+      outlet_id: "OUT117",
+      place: "Hemmathagama",
+      flagged_at: at("02:47"),
+      flagged_by: "Mohamed Rizwan",
+      run_date: "2026-04-08",
+      departs: at("03:40"),
+      trip_stops: 4,
+      driver: "Kasun Bandara",
+      stop_cases: 102,
+      next_order_ref: "ORD0098747",
+      next_day: "2026-04-09",
+      window: "4:00 to 7:45 AM",
+      store_contact: "Dilani Jayawardena",
+      decision: "send_short",
+      decided_at: at("02:52"),
+      decided_by: "Nuwan Perera",
+      added_to_order_ref: "ORD0098747",
+      store_seen_at: null,
+      completed_at: null,
+      loaded_cases: 0,
+      planned_cases: 0,
+      accepted_at: null,
+      accepted_by: null,
+      hub_spare: null,
+      next_delivery_at: null,
+      photo_id: "photo-2",
+    };
+    show(
+      [],
+      [kasun],
+      [
+        item({
+          kind: "shortfall",
+          title: "Shortfall on VEH045, stop 3",
+          created_at: at("02:47"),
+          handled_at: at("02:52"),
+          outcome: "Send short, add to Thursday.",
+          shortfall,
+        }),
+      ],
+    );
+    // the only item in the feed opens on the desk
+    expect(screen.getByRole("img", { name: "The damaged rice and dhal cases, from the dock" })).toBeInTheDocument();
   });
 });
