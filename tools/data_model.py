@@ -124,7 +124,7 @@ def main() -> None:
                 if column.primary_key:
                     notes.append("primary key")
                 for fk in column.foreign_keys:
-                    notes.append(f"→ `{fk.column.table.name}.{fk.column.name}`")
+                    notes.append(f"references `{fk.column.table.name}.{fk.column.name}`")
                 if column.nullable and not column.primary_key:
                     notes.append("optional")
                 field_doc = _doc(model, column.key)

@@ -18,7 +18,7 @@ data
 docs
 tools
 e2e/tests
-Challenge Booklet.pdf
+*.pdf
 .env
 .env.*
 !.env.example

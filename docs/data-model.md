@@ -21,6 +21,8 @@ erDiagram
     outlet ||--o{ outlet_dwell : "outlet_id"
     outlet ||--o{ service_history : "outlet_id"
     outlet ||--o{ usual_stop : "outlet_id"
+    outlook_forecast ||--o{ outlook_day : "depot"
+    outlook_forecast ||--o{ outlook_week : "depot"
     vehicle ||--o{ usual_run : "vehicle_id"
     vehicle ||--o{ usual_stop : "vehicle_id"
     calendar_day {
@@ -87,6 +89,42 @@ erDiagram
         numeric p10
         numeric p50
         numeric p90
+    }
+    outlook_day {
+        varchar depot PK
+        date date PK
+        smallint chilled_orders
+        numeric chilled_kg
+        numeric chilled_m3
+        smallint needed
+        jsonb in_workshop
+        smallint served_one_fewer
+    }
+    outlook_forecast {
+        varchar depot PK
+        date forecast_updated
+        smallint baseline_year
+        smallint baseline_first_week
+        smallint baseline_last_week
+        smallint backtest_year
+        smallint backtest_first_week
+        smallint backtest_last_week
+        numeric backtest_pct
+        numeric last_year_pct
+        numeric ordinary_week_m3
+        numeric record_week_m3
+        smallint record_year
+        smallint record_week
+        numeric tech_order_max_m3
+    }
+    outlook_week {
+        varchar depot PK
+        smallint iso_year PK
+        smallint iso_week PK
+        numeric chilled_m3
+        numeric dry_m3
+        numeric style_m3
+        numeric tech_m3
     }
     road_condition {
         varchar district PK
@@ -198,7 +236,7 @@ What a hub's store holds of a case type for a run beyond the night's picks, and 
 | Column | Type | Notes |
 |---|---|---|
 | `depot` | varchar | primary key |
-| `case_type` | varchar | primary key; → `case_type.code` |
+| `case_type` | varchar | primary key; references `case_type.code` |
 | `run_date` | date | primary key |
 | `spare` | integer |  |
 | `next_delivery_at` | datetime | optional |
@@ -210,7 +248,7 @@ A store that orders on this weekday, with this temperature, in nearly every week
 | Column | Type | Notes |
 |---|---|---|
 | `dow_name` | varchar | primary key |
-| `outlet_id` | varchar | primary key; → `outlet.outlet_id` |
+| `outlet_id` | varchar | primary key; references `outlet.outlet_id` |
 | `temp` | varchar | primary key |
 
 ### `outlet`
@@ -223,7 +261,7 @@ Base class used for declarative class definitions. The :class:`_orm.DeclarativeB
 | `name` | varchar |  |
 | `short_name` | varchar |  |
 | `brand` | varchar |  |
-| `district` | varchar | → `district.name` |
+| `district` | varchar | references `district.name` |
 | `depot` | varchar |  |
 | `dock_type` | varchar |  |
 | `parking_constraint` | varchar |  |
@@ -237,11 +275,62 @@ Each store's usual unloading time in minutes, from the route history (Relay's Ex
 
 | Column | Type | Notes |
 |---|---|---|
-| `outlet_id` | varchar | primary key; → `outlet.outlet_id` |
+| `outlet_id` | varchar | primary key; references `outlet.outlet_id` |
 | `monsoon` | boolean | primary key |
 | `p10` | numeric |  |
 | `p50` | numeric |  |
 | `p90` | numeric |  |
+
+### `outlook_day`
+
+One open day at a depot: its forecast chilled orders, the fewest refrigerated vehicles that carry them all on Relay's clock (exact search under the plan's rules), and the refrigerated vehicles out of service that day.
+
+| Column | Type | Notes |
+|---|---|---|
+| `depot` | varchar | primary key; references `outlook_forecast.depot` |
+| `date` | date | primary key |
+| `chilled_orders` | smallint |  |
+| `chilled_kg` | numeric |  |
+| `chilled_m3` | numeric |  |
+| `needed` | smallint |  |
+| `in_workshop` | jsonb | Vehicle IDs. |
+| `served_one_fewer` | smallint | optional; Chilled orders that one refrigerated vehicle fewer than needed can serve, on the days the search counted it. |
+
+### `outlook_forecast`
+
+A depot's demand forecast for the capacity outlook (DSP-05): when it was made, what an ordinary week is, and how well the method did. The forecast (the Datathon's method) and the fewest-vehicles search need the order history, which the app never holds, so the seed carries their answers. A depot without a row has no outlook.
+
+| Column | Type | Notes |
+|---|---|---|
+| `depot` | varchar | primary key |
+| `forecast_updated` | date |  |
+| `baseline_year` | smallint |  |
+| `baseline_first_week` | smallint |  |
+| `baseline_last_week` | smallint | The ISO weeks an ordinary week is averaged over. |
+| `backtest_year` | smallint |  |
+| `backtest_first_week` | smallint |  |
+| `backtest_last_week` | smallint |  |
+| `backtest_pct` | numeric | The method's mean weekly miss on the depot's Fresh volume over the backtest weeks, in %. |
+| `last_year_pct` | numeric | The same for "same week last year times growth". |
+| `ordinary_week_m3` | numeric | Chilled m³ in an ordinary week of the baseline. |
+| `record_week_m3` | numeric |  |
+| `record_year` | smallint |  |
+| `record_week` | smallint | The depot's highest chilled week on record. |
+| `tech_order_max_m3` | numeric | The largest single Tech order in the depot's history. |
+
+### `outlook_week`
+
+Forecast demand at a depot for one ISO week, in m³ per group, counted over the week's open days.
+
+| Column | Type | Notes |
+|---|---|---|
+| `depot` | varchar | primary key; references `outlook_forecast.depot` |
+| `iso_year` | smallint | primary key |
+| `iso_week` | smallint | primary key |
+| `chilled_m3` | numeric |  |
+| `dry_m3` | numeric |  |
+| `style_m3` | numeric |  |
+| `tech_m3` | numeric |  |
 
 ### `road_condition`
 
@@ -249,7 +338,7 @@ Date-specific disruption by district; 100 is a clear road.
 
 | Column | Type | Notes |
 |---|---|---|
-| `district` | varchar | primary key; → `district.name` |
+| `district` | varchar | primary key; references `district.name` |
 | `date` | date | primary key |
 | `disruption_index` | numeric |  |
 
@@ -269,7 +358,7 @@ Each store's last delivery before the story day, and whether its last order wait
 
 | Column | Type | Notes |
 |---|---|---|
-| `outlet_id` | varchar | primary key; → `outlet.outlet_id` |
+| `outlet_id` | varchar | primary key; references `outlet.outlet_id` |
 | `temp` | varchar | primary key |
 | `last_delivered` | date | optional |
 | `deferred_on` | date | optional |
@@ -280,7 +369,7 @@ Typical congestion by district and hour; 100 is free flow.
 
 | Column | Type | Notes |
 |---|---|---|
-| `district` | varchar | primary key; → `district.name` |
+| `district` | varchar | primary key; references `district.name` |
 | `hour` | smallint | primary key |
 | `monsoon` | boolean | primary key |
 | `speed_index` | numeric |  |
@@ -291,12 +380,12 @@ What a vehicle usually does on a weekday, learned from the route history.
 
 | Column | Type | Notes |
 |---|---|---|
-| `vehicle_id` | varchar | primary key; → `vehicle.vehicle_id` |
+| `vehicle_id` | varchar | primary key; references `vehicle.vehicle_id` |
 | `dow_name` | varchar | primary key |
 | `trip_no` | smallint | primary key |
 | `brand` | varchar |  |
 | `temp` | varchar |  |
-| `district` | varchar | → `district.name` |
+| `district` | varchar | references `district.name` |
 | `share` | numeric | How often this vehicle ran this trip on that weekday in the history. |
 
 ### `usual_stop`
@@ -305,13 +394,13 @@ The stores a vehicle's usual trip visits on a weekday, per run it makes (brand, 
 
 | Column | Type | Notes |
 |---|---|---|
-| `vehicle_id` | varchar | primary key; → `vehicle.vehicle_id` |
+| `vehicle_id` | varchar | primary key; references `vehicle.vehicle_id` |
 | `dow_name` | varchar | primary key |
 | `trip_no` | smallint | primary key |
 | `brand` | varchar | primary key |
 | `temp` | varchar | primary key |
-| `district` | varchar | primary key; → `district.name` |
-| `outlet_id` | varchar | primary key; → `outlet.outlet_id` |
+| `district` | varchar | primary key; references `district.name` |
+| `outlet_id` | varchar | primary key; references `outlet.outlet_id` |
 | `share` | numeric |  |
 | `run_share` | numeric | How often the vehicle makes this run on that weekday. |
 
@@ -366,8 +455,8 @@ Base class used for declarative class definitions. The :class:`_orm.DeclarativeB
 | `password_hash` | varchar | optional |
 | `pin_hash` | varchar | optional |
 | `depot` | varchar | optional |
-| `outlet_id` | varchar | → `outlet.outlet_id`; optional |
-| `vehicle_id` | varchar | → `vehicle.vehicle_id`; optional |
+| `outlet_id` | varchar | references `outlet.outlet_id`; optional |
+| `vehicle_id` | varchar | references `vehicle.vehicle_id`; optional |
 | `locale` | varchar |  |
 | `phone` | varchar | optional |
 | `judge_account` | boolean | One of the four accounts in the README; shown as a quick sign-in card in demo mode. |
@@ -417,7 +506,7 @@ Every change a person or the simulator makes, in scenario time.
 |---|---|---|
 | `id` | char | primary key |
 | `at` | datetime |  |
-| `actor_id` | char | → `app_user.id`; optional |
+| `actor_id` | char | references `app_user.id`; optional |
 | `actor_label` | varchar |  |
 | `action` | varchar |  |
 | `entity` | varchar |  |
@@ -499,7 +588,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 |---|---|---|
 | `id` | char | primary key |
 | `order_ref` | varchar |  |
-| `outlet_id` | varchar | → `outlet.outlet_id` |
+| `outlet_id` | varchar | references `outlet.outlet_id` |
 | `brand` | varchar |  |
 | `temp` | varchar |  |
 | `requested_date` | date | The delivery day the store ordered for. |
@@ -510,7 +599,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `status` | varchar |  |
 | `source` | varchar |  |
 | `placed_at` | datetime |  |
-| `placed_by` | char | → `app_user.id`; optional |
+| `placed_by` | char | references `app_user.id`; optional |
 | `client_ref` | varchar | optional; The store device's id for the order, so a resend never creates a second order. |
 | `note` | text |  |
 
@@ -521,9 +610,9 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `order_id` | char | → `delivery_order.id` |
+| `order_id` | char | references `delivery_order.id` |
 | `position` | integer |  |
-| `case_type` | varchar | → `case_type.code` |
+| `case_type` | varchar | references `case_type.code` |
 | `qty` | integer |  |
 | `carried_qty` | integer | Cases added from an earlier order that went short, included in qty. |
 | `carried_from` | varchar | optional |
@@ -648,8 +737,8 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `order_id` | char | → `delivery_order.id` |
-| `plan_id` | char | → `plan.id`; optional |
+| `order_id` | char | references `delivery_order.id` |
+| `plan_id` | char | references `plan.id`; optional |
 | `kind` | varchar |  |
 | `from_date` | date |  |
 | `to_date` | date |  |
@@ -658,7 +747,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `explanation` | jsonb | What the engine found: unavoidable or its choice, the rule, the pool, the cost, the next-run check. |
 | `created_at` | datetime |  |
 | `confirmed_at` | datetime | optional |
-| `confirmed_by` | char | → `app_user.id`; optional |
+| `confirmed_by` | char | references `app_user.id`; optional |
 | `notified_at` | datetime | optional |
 | `acknowledged_at` | datetime | optional |
 
@@ -686,7 +775,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `version` | integer |  |
 | `proposed_at` | datetime | optional |
 | `published_at` | datetime | optional |
-| `published_by` | char | → `app_user.id`; optional |
+| `published_by` | char | references `app_user.id`; optional |
 | `summary` | jsonb |  |
 
 ### `plan_change` (per copy)
@@ -696,13 +785,13 @@ A change after publishing, such as swapping two stops, with the cost Relay showe
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `plan_id` | char | → `plan.id` |
-| `trip_id` | char | → `trip.id`; optional |
+| `plan_id` | char | references `plan.id` |
+| `trip_id` | char | references `trip.id`; optional |
 | `kind` | varchar |  |
 | `summary` | text |  |
 | `detail` | jsonb |  |
 | `created_at` | datetime |  |
-| `created_by` | char | → `app_user.id`; optional |
+| `created_by` | char | references `app_user.id`; optional |
 
 ### `stop` (per copy)
 
@@ -711,9 +800,9 @@ One order delivered at one outlet. The data delivers every order as its own stop
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `trip_id` | char | → `trip.id` |
-| `order_id` | char | → `delivery_order.id` |
-| `outlet_id` | varchar | → `outlet.outlet_id` |
+| `trip_id` | char | references `trip.id` |
+| `order_id` | char | references `delivery_order.id` |
+| `outlet_id` | varchar | references `outlet.outlet_id` |
 | `seq` | smallint |  |
 | `planned_arrival` | datetime |  |
 | `expected_arrival` | datetime | optional |
@@ -721,7 +810,7 @@ One order delivered at one outlet. The data delivers every order as its own stop
 | `arrived_at` | datetime | optional |
 | `completed_at` | datetime | optional |
 | `version` | integer | Bumped on every change the office makes, so a record made offline can be checked against it. |
-| `backup_of` | char | → `stop.id`; optional |
+| `backup_of` | char | references `stop.id`; optional |
 | `reason` | text |  |
 
 ### `trip` (per copy)
@@ -731,12 +820,12 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `plan_id` | char | → `plan.id` |
-| `vehicle_id` | varchar | → `vehicle.vehicle_id` |
+| `plan_id` | char | references `plan.id` |
+| `vehicle_id` | varchar | references `vehicle.vehicle_id` |
 | `trip_no` | smallint |  |
 | `brand` | varchar |  |
 | `temp` | varchar |  |
-| `district` | varchar | → `district.name` |
+| `district` | varchar | references `district.name` |
 | `planned_depart` | datetime |  |
 | `planned_back` | datetime |  |
 | `std_minutes` | integer |  |
@@ -747,7 +836,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `finished_at` | datetime | optional |
 | `expected_back` | datetime | optional |
 | `note` | text |  |
-| `loader_id` | char | → `app_user.id`; optional; Who is loading it now, or loaded it. |
+| `loader_id` | char | references `app_user.id`; optional; Who is loading it now, or loaded it. |
 | `loading_started_at` | datetime | optional |
 | `claimed_at` | datetime | optional; When a person first worked on this load. From then on the world simulator leaves it alone. |
 | `turned_back_at` | datetime | optional |
@@ -759,10 +848,10 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `vehicle_id` | varchar | → `vehicle.vehicle_id` |
+| `vehicle_id` | varchar | references `vehicle.vehicle_id` |
 | `run_date` | date |  |
 | `status` | varchar |  |
-| `driver_id` | char | → `app_user.id`; optional |
+| `driver_id` | char | references `app_user.id`; optional |
 | `fuel_used_l` | numeric | Litres already used earlier in the same ISO week. |
 | `note` | text |  |
 
@@ -829,13 +918,13 @@ Planned against loaded, confirmed by the loader and accepted by the driver.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `trip_id` | char | → `trip.id` |
+| `trip_id` | char | references `trip.id` |
 | `planned_cases` | integer |  |
 | `loaded_cases` | integer |  |
 | `completed_at` | datetime |  |
-| `completed_by` | char | → `app_user.id`; optional |
+| `completed_by` | char | references `app_user.id`; optional |
 | `accepted_at` | datetime | optional |
-| `accepted_by` | char | → `app_user.id`; optional |
+| `accepted_by` | char | references `app_user.id`; optional |
 | `accepted_on` | varchar | optional; 'phone' or 'tablet' (the driver's own PIN on the dock tablet). |
 | `difference` | text | What the driver said does not match, if he reported a difference instead of accepting. |
 
@@ -846,16 +935,16 @@ One case type for one stop on one trip, in loading order.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `trip_id` | char | → `trip.id` |
-| `stop_id` | char | → `stop.id` |
-| `case_type` | varchar | → `case_type.code` |
+| `trip_id` | char | references `trip.id` |
+| `stop_id` | char | references `stop.id` |
+| `case_type` | varchar | references `case_type.code` |
 | `load_order` | smallint |  |
 | `planned_qty` | integer |  |
 | `loaded_qty` | integer |  |
 | `status` | varchar |  |
 | `changed_by_plan` | boolean |  |
 | `updated_at` | datetime | optional |
-| `updated_by` | char | → `app_user.id`; optional |
+| `updated_by` | char | references `app_user.id`; optional |
 
 ### `shortfall` (per copy)
 
@@ -864,16 +953,16 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `load_line_id` | char | → `load_line.id` |
+| `load_line_id` | char | references `load_line.id` |
 | `kind` | varchar |  |
 | `qty` | integer |  |
 | `note` | text |  |
-| `photo_id` | char | → `photo.id`; optional |
+| `photo_id` | char | references `photo.id`; optional |
 | `flagged_at` | datetime |  |
-| `flagged_by` | char | → `app_user.id`; optional |
+| `flagged_by` | char | references `app_user.id`; optional |
 | `decision` | varchar | optional |
 | `decided_at` | datetime | optional |
-| `decided_by` | char | → `app_user.id`; optional |
+| `decided_by` | char | references `app_user.id`; optional |
 | `added_to_order_ref` | varchar | optional |
 
 ## What drivers record on the road
@@ -984,9 +1073,9 @@ A driver's offline record that clashes with an office change, and the one questi
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `stop_id` | char | → `stop.id` |
-| `backup_stop_id` | char | → `stop.id`; optional |
-| `driver_id` | char | → `app_user.id` |
+| `stop_id` | char | references `stop.id` |
+| `backup_stop_id` | char | references `stop.id`; optional |
+| `driver_id` | char | references `app_user.id` |
 | `status` | varchar |  |
 | `question` | text |  |
 | `answer` | varchar | optional |
@@ -995,7 +1084,7 @@ A driver's offline record that clashes with an office change, and the one questi
 | `resolution` | text | Who settled it: the driver, or the dispatcher cancelling the backup's copy. |
 | `event_id` | char | optional; The record that clashed. |
 | `resolved_at` | datetime | optional |
-| `resolved_by` | char | → `app_user.id`; optional |
+| `resolved_by` | char | references `app_user.id`; optional |
 | `escalated_at` | datetime | optional |
 
 ### `device_contact` (per copy)
@@ -1005,7 +1094,7 @@ The last time each driver's phone reached Relay, and what it said was still wait
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `user_id` | char | → `app_user.id` |
+| `user_id` | char | references `app_user.id` |
 | `last_contact_at` | datetime |  |
 | `last_record_at` | datetime | optional |
 | `pending_records` | integer |  |
@@ -1020,11 +1109,11 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key; Generated on the phone when the record is made. |
-| `user_id` | char | → `app_user.id` |
+| `user_id` | char | references `app_user.id` |
 | `device_id` | varchar |  |
 | `kind` | varchar |  |
-| `trip_id` | char | → `trip.id`; optional |
-| `stop_id` | char | → `stop.id`; optional |
+| `trip_id` | char | references `trip.id`; optional |
+| `stop_id` | char | references `stop.id`; optional |
 | `occurred_at` | datetime | When it happened, by the phone's scenario clock. Kept as recorded, even if it arrives an hour later. |
 | `received_at` | datetime |  |
 | `base_version` | integer | optional; The stop version the phone last saw. |
@@ -1049,8 +1138,8 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `height` | integer | optional |
 | `taken_at` | datetime |  |
 | `uploaded_at` | datetime |  |
-| `uploaded_by` | char | → `app_user.id`; optional |
-| `stop_id` | char | → `stop.id`; optional |
+| `uploaded_by` | char | references `app_user.id`; optional |
+| `stop_id` | char | references `stop.id`; optional |
 | `event_id` | char | optional; The delivery record it belongs to; the photo is sent after it. |
 
 ### `problem_report` (per copy)
@@ -1060,9 +1149,9 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `event_id` | char | → `field_event.id` |
-| `trip_id` | char | → `trip.id` |
-| `stop_id` | char | → `stop.id`; optional |
+| `event_id` | char | references `field_event.id` |
+| `trip_id` | char | references `trip.id` |
+| `stop_id` | char | references `stop.id`; optional |
 | `reason` | varchar |  |
 | `delay_min` | integer | optional |
 | `note` | text |  |
@@ -1077,12 +1166,12 @@ Proof of delivery for one stop: what was dropped, who received it, a photo or a 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `stop_id` | char | → `stop.id` |
-| `event_id` | char | → `field_event.id` |
+| `stop_id` | char | references `stop.id` |
+| `event_id` | char | references `field_event.id` |
 | `receiver_name` | varchar |  |
 | `lines` | jsonb | Delivered count per case type, with a reason where it differs from the load. |
 | `all_delivered` | boolean |  |
-| `photo_id` | char | → `photo.id`; optional |
+| `photo_id` | char | references `photo.id`; optional |
 | `signature_svg` | text | optional |
 | `recorded_at` | datetime |  |
 
@@ -1123,10 +1212,10 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `order_id` | char | → `delivery_order.id` |
+| `order_id` | char | references `delivery_order.id` |
 | `status` | varchar |  |
 | `confirmed_at` | datetime |  |
-| `confirmed_by` | char | → `app_user.id`; optional |
+| `confirmed_by` | char | references `app_user.id`; optional |
 | `before_driver_proof` | boolean | Confirmed at the store before the driver's phone had sent its proof. |
 | `lines` | jsonb |  |
 | `client_ref` | varchar | optional |
@@ -1138,12 +1227,12 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `receipt_id` | char | → `receipt.id` |
-| `case_type` | varchar | → `case_type.code` |
+| `receipt_id` | char | references `receipt.id` |
+| `case_type` | varchar | references `case_type.code` |
 | `kind` | varchar |  |
 | `qty` | integer |  |
 | `note` | text |  |
-| `photo_id` | char | → `photo.id`; optional |
+| `photo_id` | char | references `photo.id`; optional |
 
 ## Notices and the dispatcher's feed
 
@@ -1194,7 +1283,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `ref` | jsonb |  |
 | `created_at` | datetime |  |
 | `handled_at` | datetime | optional |
-| `handled_by` | char | → `app_user.id`; optional |
+| `handled_by` | char | references `app_user.id`; optional |
 | `outcome` | text |  |
 
 ### `notification` (per copy)
@@ -1204,8 +1293,8 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | Column | Type | Notes |
 |---|---|---|
 | `id` | char | primary key |
-| `outlet_id` | varchar | → `outlet.outlet_id`; optional |
-| `user_id` | char | → `app_user.id`; optional |
+| `outlet_id` | varchar | references `outlet.outlet_id`; optional |
+| `user_id` | char | references `app_user.id`; optional |
 | `kind` | varchar |  |
 | `title` | varchar |  |
 | `body` | text |  |
