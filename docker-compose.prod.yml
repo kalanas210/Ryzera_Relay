@@ -1,0 +1,17 @@
+# Production overlay for the public server (see infra/README.md):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file /opt/relay/.env up -d --build
+# Caddy answers on 80 and 443 with a certificate for SITE_ADDRESS, and keeps its certificates in a volume so a
+# redeploy never asks Let's Encrypt again.
+services:
+  web:
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

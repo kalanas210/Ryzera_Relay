@@ -37,3 +37,11 @@ Thumbs.db
 
 # Local tool settings
 .claude/
+
+# Terraform: local state holds the server's details; tfvars holds your own IP
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log
+*.tfplan
