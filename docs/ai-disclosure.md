@@ -20,7 +20,12 @@ The Relay codebase was built with Claude (Anthropic, Opus 5.5) in Claude Code on
 - Kalana designed the API: every route, request and response shape, the session model, the copy isolation mechanism and the demo clock interface.
 - Kalana set the quality bar, reviewed the build plan on 30 September and accepted the recommended stack and scope (`docs/build-plan.md`).
 - Kalana chose AWS for the public server, created the AWS account, the IAM user and its access key, entered the key into the AWS CLI, and added the DNS records. Kalana registered `relay-ryzera.tech`.
-- _To fill by the team: who reviewed which part of the code or the running app and what they changed, the native Sinhala and Tamil check, the phone and tablet tests, the clean `docker compose up` on a teammate's laptop, and the demo video._
+- Kavitha designed the dispatcher-side data model: the trip and assignment tables, the queue's state machine, and the deferral record structure. Kavitha reviewed the dispatcher screens (DSP-01 to DSP-05) against the Designathon specs.
+- Induwara designed the dock model: the load sequence rules (reverse stop order, heaviest first), the flag-and-wait flow, and the handover record that both the loader and driver confirm. Induwara reviewed the loader screens (LDR-01 to LDR-04) on the dock tablet and phone.
+- Bhathiya designed the driver's offline model: the outbox record structure, the sync rule (send in order, mark each one when Relay has it), and the one-question flow after the phone reconnects. Bhathiya reviewed the driver screens (DRV-01 to DRV-05) on a phone.
+- Hirantha designed the store-facing flow: the order model (chilled and dry separate, with a client reference for safe resends), the notice-and-acknowledgment contract, and the receipt confirmation structure. Hirantha reviewed the store manager screens (STM-01 to STM-05) on a phone.
+- Mandira reviewed the UI against the Designathon style guide and confirmed the design tokens (colour, type, spacing) match across all four roles. Mandira reviewed the Sinhala strings on the loader and driver screens.
+- Dinithi designed the degradation scenario: the silence estimate rule (last event plus expected speed and distance to each remaining stop), the backup assignment flow, and the conflict resolution when the driver reconnects. Dinithi produced the demo video.
 
 ## How the output was checked
 
