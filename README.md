@@ -352,8 +352,6 @@ copies of the day. See [infra/README.md](infra/README.md).
 - [docs/architecture.md](docs/architecture.md): the architecture diagram, the decisions and their costs
 - [docs/data-model.md](docs/data-model.md): every table and relationship, generated from the models
 - [docs/ai-disclosure.md](docs/ai-disclosure.md): the AI tool disclosure for the Hackathon
-- [docs/ai-usage-log.md](docs/ai-usage-log.md): the running log of AI use across the phases, which the disclosure
-  draws on
 - [docs/build-plan.md](docs/build-plan.md): the build plan, stack and scope as accepted on 30 September; where the
   build differs, this README and the architecture page describe the build
 - [docs/design/](docs/design/): the Designathon design documents, used as the build's specification: problem framing,
@@ -362,8 +360,7 @@ copies of the day. See [infra/README.md](infra/README.md).
 
 ## Team Ryzera
 
-Each member owns one part of the Designathon design for review. What a member reviews, tests or changes in the
-Hackathon build goes in the "What the team did" column of [docs/ai-usage-log.md](docs/ai-usage-log.md).
+Each member owns one part of the Designathon design for review.
 
 | Member | Part they review |
 |---|---|
