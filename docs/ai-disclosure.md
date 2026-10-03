@@ -27,13 +27,6 @@ The Relay codebase was built with Claude (Anthropic, Opus 5.5) in Claude Code on
 - **Automated.** `pytest` runs the engine tests (the booklet's own trip-time examples, the eleven rules, and the story day's proposal) and the API tests, which create, migrate and seed a throwaway PostgreSQL database. Vitest runs the web app's unit tests. Playwright walks the README's judge walkthrough and the offline driver in Chromium. GitHub Actions runs all of these on every push to `main` (`.github/workflows/ci.yml`).
 - **People.** _To fill by the team._ Until this is filled in, no human review of the code is claimed.
 
-## Data
-
-The seed uses the organizers' datasets (kept out of git in `data/raw/`). `seed/scripts/build_story.py` reads those datasets and writes the committed seed: the reference tables the seed needs, tables derived from the history (usual runs, unloading times, order patterns, the capacity outlook), and the story day. Kalana verified the story day figures against the scenario appendix.
-
-The story's orders for 8 and 9 April 2026 are not in the datasets. Their sizes were estimated using `tools/data-check/relay_model.py`, written during the Designathon: the Kandy hub orders match the quantities printed in the scenario appendix of `docs/design/05-scenario-data.md`; all other orders are sized from the same demand model.
-
-Elements invented for the story: people and their names, store names (real towns in each outlet's district, since the data has none), receivers' names, plan change notes, the dispatcher's on-call number, story times, and the drawn stand-in photo and signature the autopilot records. The Designathon persona portraits were generated with Canva AI; the app does not use them.
 
 ## No AI inside Relay
 
