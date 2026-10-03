@@ -1,5 +1,16 @@
 # Relay, by Team Ryzera
 
+[![CI](https://github.com/kalanas210/Ryzera_Relay/actions/workflows/ci.yml/badge.svg)](https://github.com/kalanas210/Ryzera_Relay/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![React](https://img.shields.io/badge/React-19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-E2E-45ba4b?style=flat-square&logo=playwright&logoColor=white)
+
 Relay plans Waypoint Group's overnight store deliveries from the order to the confirmed receipt: store managers order,
 the dispatcher plans and publishes trips with an engine that checks every operating rule, loaders load in reverse stop
 order on a shared dock tablet, and drivers record each stop on a phone that keeps working with no signal. All four
