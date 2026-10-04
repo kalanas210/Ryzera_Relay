@@ -21,6 +21,8 @@ roles work on one record per order, so a shortfall, a moved stop or a lost signa
 
 **Live demo: https://relay-ryzera.tech** (the same stack as below, with the demo bar on).
 
+**Demo video: https://youtu.be/PepyoF36Ul4** (unlisted, 7 minutes 58 seconds: all four roles complete the walkthrough, then the code and architecture).
+
 ## Accounts
 
 Every account is seeded on first start. The password is `relay2026` (set by `RELAY_SEED_PASSWORD`).
