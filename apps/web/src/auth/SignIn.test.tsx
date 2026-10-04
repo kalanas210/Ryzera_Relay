@@ -45,6 +45,19 @@ describe("signing in", () => {
     vi.restoreAllMocks();
   });
 
+  it("says in brackets which device each role is built for", async () => {
+    show();
+    const devices: Record<string, string> = {
+      "Store manager": "use mobile phone",
+      Dispatcher: "use desktop",
+      Loader: "use mobile phone or tablet",
+      Driver: "use mobile phone",
+    };
+    for (const [title, device] of Object.entries(devices)) {
+      expect(await screen.findByRole("button", { name: new RegExp(`^${title} \\(${device}\\)`) })).toBeInTheDocument();
+    }
+  });
+
   it("brings the chosen role's sign-in into view, ready for the password", async () => {
     const scrolled = vi.fn();
     Element.prototype.scrollIntoView = scrolled;

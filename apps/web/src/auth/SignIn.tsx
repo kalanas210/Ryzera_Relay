@@ -17,21 +17,36 @@ export const HOME: Record<Role, string> = {
   store_manager: "/store",
 };
 
-const ROLES: { role: Role; title: string; where: string; icon: LucideIcon }[] = [
+// `device` is the screen each role is built and judged on (README, Accounts), shown in brackets after the title
+const ROLES: { role: Role; title: string; device: string; where: string; icon: LucideIcon }[] = [
   {
     role: "store_manager",
     title: "Store manager",
+    device: "use mobile phone",
     where: "Places orders, tracks arrival, confirms receipt",
     icon: Store,
   },
   {
     role: "dispatcher",
     title: "Dispatcher",
+    device: "use desktop",
     where: "Plans the day, decides deferrals, watches the runs",
     icon: LayoutDashboard,
   },
-  { role: "loader", title: "Loader", where: "Loads in stop order on the shared dock tablet", icon: Package },
-  { role: "driver", title: "Driver", where: "Runs the stops and records proof, offline too", icon: Truck },
+  {
+    role: "loader",
+    title: "Loader",
+    device: "use mobile phone or tablet",
+    where: "Loads in stop order on the shared dock tablet",
+    icon: Package,
+  },
+  {
+    role: "driver",
+    title: "Driver",
+    device: "use mobile phone",
+    where: "Runs the stops and records proof, offline too",
+    icon: Truck,
+  },
 ];
 
 export function SignIn() {
@@ -87,7 +102,7 @@ export function SignIn() {
             Who is signing in?
           </h1>
           <div className="grid gap-3 sm:grid-cols-2">
-            {ROLES.map(({ role: r, title, where, icon: Icon }) => {
+            {ROLES.map(({ role: r, title, device, where, icon: Icon }) => {
               const judge = (accounts.data ?? []).find((a) => a.role === r);
               const selected = role === r;
               return (
@@ -117,7 +132,9 @@ export function SignIn() {
                     <Icon size={20} strokeWidth={1.75} aria-hidden />
                   </span>
                   <span className="flex min-w-0 flex-col">
-                    <span className={cx("t-h3", selected && "text-petrol-700")}>{title}</span>
+                    <span className={cx("t-h3", selected && "text-petrol-700")}>
+                      {title} <span className="t-label whitespace-nowrap font-normal text-asphalt-700">({device})</span>
+                    </span>
                     <span className="t-label text-asphalt-700">{where}</span>
                     {judge ? (
                       <span className="t-label mt-1 text-asphalt-500">
