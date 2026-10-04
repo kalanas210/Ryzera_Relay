@@ -1,6 +1,6 @@
 # AI tool disclosure: Hackathon
 
-The Relay codebase was built with Claude (Anthropic, Opus 5.5) in Claude Code on Kalana's machine, with Kalana directing the work throughout. The architecture, database schema, product logic, and API design are Kalana's and the team's; Claude handled the implementation — turning agreed designs and specs into working code, tests, configuration and documents. All commits are under Kalana's GitHub account (`kalanas210`). The Designathon's own disclosure is kept at the tag `designathon-submission`, in `docs/designathon/07-ai-disclosure.md`.
+The Relay codebase was built with Claude (Anthropic, Opus 5.5) in Claude Code on Kalana's machine, with Kalana directing the work throughout. The architecture, database schema, product logic, and API design are Kalana's and the team's; Claude handled the implementation - turning agreed designs and specs into working code, tests, configuration and documents. All commits are under Kalana's GitHub account (`kalanas210`). The Designathon's own disclosure is kept at the tag `designathon-submission`, in `docs/designathon/07-ai-disclosure.md`.
 
 ## What Claude did
 
