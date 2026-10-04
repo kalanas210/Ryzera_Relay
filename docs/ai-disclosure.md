@@ -30,7 +30,7 @@ The Relay codebase was built with Claude (Anthropic, Opus 5.5) in Claude Code on
 ## How the output was checked
 
 - **Automated.** `pytest` runs the engine tests (the booklet's own trip-time examples, the eleven rules, and the story day's proposal) and the API tests, which create, migrate and seed a throwaway PostgreSQL database. Vitest runs the web app's unit tests. Playwright walks the README's judge walkthrough and the offline driver in Chromium. GitHub Actions runs all of these on every push to `main` (`.github/workflows/ci.yml`).
-- **People.** _To fill by the team._ Until this is filled in, no human review of the code is claimed.
+- **People.** Kalana directed the build, tested the live site while preparing the demo, reported what did not match the design so it could be fixed, and reviewed and merged every pull request. The other members each own one part of the Designathon design and added a short guide for it as a pull request: Hirantha the store manager's guide (tested on a phone in Firefox), Induwara the loader's guide, Mandira the design system document, and Dinithi the guide to losing the signal. Two further commits under Induwara's name (the device hints on the sign-in cards, and the README badges) were prepared with Claude Code at Kalana's request and committed from Induwara's account with Induwara's permission, as their commit messages say. No human review of the code beyond this is claimed.
 
 
 ## No AI inside Relay
