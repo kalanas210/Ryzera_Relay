@@ -124,6 +124,18 @@ role. Every arrow is a hand-off to another role. Source: the README walkthrough,
 
 ![Delivery day, four roles](png/09-delivery-day-four-roles.png)
 
+## Mermaid versions in the docs
+
+Some of the same ideas are also drawn in Mermaid, so GitHub shows them right inside the page, next to the text they
+explain.
+
+| Page | Diagrams |
+|---|---|
+| [README.md](../../README.md) | System architecture, the story day |
+| [architecture.md](../architecture.md) | Request path, planning engine, the tick, delivery and runtime, statuses |
+| [degradation.md](../degradation.md) | How a record is answered, the storm in order |
+
+
 ## Editing
 
 Open a file in [drawio/](drawio/) and export again as PNG. The colours are the product's own tokens from

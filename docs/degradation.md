@@ -16,6 +16,67 @@ On Wednesday 8 April 2026, a storm near Mawanella takes Kasun's phone offline fr
 - The office shows the last contact, an estimate and a likely range. Relay does not guess why the phone is silent.
 - The dispatcher can move a stop to a suitable standby van. A store's confirmed receipt counts as a delivery; when the phone's record conflicts with the move, one question settles it.
 
+## How a record is answered
+
+Every record the phone sends gets one answer, and a clash with an office change is kept and settled with one question.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> saved: driver taps, the phone writes it to IndexedDB
+    saved --> waiting: no signal, or a send is running
+    waiting --> sending: browser online, app in front, new record, minute check in
+    saved --> sending
+    sending --> waiting: the send failed, the record stays queued
+    sending --> applied: delivery, arrival or problem recorded at the phone's time
+    sending --> duplicate: Relay already has this id, nothing is written
+    sending --> rejected: not this driver's vehicle, wrong stop, or a time in the future
+    sending --> conflict: the office moved or cancelled the stop after the version the phone saw
+    applied --> [*]
+    duplicate --> [*]
+    rejected --> [*]
+    conflict --> [*]: kept with its proof, then one question goes to the driver
+```
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> waiting_for_driver: the clash is kept with its proof
+    waiting_for_driver --> resolved: driver answers yes, the delivery stands and the backup's copy is cancelled
+    waiting_for_driver --> resolved: dispatcher keeps the backup's copy
+    waiting_for_driver --> escalated: driver answers no, or 10 minutes pass
+    escalated --> resolved: dispatcher settles it
+    resolved --> [*]
+```
+
+## The storm in order
+
+What each screen shows between 5:41 and 7:15 AM:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Kasun's phone
+    participant R as Relay
+    participant N as Nuwan<br/>dispatcher
+    participant D as Dilani<br/>store manager
+
+    Note over P,R: 5:41 AM, signal lost near Mawanella
+    Note over P: 5:59 and 6:36 AM, stops 2 and 3 are delivered and saved in the outbox
+    R->>N: 6:05 AM, no contact since 5:41, estimates and likely ranges
+    R->>D: 6:05 AM, arrival around 6:35, likely 6:05 to 7:05, last heard 5:41
+    N->>R: 6:15 AM, stop 4 moves to backup van VEH060
+    D->>R: 6:42 AM, confirms receipt, before any proof
+    N->>R: 6:44 AM, keeps the backup, Kasun is still silent
+    Note over P,R: 7:14 AM, signal back
+    P->>R: 5 saved records in order, then 2 photos
+    Note over R: stops 2 and 3 apply at the phone's times, stop 4 is kept as a clash
+    R->>P: one question, was stop 4 also given to the backup
+    P->>R: 7:15 AM, yes, I delivered it
+    R->>N: conflict resolved, VEH060 turns back
+    R->>D: stop 4 delivered at 7:09 AM, proof attached
+```
+
 ## Code and tests
 
 - Phone: [outbox.ts](../apps/web/src/offline/outbox.ts), [sync.tsx](../apps/web/src/roles/driver/sync.tsx)

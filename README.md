@@ -23,6 +23,58 @@ roles work on one record per order, so a shortfall, a moved stop or a lost signa
 
 **Demo video: https://youtu.be/PepyoF36Ul4** (unlisted, 7 minutes 58 seconds: all four roles complete the walkthrough, then the code and architecture).
 
+## System architecture
+
+Four roles use one installable web app. It talks to one API, which calls a planning engine library and keeps
+everything in one PostgreSQL database. [docs/architecture.md](docs/architecture.md) explains each part, and
+[docs/diagrams](docs/diagrams/README.md) has more diagrams.
+
+```mermaid
+flowchart TB
+    subgraph roles["Browsers, one installable app"]
+        store["Store manager<br/>phone or desk"]
+        dispatcher["Dispatcher<br/>desk"]
+        loader["Loaders<br/>shared dock tablet"]
+        driver["Driver<br/>phone with an outbox"]
+    end
+
+    caddy["Caddy 2<br/>HTTPS, the built app, proxy for /api"]
+
+    subgraph api["FastAPI on Uvicorn"]
+        routers["Routers<br/>client header, workspace, role check"]
+        services["Services<br/>orders, plan, dock, field records,<br/>estimates, live runs, tracker"]
+        tick{{"Background tick, every 2 s<br/>world simulator, watch"}}
+        autopilot{{"Story autopilot<br/>when the demo bar jumps"}}
+        engine["relay_engine<br/>library with no database:<br/>rules, clocks, proposal, estimate"]
+        routers --> services
+        tick --> services
+        autopilot --> services
+        services -->|"plain dataclasses"| engine
+    end
+
+    db[("PostgreSQL 16<br/>43 tables, engine cache, photos")]
+    migrate["migrate job<br/>Alembic, then seed the story day"]
+
+    store -->|"HTTPS, JSON, polling"| caddy
+    dispatcher --> caddy
+    loader --> caddy
+    driver --> caddy
+    caddy -->|"/api"| routers
+    services -->|"SQLAlchemy 2, psycopg 3"| db
+    migrate -->|"schema, then the story day"| db
+
+    classDef client fill:#E5F1F3,stroke:#0F5563,color:#14181F
+    classDef infra fill:#ECEFF3,stroke:#69727F,color:#14181F
+    classDef plain fill:#FFFFFF,stroke:#3A424E,color:#14181F
+    classDef lib fill:#FFF4CC,stroke:#C99700,color:#14181F
+    classDef data fill:#E4F1FB,stroke:#0A6EBD,color:#14181F
+    class store,dispatcher,loader,driver client
+    class caddy,migrate,tick,autopilot infra
+    class routers,services plain
+    class engine lib
+    class db data
+```
+
 ## Accounts
 
 Every account is seeded on first start. The password is `relay2026` (set by `RELAY_SEED_PASSWORD`).
@@ -88,6 +140,46 @@ never played again. The other stores, loaders and drivers act on their own as th
 So does a judge character nobody is playing: when no one signed in as Nuwan has used the copy for a few minutes, Relay
 answers a dock flag in Nuwan's place five minutes after it is raised. A character someone is playing waits for them.
 Moments that depend on Kasun's truck move with it: once the Kandy plan is published, Handover at the dock reads 3:16 AM.
+
+The whole day at a glance, before you start jumping around in it:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Dilani<br/>store manager
+    participant R as Relay
+    participant N as Nuwan<br/>dispatcher
+    participant L as Rizwan<br/>loader
+    participant K as Kasun<br/>driver
+
+    Note over D,K: Tuesday 7 April
+    D->>R: 2:10 PM, orders before the 4:00 PM cutoff
+    R->>N: 4:35 PM, proposes a plan, one chilled order waits
+    N->>R: 4:52 PM, confirms the deferral and Relay's reason
+    N->>R: 6:39 PM, publishes the plan
+    R-->>D: notice, the chilled order moves to Thursday
+    R-->>L: loading list, last stop loads first
+    N->>R: 9:12 PM, swaps stops 2 and 3
+    R-->>L: banner on the loading screen
+    R-->>D: notice, the dry order now arrives about 6:25 AM
+
+    Note over D,K: Wednesday 8 April
+    L->>R: 2:47 AM, flags 6 cases of rice and dhal missing
+    R->>N: flag on the dispatcher's feed
+    N->>R: 2:52 AM, sends short, adds 6 cases to Thursday
+    R-->>D: notice, 6 cases are short
+    L->>K: 3:16 AM, handover, 377 of 383 cases loaded
+    K->>R: accepts the load, leaves at 3:33 AM
+    Note over K,R: 5:41 to 7:14 AM, a storm, no signal on Kasun's phone
+    R->>N: 6:05 AM, no contact, estimates and likely ranges
+    N->>R: 6:15 AM, sends backup van VEH060 to Aranayake
+    D->>R: 6:42 AM, confirms receipt at Hemmathagama
+    K->>R: 7:14 AM, signal back, saved records go in order
+    R->>K: one question, Aranayake was also given to the backup
+    K->>R: 7:15 AM, yes, I delivered it
+    R-->>N: settled, VEH060 turns back
+    K->>R: 7:17 AM, finishes the trip
+```
 
 1. **Any role, desk, sign-in page, Tuesday 2:05 PM.** The bar reads "Shared walkthrough, clock held": every browser
    without a code lands in this copy, so its clock stays at 2:05 PM, and a jump there first asks "Start your own copy

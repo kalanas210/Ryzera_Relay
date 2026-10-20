@@ -95,6 +95,45 @@ service calls and look up the rows a route names. The exceptions run their own q
 `routers/dispatch.py`, the store's home view, notices and notice acknowledgement in `routers/store.py`, and the demo
 account list in `routers/auth.py`.
 
+The same steps as a sequence, with the answer each failing check sends:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant C as Caddy 2
+    participant A as API<br/>main.py, security.py
+    participant S as get_scope<br/>workspaces.py
+    participant V as Route and service
+    participant DB as PostgreSQL
+
+    B->>C: request with X-Relay-Client, X-Relay-Role, relay_ws and the role's cookie
+    alt body over 2 MB
+        C-->>B: 413
+    end
+    C->>A: the /api request
+    alt body over 2,000,000 bytes, LimitBody
+        A-->>B: 413
+    end
+    alt POST, PUT, PATCH or DELETE without X-Relay-Client
+        A-->>B: 403
+    end
+    A->>S: find the copy of the day
+    Note over S: relay_ws names the copy, no cookie means MAIN
+    alt database not seeded
+        S-->>B: 503
+    end
+    S->>A: session scoped to the copy
+    A->>A: require(Role.X) reads relay_dsp, relay_ldr, relay_drv or relay_stm
+    alt no cookie, bad token, wrong role or unknown role header
+        A-->>B: 401, 403 or 400
+    end
+    A->>V: call the route
+    V->>DB: queries, the ORM hook adds workspace_id to every one
+    V->>DB: one commit
+    V-->>B: JSON, or image bytes for a photo
+```
+
 `relay-api setup` applies the seven Alembic migrations and seeds whatever is missing; Compose runs it as the
 one-shot `migrate` service before `api` starts. `relay-api serve` runs one Uvicorn worker, whose lifespan starts the
 background tick (`main.py`), and beside it a separate process that warms the engine cache (`cli.py`, decision 8).
@@ -117,6 +156,55 @@ background tick (`main.py`), and beside it a separate process that warms the eng
 | `reference.py` | Builds a `Network` straight from the organizers' CSV files, for tests and scripts |
 
 The API adapts rows to these types in `services/network.py`.
+
+How a proposal is asked for, cached and stored:
+
+```mermaid
+flowchart LR
+    plan["Propose plan<br/>dispatcher, plan board"] --> pp["propose_plan<br/>services/planning.py<br/>builds RunInput"]
+    pp --> pc(["propose_cached<br/>services/engine_cache.py"])
+    cache[("engine_cache<br/>key is a SHA-256 of the run<br/>and the engine's own source")]
+    pc <-->|"look up, store"| cache
+    pc -->|"miss: one search per key,<br/>under an advisory lock"| eng["relay_engine.propose<br/>pure library, no database"]
+    eng -->|"Proposal"| pc
+    pc -->|"hit or new answer"| write["Write trips, stops<br/>and deferrals into this<br/>copy's plan"]
+    write --> board["Plan board<br/>every read checks the trips<br/>against all eleven rules"]
+
+    classDef client fill:#E5F1F3,stroke:#0F5563,color:#14181F
+    classDef plain fill:#FFFFFF,stroke:#3A424E,color:#14181F
+    classDef lib fill:#FFF4CC,stroke:#C99700,color:#14181F
+    classDef data fill:#E4F1FB,stroke:#0A6EBD,color:#14181F
+    class plan,board client
+    class pp,pc,write plain
+    class eng lib
+    class cache data
+```
+
+And what happens inside `relay_engine.propose`:
+
+```mermaid
+flowchart LR
+    run["RunInput<br/>network, orders, vehicles,<br/>usual runs, conditions,<br/>protected stores"] --> split["Split by<br/>temperature"]
+
+    subgraph chilled["Chilled, planned exactly"]
+        c0["options.py<br/>every trip a vehicle<br/>could run"] --> c1["Step 1<br/>the most orders any<br/>allocation can carry"] --> c2["Step 2<br/>the best allocation that<br/>keeps that many"] --> c3["Explain each wait<br/>deferral rules 1, 2, 3"]
+    end
+
+    subgraph ambient["Ambient, usual runs first"]
+        a1["Each vehicle takes<br/>its usual run"] --> a2["Leftovers go to<br/>any free vehicle"]
+    end
+
+    split --> c0
+    split --> a1
+    c3 --> timed["Timed trips<br/>stop order and departure<br/>on the Expected clock"]
+    a2 --> timed
+    timed --> rules["rules.evaluate<br/>all eleven rules<br/>on every trip"] --> out["Proposal<br/>trips, reports,<br/>deferred, analyses"]
+
+    classDef plain fill:#FFFFFF,stroke:#3A424E,color:#14181F
+    classDef lib fill:#FFF4CC,stroke:#C99700,color:#14181F
+    class run plain
+    class split,c0,c1,c2,c3,a1,a2,timed,rules,out lib
+```
 
 ### PostgreSQL 16
 
@@ -160,6 +248,44 @@ all through the same services a person's device uses, all idempotent, all applie
 
 The background tick calls `catch_up` every 2 seconds for each copy used in the last 6 hours. `catch_up` locks the
 workspace row; the tick skips a copy that is locked, and a demo jump waits for it, so no step is applied twice.
+
+One pass of `catch_up`:
+
+```mermaid
+flowchart TB
+    tick{{"Background tick<br/>every 2 s, for each copy used in the last 6 hours"}}
+    jump["Demo bar jump<br/>or skip ahead"]
+    clock[("The copy's scenario clock<br/>anchor_real, anchor_sim, clock_rate")]
+
+    subgraph catch["catch_up, services/simulator.py"]
+        lock["Step 1<br/>lock the workspace row"]
+        next["Step 2<br/>take the next story step that is due,<br/>earliest first"]
+        pass["Step 3<br/>at the step's time, in this order:<br/>scheduled events, world simulator,<br/>autopilot phone, watch, then the step"]
+        done["Step 4<br/>move to now and commit"]
+        lock --> next
+        next -->|"a step is due"| pass
+        pass -->|"back for the next one"| next
+        next -->|"none left"| done
+    end
+
+    svc["The same services a person's device calls<br/>ordering, field.receive, dock, planning, notify"]
+
+    tick -->|"skips a locked copy"| lock
+    jump -->|"waits for the lock"| lock
+    clock -->|"target time"| next
+    pass --> svc
+
+    classDef plain fill:#FFFFFF,stroke:#3A424E,color:#14181F
+    classDef infra fill:#ECEFF3,stroke:#69727F,color:#14181F
+    classDef client fill:#E5F1F3,stroke:#0F5563,color:#14181F
+    classDef data fill:#E4F1FB,stroke:#0A6EBD,color:#14181F
+    classDef ok fill:#E3F3EA,stroke:#1F7A4D,color:#14181F
+    class tick infra
+    class jump client
+    class clock data
+    class lock,next,pass,done plain
+    class svc ok
+```
 
 ## One delivery record, from the driver's outbox to the desk and the store
 
@@ -336,6 +462,58 @@ team's addresses. `infra/deploy.sh` ships the committed `HEAD` with `git archive
 deployed, and `infra/server/up.sh` rebuilds and installs a nightly `pg_dump` that keeps 14 days. CI builds the same
 images. The cost is one machine: no failover, and scaling out needs the steps listed at the end.
 
+From a push to the server:
+
+```mermaid
+flowchart TB
+    dev["Developer"] -->|"push to main or a pull request"| ci
+    dev -.->|"by hand"| deploy["infra/deploy.sh<br/>git archive of HEAD over ssh<br/>uncommitted work is never deployed"]
+    deploy --> up["infra/server/up.sh<br/>on the EC2 server<br/>rebuilds and restarts the stack"]
+
+    subgraph ci["GitHub Actions CI, four jobs"]
+        j1["Engine and API<br/>ruff, mypy strict,<br/>pytest on PostgreSQL 16"]
+        j2["Web app<br/>Biome, Vitest,<br/>tsc and production build"]
+        j3["Docker images<br/>docker compose build"]
+        j4["Judge walkthrough<br/>compose up, then<br/>Playwright in Chromium"]
+    end
+
+    classDef client fill:#E5F1F3,stroke:#0F5563,color:#14181F
+    classDef infra fill:#ECEFF3,stroke:#69727F,color:#14181F
+    classDef ok fill:#E3F3EA,stroke:#1F7A4D,color:#14181F
+    class dev client
+    class deploy,up infra
+    class j1,j2,j3,j4 ok
+```
+
+And what runs on the server:
+
+```mermaid
+flowchart TB
+    visitors["Visitors<br/>judges and the team, in a browser"] --> eip["Elastic IP<br/>relay-ryzera.tech"]
+    eip -->|"ports 80 and 443"| caddy
+
+    subgraph ec2["EC2 server in Mumbai"]
+        caddy["web: Caddy 2<br/>HTTPS certificates kept in volumes"]
+        api["api: FastAPI<br/>no published port"]
+        db[("db: PostgreSQL 16<br/>pgdata volume, no published port")]
+        migrate["migrate<br/>one-shot job"]
+        backup["Nightly pg_dump<br/>newest 14 kept"]
+        caddy -->|"/api"| api
+        api --> db
+        migrate -->|"schema, then seed"| db
+        db -.->|"pg_dump"| backup
+    end
+
+    classDef client fill:#E5F1F3,stroke:#0F5563,color:#14181F
+    classDef infra fill:#ECEFF3,stroke:#69727F,color:#14181F
+    classDef plain fill:#FFFFFF,stroke:#3A424E,color:#14181F
+    classDef data fill:#E4F1FB,stroke:#0A6EBD,color:#14181F
+    class visitors client
+    class eip,caddy,migrate infra
+    class api plain
+    class db,backup data
+```
+
 ### 11. Polling, not server-sent events
 
 The build plan proposed server-sent events for live updates. We poll instead, with TanStack Query: the dock every 8 to
@@ -343,6 +521,82 @@ The build plan proposed server-sent events for live updates. We poll instead, wi
 driver's run 30 plus the minute check-in, and every screen again when it comes to the front. Each screen already reads
 one complete view model per GET, polling survives the dropped connections of phones on the road, and nothing in Caddy
 or the API has to hold a stream open. The cost is that a change reaches another screen up to one interval late.
+
+## Statuses
+
+How an order, a trip, a stop and a load line change state. The names are the values stored in the database.
+
+**Order**
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> received: store places the order
+    received --> allocated: plan published with a trip for it
+    received --> deferred: plan published, it waits for a later run
+    allocated --> received: plan proposed again
+    allocated --> loaded: driver accepts the load
+    loaded --> on_the_way: the truck departs
+    on_the_way --> delivered: driver records the delivery
+    on_the_way --> failed: stop failed
+    delivered --> confirmed: store confirms receipt
+    delivered --> disputed: store reports an issue
+    confirmed --> [*]
+    disputed --> [*]
+```
+
+**Trip**
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> planned
+    planned --> loading: loader starts
+    loading --> loaded: driver accepts the handover
+    loaded --> departed: the truck leaves
+    departed --> finished: trip finished
+    departed --> returning: a backup is cancelled on the road
+    planned --> cancelled: a backup is cancelled at the dock
+    loading --> cancelled: a backup is cancelled at the dock
+    loaded --> cancelled: a backup is cancelled before it leaves
+    finished --> [*]
+    returning --> [*]
+    cancelled --> [*]
+```
+
+**Stop**
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> pending
+    pending --> arrived: driver arrives
+    arrived --> delivered: driver completes the stop
+    arrived --> failed: stop failed
+    pending --> moved: dispatcher gives it to a backup, driver out of contact
+    moved --> delivered: driver's records arrive and settle the clash
+    moved --> pending: dispatcher cancels the backup's copy
+    pending --> cancelled: a backup's own copy is withdrawn
+    delivered --> [*]
+    failed --> [*]
+    cancelled --> [*]
+```
+
+**Load line**
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> to_load
+    to_load --> in_progress: cases loaded
+    in_progress --> checked: loaded equals planned
+    to_load --> flag_waiting: loader flags a shortfall
+    in_progress --> flag_waiting: loader flags a shortfall
+    flag_waiting --> decided: dispatcher sends short or declines a replacement
+    flag_waiting --> in_progress: flag withdrawn, the cases were found
+    checked --> [*]
+    decided --> [*]
+```
 
 ## Security model
 
