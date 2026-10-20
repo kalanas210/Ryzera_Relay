@@ -32,8 +32,7 @@ import { useDriverText } from "./words";
 
 type DraftPhoto = { id: string; blob: Blob; taken_at: string; width: number; height: number };
 
-/** Everything typed and taken on DRV-03 so far, kept on the phone on every change: if Android unloads the page
- *  while the camera is open, the form comes back filled in. Cleared once the delivery is in the outbox. */
+// Saved on every change, because Android can unload the page while the camera is open.
 export type Draft = {
   stop_id: string;
   mode: "all" | "change";
@@ -65,7 +64,7 @@ function freshDraft(stop: DriverStop): Draft {
 function useDraft(stop: DriverStop | undefined) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const touched = useRef(false);
-  // a draft is read once per stop, not again for each fresh copy of the run
+  // Read the draft once per stop, not again for every fresh copy of the run.
   const latest = useRef(stop);
   latest.current = stop;
   const stopId = stop?.stop_id;
@@ -91,8 +90,7 @@ function useDraft(stop: DriverStop | undefined) {
   return [draft, update] as const;
 }
 
-/** DRV-03 Proof of delivery: what came off the truck, who took it, and a photo or a signature. Complete stop writes
- *  one delivery record and then its photo, and goes on to the next stop, or to the trip summary after the last. */
+// DRV-03 Proof of delivery. Complete stop writes the delivery record, then its photo.
 export function ProofPage() {
   const { stopId = "" } = useParams();
   const { run, loaded, now, items, save, savePhoto, offline } = useDriver();
@@ -174,7 +172,7 @@ export function ProofPage() {
       },
       { locate: true },
     );
-    // the photo always goes after its stop record, so the stop reaches the office first on a weak signal
+    // The photo goes after its stop record, so on a weak signal the stop reaches the office first.
     if (draft.photo) {
       await savePhoto({ ...draft.photo, stop_id: stop.stop_id, event_id: record.id });
     }
@@ -380,7 +378,6 @@ export function ProofPage() {
   );
 }
 
-/** DRV-03 / Saved: the stop is on the phone (and on its way, or already with Relay). Then the next stop. */
 export function SavedPage() {
   const { stopId = "" } = useParams();
   const { run, loaded, now, items, offline } = useDriver();
@@ -489,7 +486,6 @@ export function SavedPage() {
   );
 }
 
-/** Next stop card / compact: the marker, the place, its window and access, and both named times. */
 function NextCompact({ stop, runDate }: { stop: DriverStop; runDate: string }) {
   const { t, clock, around, windowOf, access } = useDriverText();
   return (

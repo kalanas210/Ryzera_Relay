@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Relay web: the React PWA, built with pnpm and served by Caddy, which also proxies /api to the API.
+# The React app, built with pnpm and served by Caddy. Caddy also proxies /api to the API.
 FROM node:22-alpine AS build
 RUN corepack enable
 WORKDIR /app

@@ -1,5 +1,5 @@
-# SITE_ADDRESS is ":80" locally. Set it to a domain in production and Caddy provisions HTTPS itself,
-# which the installable app, the camera and location need.
+# SITE_ADDRESS is :80 locally. In production it is a domain and Caddy gets HTTPS itself.
+# The installable app, the camera and location need HTTPS.
 {
 	admin off
 }
@@ -8,8 +8,8 @@
 	encode zstd gzip
 
 	handle /api/* {
-		# the largest thing anyone sends is a photo, shrunk on the phone and capped at 1.5 MB by the API: a bigger
-		# body is turned away here with 413 before the API has to read it
+		# The biggest upload is a photo, shrunk on the phone and capped at 1.5 MB by the API.
+		# Anything bigger gets a 413 here before the API reads it.
 		request_body {
 			max_size 2MB
 		}

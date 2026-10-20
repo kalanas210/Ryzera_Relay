@@ -1,5 +1,4 @@
-"""What the plan board shows: every vehicle of the depot as a lane with its trips, meters and rules, the
-orders that wait, and the counts in the plan bar. Recomputed from the stored plan on every read."""
+"""What the plan board shows. It is recomputed from the stored plan on every read."""
 
 from __future__ import annotations
 
@@ -102,7 +101,7 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
                 deferral=_deferral_out(d) if d else None,
             )
         )
-    # after publishing, deferred orders have moved to the next run; show them from their deferral
+    # Once published, deferred orders have moved to the next run. Show them from their deferral.
     if plan.status is PlanStatus.PUBLISHED:
         for d in deferrals.values():
             moved = db.get(Order, d.order_id)
@@ -186,7 +185,6 @@ def board(db: Session, now: datetime, plan: Plan) -> BoardOut:
 
 
 def _stamp(value: str | None) -> datetime | None:
-    """A moment kept in the plan's summary, in Sri Lanka time."""
     return datetime.fromisoformat(value).astimezone(COLOMBO) if value else None
 
 
@@ -195,7 +193,6 @@ def _local(value: datetime | None) -> datetime | None:
 
 
 def _deferral_out(d: Deferral) -> DeferralOut:
-    """A deferral on the board, with when the store was told and when it pressed Got it."""
     return DeferralOut(
         kind=d.kind.value,
         unavoidable=bool(d.explanation.get("unavoidable")),
@@ -212,7 +209,6 @@ def _deferral_out(d: Deferral) -> DeferralOut:
 
 
 def _loads_locked(db: Session, plan: Plan) -> set[tuple[str, int]]:
-    """Trips whose truck is packed or gone: the stop order is set by how the cases went on."""
     if plan.status is not PlanStatus.PUBLISHED:
         return set()
     trips = db.scalars(select(Trip).where(Trip.plan_id == plan.id)).all()
@@ -326,9 +322,7 @@ def _lane_note(status: str, note: str, plan: Plan, trips: list[TripReport]) -> s
 
 
 def fits(db: Session, plan: Plan, order_refs: Sequence[str]) -> list[FitOut]:
-    """While orders are dragged (one Not placed card, or every order of a stop): for every trip and every empty slot
-    of the depot's running vehicles, would they fit, what the trip would then carry, where they would stop, and if
-    they don't fit, why in a few words. Each slot is judged as the move would leave it."""
+    # Used while orders are dragged. Each slot is judged as the move would leave it.
     orders = run_orders(db, plan.depot, plan.run_date)
     ctx = context(db, plan, orders)
     refs = [ref for ref in dict.fromkeys(order_refs) if ref in ctx.orders]
@@ -358,9 +352,8 @@ def fits(db: Session, plan: Plan, order_refs: Sequence[str]) -> list[FitOut]:
                 continue
             existing = trip.order_ids if trip else []
             aboard = [*existing, *refs]
-            # the engine's words for the first order, with the store's other orders already aboard
             ok, hint = fit_hint(ctx, first, EngineTrip(vehicle_id, number, [*existing, *refs[1:]]), trips)
-            # the move puts the stops in Relay's order when one keeps every window, so judge that order too
+            # A move puts stops in Relay's order if that keeps every window, so judge that order too.
             moved = EngineTrip(vehicle_id, number, list(aboard))
             resequence(ctx, moved, trips)
             if not ok and moved.order_ids != aboard:

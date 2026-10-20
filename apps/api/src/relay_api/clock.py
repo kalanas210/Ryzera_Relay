@@ -1,10 +1,4 @@
-"""The scenario clock.
-
-The story Relay was designed around runs from Tuesday 7 April 2026, 2:05 PM, to the Wednesday
-morning deliveries. The real date is months later, so each workspace carries its own clock: scenario
-time runs at `clock_rate` from an anchor, and the demo bar can jump it to the next moment in the
-story. Everything Relay records (orders, arrivals, proofs) is stamped in scenario time.
-"""
+"""Each workspace has its own scenario clock, and everything Relay records is stamped with it."""
 
 from __future__ import annotations
 
@@ -18,7 +12,6 @@ COLOMBO = ZoneInfo("Asia/Colombo")
 
 
 def at(day: str, clock: str) -> datetime:
-    """at('2026-04-08', '05:41') is 5:41 AM Sri Lanka time on 8 April 2026."""
     return datetime.fromisoformat(f"{day}T{clock}:00").replace(tzinfo=COLOMBO)
 
 

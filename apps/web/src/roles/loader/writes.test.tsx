@@ -87,7 +87,7 @@ function trip(...lines: LoadLine[]): TripLoad {
 
 type Pending<T> = { resolve: (value: T) => void; reject: (error: unknown) => void };
 
-/** Server calls that answer only when the test says so, in the order they were made. */
+// Server calls that answer only when the test says so, in the order they were made.
 function controlled<T>() {
   const calls: Pending<T>[] = [];
   const fn = () =>
@@ -123,10 +123,8 @@ describe("taps on one load reach the screen in the order they were made", () => 
     act(() => result.current.mutate({ lineId: "packet", loaded: 44 }));
     act(() => result.current.mutate({ lineId: "tea", loaded: 44 }));
     await waitFor(() => expect(shown("tea")).toBe("checked"));
-    // one at a time: the second tap waits for the first to be saved
     expect(spy).toHaveBeenCalledTimes(1);
 
-    // the server saved packet foods only so far
     await act(async () => post.calls[0]?.resolve(trip(line("packet", 44), line("tea"))));
     expect(shown("packet")).toBe("checked");
     expect(shown("tea")).toBe("checked");
@@ -161,7 +159,7 @@ describe("taps on one load reach the screen in the order they were made", () => 
     act(() => result.current.write.mutate({ lineId: "tea", loaded: 44 }));
     await waitFor(() => expect(shown("tea")).toBe("checked"));
 
-    // the 8 second poll goes out while the tap is still on its way, and is answered from before the tap
+    // The 8 second poll goes out while the tap is still on its way, and is answered from before the tap.
     act(() => void result.current.read.refetch());
     await waitFor(() => expect(get.calls).toHaveLength(1));
     await act(async () => get.calls[0]?.resolve(trip(line("packet"), line("tea"))));
@@ -212,7 +210,7 @@ describe("a flag saves on the tablet first", () => {
       });
       expect(result.current.flag.failureCount).toBeGreaterThan(1);
       expect(result.current.flag.isPending).toBe(true);
-      // a missing connection never puts the flag back: it waits on the tablet
+      // No signal never puts the flag back. It waits on the tablet.
       expect(shown("packet")).toBe("flag_waiting");
       expect(result.current.unsent.has("packet")).toBe(true);
     } finally {

@@ -1,5 +1,4 @@
-"""The demo bar: the scenario clock, private copies of the day, and reset. Only in demo mode. The shared walkthrough
-stays at the start of the story for everyone, so only a private copy's clock moves or resets."""
+"""The demo bar: the scenario clock, private copies of the day, and reset. Demo mode only."""
 
 from __future__ import annotations
 
@@ -30,8 +29,8 @@ def _demo_only() -> None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Demo mode is off")
 
 
+# The shared walkthrough stays at the start of the story for everyone. Only a private copy's clock moves.
 def _private(scope: ScopeDep) -> None:
-    """The shared walkthrough stays at the start of the story for everyone: only a private copy's clock moves."""
     if scope.workspace.is_default:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -70,9 +69,9 @@ class ClockCommand(BaseModel):
     to: str | None = Field(default=None, description="A moment key, or an ISO time with its offset")
     minutes: int | None = Field(default=None, ge=1, le=24 * 60)
 
+    # A jump needs a story moment or a time with its offset. A time without one could be any timezone.
     @model_validator(mode="after")
     def _a_jump_names_where(self) -> Self:
-        """A jump goes to a story moment, or to a time with its offset: a time with none could be any timezone."""
         if self.action != "jump":
             return self
         if not self.to:
@@ -97,8 +96,9 @@ def move_clock(body: ClockCommand, scope: ScopeDep) -> DemoState:
         target = moment(scope.db) if moment else datetime.fromisoformat(body.to or "")  # checked by ClockCommand
         if target < now - timedelta(minutes=1):
             raise HTTPException(status.HTTP_409_CONFLICT, "The clock only moves forward. Reset the day to start again.")
+        # A story moment can move while the jump plays its steps, so catch_up sets the clock for it.
         if moment is None:
-            set_clock(ws, target)  # a moment can move while the jump plays the steps on the way; catch_up sets it
+            set_clock(ws, target)
     elif body.action == "advance":
         set_clock(ws, now + timedelta(minutes=body.minutes or 15))
     elif body.action == "pause":

@@ -5,7 +5,6 @@ import type { Account, DemoState, Me } from "@/api/types";
 
 const RoleContext = createContext<Role | null>(null);
 
-/** Everything under a role's route acts as that role. */
 export function RoleProvider({ role, children }: { role: Role; children: ReactNode }) {
   return <RoleContext.Provider value={role}>{children}</RoleContext.Provider>;
 }
@@ -16,8 +15,7 @@ export function useRole(): Role {
   return role;
 }
 
-/** The driver's phone opens with no signal too: who is signed in is kept on the phone, and checked again as soon as
- *  Relay can be reached. Only the driver's: every other role works at a desk or a dock with a connection. */
+// Only the driver's phone can open with no signal, so only the driver's sign-in is kept on the phone.
 const KEPT_ROLES: ReadonlySet<Role> = new Set(["driver"]);
 
 function keptMe(role: Role): Me | undefined {
@@ -36,7 +34,7 @@ function keepMe(role: Role, me: Me | null) {
     if (me) localStorage.setItem(`relay.me.${role}`, JSON.stringify(me));
     else localStorage.removeItem(`relay.me.${role}`);
   } catch {
-    // nothing kept: the phone asks Relay each time
+    // storage is blocked, so the phone asks Relay each time
   }
 }
 
@@ -54,7 +52,7 @@ export function useMe(role: Role) {
       }
     },
     initialData: () => keptMe(role),
-    initialDataUpdatedAt: 0, // kept, never fresh: Relay is asked again at once
+    initialDataUpdatedAt: 0, // a kept copy is never fresh, so Relay is asked at once
     retry: (count, error) => error.status !== 401 && !error.offline && count < 2,
     staleTime: 60_000,
   });
@@ -90,8 +88,7 @@ export function useSignOut(role: Role) {
   });
 }
 
-/** The demo bar's state. Asked as the role on screen, so Relay knows who is being played in this copy: the story
- *  leaves a character to the judge playing them, even on a driver's phone with its signal switched off. */
+// Asked as the role on screen, so Relay knows which character a judge is playing.
 export function useDemoState() {
   const role = useContext(RoleContext) ?? undefined;
   return useQuery<DemoState, ApiError>({

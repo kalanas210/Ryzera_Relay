@@ -1,5 +1,4 @@
-"""The dock tablet: tonight's loads (LDR-01), loading one vehicle (LDR-02), flagging a shortfall (LDR-03) and the
-handover (LDR-04). Every change is recorded against the loader signed in on the tablet."""
+"""The dock tablet (LDR-01 to LDR-04). Every change is recorded against the loader signed in on the tablet."""
 
 from __future__ import annotations
 
@@ -32,9 +31,8 @@ def _depot(user: AppUser) -> str:
     return user.depot or "Kandy"
 
 
+# Another hub's load reads as not there, so a crafted request learns nothing about it.
 def _trip(scope: Scope, user: AppUser, trip_id: uuid.UUID) -> Trip:
-    """A load at the loader's own hub. Another hub's load reads as not there, the same as a load that does not
-    exist, so a crafted request learns nothing about it."""
     trip = scope.db.get(Trip, trip_id)
     plan = scope.db.get(Plan, trip.plan_id) if trip else None
     if trip is None or plan is None or plan.depot != _depot(user):
@@ -91,8 +89,8 @@ def flag(line_id: uuid.UUID, body: FlagIn, scope: ScopeDep, user: Loader) -> Tri
 
 @router.put("/lines/{line_id}/flag/photo", response_model=TripLoadOut)
 def flag_photo(line_id: uuid.UUID, scope: ScopeDep, user: Loader, file: Annotated[UploadFile, File()]) -> TripLoadOut:
-    """A photo of the damaged cases, resized on the tablet. Sent after the flag; a second photo replaces it. Not
-    async: the load's lock may have to wait for the simulator's tick."""
+    """A photo of the damaged cases, resized on the tablet. Sent after the flag. A second photo replaces it."""
+    # Not async on purpose. The load's lock may have to wait for the simulator's tick.
     line = _line(scope, user, line_id)
     data = file.file.read(dock.MAX_PHOTO_BYTES + 1)
     _guard(lambda: dock.attach_photo(scope.db, scope.now, user, line, data, file.content_type or "image/jpeg"))
@@ -109,7 +107,7 @@ def withdraw_flag(line_id: uuid.UUID, scope: ScopeDep, user: Loader) -> TripLoad
 
 @router.post("/trips/{trip_id}/complete", response_model=TripLoadOut)
 def complete(trip_id: uuid.UUID, scope: ScopeDep, user: Loader) -> TripLoadOut:
-    """Load complete: sends the handover to the driver's phone."""
+    """Load complete. Sends the handover to the driver's phone."""
     trip = _trip(scope, user, trip_id)
     _guard(lambda: dock.complete(scope.db, scope.now, user, trip))
     return _load(scope, user, trip_id)

@@ -1,6 +1,5 @@
 import { cx } from "@/lib/cx";
 
-/** The Relay mark: a baton passed from one hand to the next. */
 export function RelayMark({ size = 28, className }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden className={className}>

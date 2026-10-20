@@ -31,11 +31,9 @@ class Account(Schema):
     role: Role
     detail: str
     uses_pin: bool
+    # The sign-in page shows it because the README publishes the demo credentials anyway.
     hint: str
-    """The demo credential, shown on the sign-in page because the README publishes it anyway."""
     pin: str | None = None
-    """The seeded PIN, if the account has one: a loader's sign-in, or the driver's own PIN that accepts a load on
-    the dock tablet."""
 
 
 class MomentOut(Schema):
@@ -49,8 +47,8 @@ class WorkspaceOut(Schema):
     code: str
     label: str
     is_default: bool
+    # New each time the copy is made or reset.
     edition: str
-    """New each time the copy is made or reset."""
 
 
 class DemoState(Schema):
@@ -61,7 +59,5 @@ class DemoState(Schema):
     moments: list[MomentOut]
     next: MomentOut | None
     played: list[str] = []
-    """Story steps the last jump played because nobody had taken them."""
+    # The story's scripted loss of signal by driver username, once the clock has reached it.
     outages: dict[str, dict[str, datetime]] = {}
-    """The story's scripted loss of signal by driver username ({"from", "to"}), once the clock has reached it: the
-    demo bar can say why a phone is quiet, and that driver's phone obeys it."""

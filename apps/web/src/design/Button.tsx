@@ -12,11 +12,10 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   iconAfter?: LucideIcon;
   full?: boolean;
   compact?: boolean;
-  /** Field screens say what is left instead of greying out: "Add a name and a photo". */
   reason?: ReactNode;
 };
 
-/** Store and field buttons grow to a second line rather than clip: Sinhala and Tamil labels run longer. */
+// Store and field buttons grow to a second line, because Sinhala and Tamil labels run longer.
 const HEIGHT: Record<Density, { primary: string; other: string; compact: string; text: string; icon: number }> = {
   desk: { primary: "h-9", other: "h-9", compact: "h-8", text: "t-dense-strong", icon: 20 },
   store: { primary: "min-h-12 py-1.5", other: "min-h-12 py-1.5", compact: "min-h-11 py-1", text: "t-button", icon: 20 },
@@ -49,8 +48,7 @@ function sizeOf(density: Density, variant: Variant, compact: boolean | undefined
   };
 }
 
-/** A button's look for something that is not a button, such as a link that opens another screen, so the two never
- *  drift apart. The icon size to draw beside its label comes with it. */
+// The button look for a link that opens another screen, so the two never drift apart.
 export function buttonLook({
   variant = "secondary",
   density = "store",

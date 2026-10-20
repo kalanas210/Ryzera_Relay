@@ -1,10 +1,4 @@
-"""Live estimates for a run on the road: the engine's one rule (relay_engine.estimate) fed from what Relay has heard.
-
-The last stop event comes from the driver's records (an arrival or a delivery Relay has applied) or a store's confirmed
-receipt, which counts as a delivery at the receipt time; before the first stop it is the departure. The driver's phone
-counts as out of contact once it has not reached Relay for a few minutes on a running trip. Nothing here writes: the
-dispatcher, the store and the phone all read the same numbers through this module.
-"""
+"""Live estimates for a run on the road, from the engine's one rule (relay_engine.estimate)."""
 
 from __future__ import annotations
 
@@ -32,8 +26,8 @@ from relay_engine.clock import Conditions
 from relay_engine.estimate import LastEvent, estimate_after, likely_range, position, round5
 from relay_engine.network import Brand
 
+# A running trip's phone is out of contact after this long without reaching Relay.
 SILENCE_MINUTES = 5
-"""A running trip's phone counts as out of contact after this long without reaching Relay (it checks in each minute)."""
 
 
 @dataclass
@@ -45,14 +39,12 @@ class StopEstimate:
     arrived_at: datetime | None = None
     delivered_at: datetime | None = None
     receipt_at: datetime | None = None
+    # rounded to 5 minutes for drivers and stores, None once the stop is done. exact is for the desk.
     estimate: datetime | None = None
-    """Rounded to 5 minutes, as the driver and the store read it ("around 6:35 AM"); None once the stop is done."""
     exact: datetime | None = None
-    """The same estimate to the minute, as the dispatcher's desk shows it while the phone is in contact."""
+    # the estimate has gone by with no word, and it is never pushed later
     passed: bool = False
-    """The estimate has gone by with no word; it is never pushed later."""
     range: tuple[datetime, datetime] | None = None
-    """Only while the driver is out of contact."""
 
     @property
     def done(self) -> bool:
@@ -115,7 +107,8 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
         if s.status is StopStatus.ARRIVED and row.arrived_at is None:
             row.arrived_at = s.arrived_at
 
-    # the last stop event: the furthest stop with anything recorded, its delivery before its arrival
+    # The last event is the furthest stop with anything recorded, delivery before arrival.
+    # A store's receipt counts as a delivery. With no stops yet, the last event is the departure.
     last: LastEvent | None = None
     last_dt: datetime | None = None
     for row in out:
@@ -141,7 +134,7 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
 
     brand = Brand(trip.brand)
     remaining = [row for row in out if not row.done and row.arrived_at is None]
-    now_min = float(int(adapters.minutes_of(run_date, now)))  # the minute on the clock, as people read it
+    now_min = float(int(adapters.minutes_of(run_date, now)))
     if last is not None:
         times = estimate_after(net, conditions, brand, [r.outlet_id for r in remaining], last)
         for row, t in zip(remaining, times, strict=True):
@@ -155,7 +148,6 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
     else:
         for row, s in zip(out, stops, strict=True):
             if not row.done and row.arrived_at is None and s.expected_arrival is not None:
-                # the plan's expected time, read like every estimate: to 5 minutes, and to the minute on the desk
                 row.estimate = adapters.at_minutes(run_date, round5(adapters.minutes_of(run_date, s.expected_arrival)))
                 row.exact = adapters.at_minutes(run_date, adapters.minutes_of(run_date, s.expected_arrival))
         where = ("at_depot", None)
@@ -174,5 +166,5 @@ def run_estimate(db: Session, trip: Trip, now: datetime, conditions: Conditions 
 
 
 def _clock_minutes(moment: datetime) -> int:
-    """Whole minutes on the clock, so 5:41 to 6:15 reads 34 minutes whatever the seconds."""
+    # Whole minutes on the clock, so 5:41 to 6:15 reads 34 minutes whatever the seconds.
     return int(moment.timestamp() // 60)

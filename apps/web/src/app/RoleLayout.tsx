@@ -4,7 +4,6 @@ import type { Role } from "@/api/client";
 import { DemoBar } from "@/demo/DemoBar";
 import { RoleProvider, useMe } from "./session";
 
-/** Guards a role's routes: signed in as that role, or off to sign in and back again. */
 export function RoleLayout({ appRole: role, children }: { appRole: Role; children: ReactNode }) {
   const me = useMe(role);
   const location = useLocation();
@@ -15,7 +14,7 @@ export function RoleLayout({ appRole: role, children }: { appRole: Role; childre
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/signin?role=${role}&next=${next}`} replace />;
   }
-  // a phone with no signal keeps working from who was signed in last; only a first sign-in needs Relay
+  // A phone with no signal keeps working from the last sign-in. Only a first sign-in needs Relay.
   if (me.isError && !me.data) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-6 text-center t-body text-asphalt-700">

@@ -28,7 +28,7 @@ def seed_all(db: Session) -> None:
         create_workspace(db, settings.seed_dir, MAIN, "Shared walkthrough", is_default=True)
         log.info("Seeded the story day into workspace %s", MAIN)
     elif not held_at_start(main):
-        # a shared copy from before its clock was held, run on in real time to a day long over
+        # This shared copy's clock was never held, so real time carried it to a day long over.
         reset_workspace(db, settings.seed_dir, main)
         log.info("Put workspace %s back to the start of the story", MAIN)
     db.commit()

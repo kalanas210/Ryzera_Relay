@@ -1,9 +1,5 @@
-"""API tests run against a real PostgreSQL, the same database the app uses.
-
-A throwaway database is created for the run, migrated and seeded like a fresh install, and dropped at the end.
-RELAY_TEST_ADMIN_URL names a server where the user may create databases (the compose database or the local dev
-one). Without a reachable server the API tests are skipped and the engine tests still run.
-"""
+"""API tests run on a real PostgreSQL, in a throwaway database made for the run and dropped after.
+RELAY_TEST_ADMIN_URL names a server that may create databases. Without one the API tests are skipped."""
 
 from __future__ import annotations
 
@@ -18,7 +14,7 @@ from sqlalchemy.engine import make_url
 ADMIN_URL = os.environ.get("RELAY_TEST_ADMIN_URL", "postgresql://relay:relay@localhost:55432/postgres")
 TEST_DB = f"relay_test_{uuid.uuid4().hex[:8]}"
 
-# Settings are read once, at first import of relay_api, so the test database is named before anything imports it.
+# Settings are read once, when relay_api first loads, so name the test database before that.
 _test_url = make_url(ADMIN_URL).set(drivername="postgresql+psycopg", database=TEST_DB)
 os.environ["RELAY_DATABASE_URL"] = _test_url.render_as_string(hide_password=False)
 os.environ.setdefault("RELAY_SECRET_KEY", "test-only-secret-key-at-least-32-bytes-long")
@@ -55,7 +51,7 @@ def new_copy(database: None) -> Callable[[], Copy]:
     from relay_api.main import app
 
     def make() -> Copy:
-        # no `with`: the background simulator stays off, so every change in a test comes from the test itself
+        # No `with` here, so the background simulator stays off.
         return Copy(TestClient(app, headers={"X-Relay-Client": "web"}))
 
     return make

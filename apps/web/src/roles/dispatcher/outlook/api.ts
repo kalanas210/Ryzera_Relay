@@ -13,10 +13,9 @@ export type OutlookDay = {
   available: number;
   in_workshop: string[];
   state: FleetState;
-  /** The run being planned counts its orders in, not the forecast. */
   from_order_book: boolean;
   waits: number;
-  /** Chilled orders one refrigerated vehicle fewer than needed can serve, on forecast days the search counted it. */
+  // Chilled orders one vehicle fewer than needed can serve. Set on forecast days the search counted.
   served_one_fewer: number | null;
 };
 
@@ -62,14 +61,12 @@ export type Outlook = {
   key_figures: KeyFigure[];
   arrange: string[];
   notes: string[];
-  /** How the numbers are made, one paragraph each. */
   method: string[];
   labels: { fleet: string; vehicles: string; day: string; tech: string } | null;
-  /** Why there is nothing to show, for a depot with no forecast. */
   empty: string | null;
 };
 
-/** DSP-05 reads only: the forecast comes with the seed, and the run being planned follows the order book. */
+// DSP-05 reads only. The forecast comes with the seed. The run being planned uses the order book.
 export function useOutlook(depot: OutlookDepot) {
   return useQuery({
     queryKey: ["dispatch", "outlook", depot],

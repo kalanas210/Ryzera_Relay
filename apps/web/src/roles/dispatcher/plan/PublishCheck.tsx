@@ -8,7 +8,7 @@ import { type Board, type DepotName, useCheck, usePublish } from "./api";
 
 const DEPOT_LABEL: Record<DepotName, string> = { Kandy: "Kandy hub", Peliyagoda: "Peliyagoda" };
 
-/** DSP-02 / publish check, the Publish dialog and the published state. */
+// DSP-02 publish check, the Publish dialog and the published state.
 export function PublishCheck({ board, depot, onBack }: { board: Board; depot: DepotName; onBack: () => void }) {
   const check = useCheck(board.plan.id, true);
   const publish = usePublish(depot, board.plan.id);
@@ -21,7 +21,7 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
   const headingId = useId();
   const resultId = useId();
 
-  // Ctrl Enter, which brought the dispatcher here from the board, now opens the Publish dialog
+  // Ctrl Enter, which brought the dispatcher here from the board, now opens the Publish dialog.
   const ready = useRef(false);
   ready.current = Boolean(!published && data?.can_publish);
   useEffect(() => {
@@ -144,7 +144,6 @@ export function PublishCheck({ board, depot, onBack }: { board: Board; depot: De
                 onClick={() => setDialog(true)}
                 title="Publish plan (Ctrl Enter)"
                 aria-keyshortcuts="Control+Enter"
-                // described by the check's result, which also tells it from the plan bar's Publish plan
                 aria-describedby={resultId}
               >
                 Publish plan

@@ -34,17 +34,14 @@ function useWide(): boolean {
   );
 }
 
-/** DSP-04 Live runs. On the desk: the tiles, every run stop by stop, and the exceptions feed beside them. At phone
- *  width only the feed, so a flag from the dock at night reaches the dispatcher on call at home with the decision it
- *  needs. */
+// DSP-04 Live runs. The phone shows only the feed, so a night flag reaches the dispatcher on call.
 export function LivePage() {
   const [depotChoice, setDepot] = useDepot("Kandy");
   const depot: Depot = depotChoice === "Peliyagoda" ? "Peliyagoda" : "Kandy";
   return useWide() ? <DeskLive depot={depot} onDepot={setDepot} /> : <PhoneLive depot={depot} />;
 }
 
-/** What the last fetch knew, when the connection is gone. The decisions stay on screen; the server refuses them
- *  until the phone is back, and says so. */
+// Decisions stay on screen when the connection is gone. The server refuses them until it is back.
 function Offline({ feed, runs }: { feed: ReturnType<typeof useFeed>; runs: RunsPanel | undefined }) {
   if (!(feed.error instanceof ApiError && feed.error.offline) || !feed.data) return null;
   return (
@@ -102,7 +99,6 @@ function DeskLive({ depot, onDepot }: { depot: Depot; onDepot: (d: "Kandy" | "Pe
   const [toast, setToast] = useState<string | null>(null);
   const search = useRef<HTMLInputElement>(null);
 
-  // "/" searches, Shift P and Shift K switch the depot; never while typing.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -139,7 +135,7 @@ function DeskLive({ depot, onDepot }: { depot: Depot; onDepot: (d: "Kandy" | "Pe
   const vehicles = useMemo(() => vehicleRuns(rows), [rows]);
   const links = useMemo(() => feedLinks(items, rows), [items, rows]);
 
-  // A new exception brings its run into view; handling one never moves the selection under the dispatcher's eyes.
+  // A new exception brings its run into view. Handling one never moves the selection.
   const newest = data?.now[0];
   const seen = useRef(0);
   useEffect(() => {
@@ -151,15 +147,13 @@ function DeskLive({ depot, onDepot }: { depot: Depot; onDepot: (d: "Kandy" | "Pe
 
   const selected =
     picked && vehicles.some((v) => v.vehicle_id === picked) ? picked : defaultSelection(vehicles, items, links, rows);
-  // Once the runs and the feed are in, the run the desk opened on stays picked: marking an item reviewed or a new
-  // estimate changes what needs attention first, never the run in front of the dispatcher.
   const loaded = !!panel && !!data;
   useEffect(() => {
     if (loaded && selected && selected !== picked) setPicked(selected);
   }, [loaded, selected, picked]);
   const closeDrawer = useCallback(() => setMoving(null), []);
-  // The drawer has no scrim, so a click outside it closes it. It opens after the click that asked for it has
-  // finished, or that same click, made outside the drawer, would close it again at once.
+  // The drawer has no scrim, so a click outside closes it. Open it after the current click,
+  // or that same click would close it again at once.
   const openMove = useCallback((row: RunRow, marker: RunMarker) => {
     window.setTimeout(() => setMoving({ row, marker }), 0);
   }, []);
@@ -244,7 +238,6 @@ function DeskLive({ depot, onDepot }: { depot: Depot; onDepot: (d: "Kandy" | "Pe
   );
 }
 
-/** Exceptions panel: the same feed as the phone, beside the runs; its body scrolls on its own. */
 function Exceptions({
   feed,
   depot,

@@ -1,28 +1,5 @@
-"""The story autopilot: the steps the four judge characters take in the story, played when a judge skips past them
-or when nobody is playing that character.
-
-A judge can walk the whole day, or jump straight to the dock at 2:40 AM, or to the driver on the road. When the
-demo bar moves the clock forward, every story step whose time has passed and that nobody took is played as the
-story wrote it, in order, through the same services a person uses: Dilani's orders, the plan and its deferral,
-publishing, the 9:12 PM swap, Rizwan's loading and flag, Nuwan's answer, the load complete and Kasun accepting it,
-and then Kasun's morning on the road: the stops, the signal lost near Mawanella, Nuwan's backup, Dilani's receipt,
-and the one question when the phone comes back. A step the judge already took, or one that no longer fits what the
-judge did (an order moved, a stop swapped by hand, a stop reported closed, a backup already sent or called off), is
-left alone.
-
-When time simply runs, a character nobody is playing (nobody signed in as them has used this copy in the last few
-minutes) still acts as their times come, so a judge playing one role is never left waiting on another: Nuwan answers
-a flag five minutes after it is raised, Kasun accepts a load nobody accepts. A character someone is playing waits for
-them. A step that cannot be taken yet (the load is not complete) is tried again as the clock runs.
-
-On the road Kasun keeps the story's own times (Kegalle at 4:52 AM, and so on), later only when the truck left too
-late for them. The thunderstorm is not a character: from 5:41 to 7:14 AM Kasun's phone has no network whoever holds
-it, and Relay takes nothing from it in that window. Outside it the phone checks in each minute while the truck is
-out. What Kasun records inside it waits in the phone's outbox (one scheduled event) until the signal returns, then
-reaches Relay in the order it was saved, each record with its own time. A judge's phone in the storm hands what it
-saves to that same outbox (the demo's stand-in for the phone's own memory, never shown to the office), so a jump
-leaves those stops to it and plays only what nobody did; the phone reads the outbox back, so the stops a jump played
-show on it as saved there. A step already recorded, by either phone, is never played again.
+"""Plays the story's steps for a judge who skips ahead, and for any character nobody is playing.
+A step the judge already took, or one that no longer fits what they did, is left alone.
 """
 
 from __future__ import annotations
@@ -86,26 +63,26 @@ from relay_engine.network import Brand
 
 log = logging.getLogger("relay.story")
 
+# Dilani's dry order. The story follows the truck that carries it.
 DRY_ORDER = "ORD0098595"
-"""Dilani's dry order: the story follows the truck that carries it."""
+# Mawanella's dry order, which Nuwan moves ahead of Dilani's at 9:12 PM.
 SWAP_WITH = "ORD0098597"
-"""Mawanella's dry order, which Nuwan moves ahead of Dilani's at 9:12 PM."""
 SWAP_NOTE = "Mawanella's curb is a bus stop from 5:30 AM, so the store asked to be served earlier."
 SHORT_CASE = "rice_dhal"
 SHORT_QTY = 6
 
+# The thunderstorm, 5:41 to 7:14 AM. Kasun's phone has no network whoever holds it,
+# and Relay takes nothing from it.
 OUTAGE = (at(DELIVERY_DAY, "05:41"), at(DELIVERY_DAY, "07:14"))
-"""The thunderstorm that takes Kasun's network down around Mawanella and the hill roads, 93 minutes."""
 DEVICE = "relay-story"
-"""The phone the autopilot carries for Kasun on the road, when a judge skips ahead or nobody holds Kasun's phone."""
+# The scheduled event for the phone's outbox. It sends what the phone saved when the signal returns.
 RELEASE = "phone_back"
-"""The scheduled event that holds what the phone saved with no signal, and sends it when the signal returns."""
+# How long a judge who lands on a step that is theirs to take has before a later jump plays it.
 GRACE = timedelta(minutes=1)
-"""How long a judge who lands on a step that is theirs to take has before a later jump plays it."""
+# As the clock runs, how long such a step waits for the judge before its character takes it.
 LATER = timedelta(minutes=5)
-"""As the clock runs, how long such a step waits for the judge to come and take it before its character does."""
+# How long Nuwan takes to answer a flag. In the story it is flagged at 2:47 and answered at 2:52.
 ANSWER_AFTER = timedelta(minutes=5)
-"""How long Nuwan takes to answer a flag from the dock, as in the story: flagged at 2:47, answered at 2:52."""
 STOPPED_BY = frozenset(
     {
         ProblemReason.OUTLET_CLOSED,
@@ -114,16 +91,12 @@ STOPPED_BY = frozenset(
         ProblemReason.DAMAGED_IN_TRANSIT,
     }
 )
-"""Problems at a stop that the driver deals with there; a delay is not one of them."""
 STOP_RECORDS = (FieldEventKind.ARRIVED, FieldEventKind.DELIVERED, FieldEventKind.FAILED)
 TRIP_KNOWN = "story_trip"
-"""Key in Session.info: the story truck, while the steps' times are worked out with nothing changing."""
 
 
 @dataclass(frozen=True)
 class Visit:
-    """Kasun at the stops of the run, in order, at the story's times."""
-
     arrive: str
     deliver: str
 
@@ -132,13 +105,12 @@ VISITS = (Visit("04:52", "05:11"), Visit("05:30", "05:59"), Visit("06:21", "06:3
 ANSWER_AT = "07:15"
 FINISH_AT = "07:17"
 RECEIVERS = {"OUT119": "P. Silva", "OUT118": "N. Wijesinghe", "OUT117": "W. Rathnayake", "OUT116": "K. Herath"}
-"""Who signs for the goods at each of Kasun's stores."""
+# A street stop gets a signature and no photo, because the goods go in through the front.
 SIGNATURE = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80">'
     '<path d="M12 54c10-26 22-38 28-22s-8 30 4 24 16-40 28-32-2 32 10 28 20-26 32-18 8 18 24 10 28-14 40-8" '
     'fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>'
 )
-"""The receiver's signature at a street stop, where the goods go in through the front and no photo is taken."""
 MOVE_AT = "06:15"
 RECEIPT_AT = "06:42"
 KEEP_AT = "06:44"
@@ -161,21 +133,15 @@ class Cast:
 class Step:
     key: str
     who: str
-    """Whose step it is, as the Cast names them: dispatcher, loader, driver or store."""
     label: str | Callable[[Session], str]
-    """What the demo bar says was played; worked out from the day when it names a place."""
     when: Callable[[Session], datetime | None]
-    """The step's time in the story, or None while it cannot apply (no plan yet, say)."""
     play: Callable[[Session, datetime, Cast], bool]
-    """Take the step at `now`. False when there was nothing to do: the judge had already done it."""
+    # Waits a minute past its time, so a jump that lands on it leaves the step to the judge.
     after: bool = False
-    """Played only once the clock is a minute past its time, so a jump that lands on it leaves the step to the judge;
-    played, it still happens at its own time."""
+    # Taken every time its time comes round, so Nuwan answers every flag on the story truck.
     again: bool = False
-    """Taken each time its time comes round: Nuwan answers every flag raised on the story truck, not only the first."""
 
 
-# ------------------------------------------------------------------------------------------------ helpers
 def cast(db: Session) -> Cast | None:
     judges = {u.role: u for u in db.scalars(select(AppUser).where(AppUser.judge_account.is_(True)))}
     try:
@@ -193,7 +159,6 @@ def _plan(db: Session, depot: str) -> Plan:
 
 
 def story_trip(db: Session) -> Trip | None:
-    """The published trip carrying Dilani's dry order."""
     known: dict[str, Trip | None] | None = db.info.get(TRIP_KNOWN)
     if known is not None:
         if "trip" not in known:
@@ -232,10 +197,8 @@ def _fixed(day: str, clock: str) -> Callable[[Session], datetime]:
     return lambda _db: moment
 
 
+# minutes after the truck leaves (before, if negative), no later than `latest` on the delivery day
 def _from_departure(minutes: int, latest: str | None = None) -> Callable[[Session], datetime | None]:
-    """A time set by the story truck's departure: `minutes` after it (or before, if negative), and no later
-    than `latest` on the delivery day."""
-
     def when(db: Session) -> datetime | None:
         trip = story_trip(db)
         if trip is None:
@@ -248,10 +211,9 @@ def _from_departure(minutes: int, latest: str | None = None) -> Callable[[Sessio
     return when
 
 
-# ------------------------------------------------------------------------------------------------ the steps
+# Dilani's two Wednesday orders, at the story's 2:10 and 2:14 PM. Not once the Kandy plan
+# exists, because a plan proposed without them is the judge's own story.
 def _dilani_orders(db: Session, _now: datetime, people: Cast) -> bool:
-    """Dilani's two Wednesday orders, at the story's 2:10 and 2:14 PM. Not once the Kandy plan exists: a plan
-    proposed without them is the judge's own story."""
     store = people.store
     outlet = db.get(Outlet, store.outlet_id) if store.outlet_id else None
     if outlet is None or _plan(db, "Kandy").trips:
@@ -349,8 +311,8 @@ def _swap(db: Session, now: datetime, people: Cast) -> bool:
     return True
 
 
+# Rizwan starts VEH045 at 2:20 and has the last stop on by 2:40.
 def _load_last_stop(db: Session, now: datetime, people: Cast) -> bool:
-    """Rizwan starts VEH045 at 2:20 and has the last stop on by 2:40."""
     trip = story_trip(db)
     if trip is None or not _judge_untouched(trip) or trip.loading_started_at is not None:
         return False
@@ -365,8 +327,8 @@ def _load_last_stop(db: Session, now: datetime, people: Cast) -> bool:
     return True
 
 
+# At 2:47 Rizwan finds 30 of the 36 rice and dhal cases for Dilani's store and flags the other 6.
 def _flag(db: Session, now: datetime, people: Cast) -> bool:
-    """At 2:47 Rizwan finds 30 of the 36 rice and dhal cases for Dilani's store and flags the other 6."""
     trip = story_trip(db)
     if trip is None or not _judge_untouched(trip):
         return False
@@ -391,9 +353,8 @@ def _waiting_flags(db: Session) -> list[Shortfall]:
     )
 
 
+# At the story's 2:52, or five minutes after a flag raised later. None while no flag is waiting.
 def _after_flag(db: Session) -> datetime | None:
-    """When Nuwan answers: at the story's 2:52, or five minutes after a flag raised later. None while no flag on the
-    story truck waits for an answer."""
     waiting = _waiting_flags(db)
     if not waiting:
         return None
@@ -401,16 +362,14 @@ def _after_flag(db: Session) -> datetime | None:
 
 
 def _answer(db: Session, now: datetime, people: Cast) -> bool:
-    """Nuwan answers any flag still waiting on the story truck: send short, add to the store's next order."""
     waiting = _waiting_flags(db)
     for shortfall in waiting:
         dock.decide(db, now, people.dispatcher, shortfall, ShortfallDecision.SEND_SHORT)
     return bool(waiting)
 
 
+# Played even on a load the judge started, so the truck can leave on time.
 def _finish_loading(db: Session, now: datetime, people: Cast) -> bool:
-    """Every line on or decided, and Load complete, so the handover is on Kasun's phone by the demo bar's handover
-    moment. Played even on a load the judge started, so the truck can leave on time."""
     trip = story_trip(db)
     if trip is None or trip.departed_at is not None:
         return False
@@ -425,15 +384,13 @@ def _finish_loading(db: Session, now: datetime, people: Cast) -> bool:
     return True
 
 
+# With the demo bar's switch on, none of Kasun's phone steps play, since a judge holds the phone.
 def _cut_off(db: Session, people: Cast) -> bool:
-    """The demo bar's switch has cut Kasun's phone off: a judge holds it, and what it saved is still only on it, so
-    none of Kasun's phone steps is played for it until the switch is off again."""
     return records.switched_off(db, people.driver) is not None
 
 
+# Played only after the handover moment, so a judge who lands there taps Accept load.
 def _accept(db: Session, now: datetime, people: Cast) -> bool:
-    """Kasun accepts the load on the phone. Played only after the handover moment, so a judge who lands there taps
-    Accept load."""
     trip = story_trip(db)
     if trip is None or trip.departed_at is not None or _cut_off(db, people):
         return False
@@ -455,26 +412,22 @@ def _leave(db: Session, now: datetime, people: Cast) -> bool:
     return True
 
 
-# ------------------------------------------------------------------------------------------------ on the road
 def _stops(trip: Trip) -> list[Stop]:
     return sorted(trip.stops, key=lambda s: s.seq)
 
 
 def _running(db: Session) -> Trip | None:
-    """The story truck while it is on the road."""
     trip = story_trip(db)
     return trip if trip is not None and trip.departed_at is not None and trip.finished_at is None else None
 
 
 _LATE: dict[tuple[uuid.UUID, datetime], timedelta] = {}
-"""How late each departure of the story truck makes Kasun's day, by trip and departure: a departure never changes."""
 
 
+# Nothing, unless the truck left too late to reach the first stop at the story's time on
+# Relay's expected clock. Then every time Kasun keeps moves by this much. Every stop is in one
+# district, so the first leg is the same to each.
 def _late(db: Session, trip: Trip) -> timedelta:
-    """How much later than the story Kasun's day runs: nothing, unless the truck left too late to reach the first
-    stop at the story's time on Relay's expected clock. Every time Kasun keeps moves by this much. Worked out once
-    for a departure, which never changes once made: every stop of the run is in one district, so the first leg is the
-    same to each."""
     if trip.departed_at is None:
         return timedelta(0)
     key = (trip.id, trip.departed_at)
@@ -495,8 +448,6 @@ def _late(db: Session, trip: Trip) -> timedelta:
 
 
 def _on_the_road(clock: str) -> Callable[[Session], datetime | None]:
-    """A time on Kasun's road: the story's, moved by how late the truck left. None until it has left."""
-
     def when(db: Session) -> datetime | None:
         trip = story_trip(db)
         if trip is None or trip.departed_at is None:
@@ -510,9 +461,8 @@ def offline(now: datetime) -> bool:
     return OUTAGE[0] <= now < OUTAGE[1]
 
 
+# The judges' driver has it from the start of the day, so the phone obeys it the minute it begins.
 def outage(workspace: Workspace, user: AppUser) -> dict[str, datetime] | None:
-    """The loss of signal the story scripts for this driver's phone, whoever holds it. The judges' driver has it from
-    the start of the day, so the phone can obey it the minute it begins."""
     window = (workspace.state.get("outages") or {}).get(user.username)
     if window:
         return {k: datetime.fromisoformat(v) for k, v in window.items()}
@@ -522,7 +472,6 @@ def outage(workspace: Workspace, user: AppUser) -> dict[str, datetime] | None:
 
 
 def no_signal(workspace: Workspace, user: AppUser, now: datetime) -> dict[str, datetime] | None:
-    """The outage this driver's phone is inside at `now`: nothing it sends reaches Relay until it ends."""
     window = outage(workspace, user)
     return window if window is not None and window["from"] <= now < window["to"] else None
 
@@ -531,9 +480,8 @@ def _outbox(db: Session) -> ScheduledEvent | None:
     return db.scalar(select(ScheduledEvent).where(ScheduledEvent.kind == RELEASE, ScheduledEvent.done_at.is_(None)))
 
 
+# Each stop as the phone last saw it, so offline records carry that version like a real phone's.
 def _open_outbox(db: Session, driver: AppUser, trip: Trip) -> ScheduledEvent:
-    """The phone's outbox for the outage. It remembers each stop as the phone last saw it before the signal went,
-    so what Kasun records offline carries that version, as a real phone's records do."""
     event = _outbox(db)
     if event is None:
         event = ScheduledEvent(
@@ -553,17 +501,13 @@ def _open_outbox(db: Session, driver: AppUser, trip: Trip) -> ScheduledEvent:
 
 
 def _held(db: Session, stop: Stop) -> set[FieldEventKind]:
-    """What the phone's outbox already holds for a stop, whichever phone saved it."""
     event = _outbox(db)
     rows = event.payload.get("records", []) if event is not None else []
     return {FieldEventKind(r["kind"]) for r in rows if r["stop_id"] == str(stop.id)}
 
 
+# A problem reported by a judge holding Kasun's phone makes the stop theirs, not the autopilot's.
 def _stopped(db: Session, stop: Stop) -> bool:
-    """The judge holding Kasun's phone reported the store closed, the way in blocked, or goods refused or damaged
-    there: that stop is theirs to deal with, so the autopilot neither arrives nor delivers there. Reported to Relay,
-    or saved in the phone's outbox in the storm. The autopilot reports no problems itself, so any such report is the
-    judge's."""
     reported = db.scalar(
         select(ProblemReport.id).where(ProblemReport.stop_id == stop.id, ProblemReport.reason.in_(STOPPED_BY))
     )
@@ -581,16 +525,14 @@ def _stopped(db: Session, stop: Stop) -> bool:
 
 
 def memory(db: Session) -> dict[str, Any] | None:
-    """The phone's outbox while the storm lasts: each stop as the phone last saw it, and what it holds."""
     event = _outbox(db)
     return event.payload if event is not None else None
 
 
+# A judge's phone saves here in the storm, so a jump plays only what nobody did.
 def hold(
     db: Session, user: AppUser, device_id: str, saved: list[records.RecordIn], photos: list[dict[str, Any]]
 ) -> None:
-    """What a judge's phone saved in the storm joins the phone's outbox, where the autopilot sees it and leaves those
-    stops alone, and which sends it when the signal returns. Idempotent by each record's and photo's id."""
     people = cast(db)
     trip = _running(db)
     if people is None or trip is None or user.id != people.driver.id:
@@ -606,14 +548,12 @@ def hold(
 
 
 def stand_in(db: Session, photo_id: uuid.UUID) -> bytes | None:
-    """The photo the autopilot's Kasun took at a rear dock, for the phone that shows it as saved there."""
     payload = memory(db) or {}
     photo = next((p for p in payload.get("photos", []) if p["id"] == str(photo_id) and "piles" in p), None)
     return stand_in_photo(photo["piles"]) if photo else None
 
 
 def _check_in(db: Session, driver: AppUser, moment: datetime) -> DeviceContact:
-    """One of the phone's minute check-ins: it reached Relay at `moment`."""
     minute = moment.astimezone(COLOMBO).replace(second=0, microsecond=0)
     contact = records.contact_of(db, driver.id)
     if contact is None:
@@ -625,10 +565,8 @@ def _check_in(db: Session, driver: AppUser, moment: datetime) -> DeviceContact:
     return contact
 
 
+# The storm is set for Kasun's phone whoever holds it. Until then the phone checks in each minute.
 def phone(db: Session, workspace: Workspace, now: datetime) -> None:
-    """Kasun's phone as the clock runs, on every tick and jump. The storm is recorded for that phone whoever holds it,
-    so a judge's phone obeys it too. While the truck is out the phone checks in each minute, holds at the last
-    check-in before the storm, and opens its outbox there; the outbox sends itself when the signal returns."""
     people = cast(db)
     if people is None:
         return
@@ -640,7 +578,8 @@ def phone(db: Session, workspace: Workspace, now: datetime) -> None:
     trip = _running(db)
     if trip is None:
         return
-    # the demo bar's switch cut the phone off: the desk sees the silence the judge made, from the last check-in
+    # the demo bar's switch cut the phone off, so the desk sees the silence the judge made,
+    # from the last check-in
     cut = _cut_off(db, people)
     if offline(now):
         if not cut:
@@ -650,10 +589,8 @@ def phone(db: Session, workspace: Workspace, now: datetime) -> None:
         _check_in(db, driver, now)
 
 
+# Records go out in the order saved, then the photos. With nothing saved the phone just checks in.
 def release(db: Session, event: ScheduledEvent) -> None:
-    """The signal is back: the phone sends what it saved, stop records first in the order they were saved, then the
-    photos (a judge's phone sends its own photo files itself). With nothing saved it simply checks in, and Relay sees
-    it is back in contact."""
     payload = event.payload
     driver = db.scalar(select(AppUser).where(AppUser.username == payload.get("username")))
     if driver is None:
@@ -731,8 +668,6 @@ def _send_photo(db: Session, now: datetime, driver: AppUser, photo: dict[str, An
 def _save(
     db: Session, now: datetime, people: Cast, trip: Trip, record: records.RecordIn, photo: dict[str, Any] | None
 ) -> bool:
-    """Kasun records something on the phone at `now`. With signal it reaches Relay at once; inside the storm it
-    waits in the outbox, against the version of the stop the phone last saw."""
     if offline(now):
         event = _open_outbox(db, people.driver, trip)
         seen = event.payload.get("seen", {}).get(str(record.stop_id)) if record.stop_id else None
@@ -750,9 +685,8 @@ def _save(
     return result.outcome is not FieldEventOutcome.REJECTED
 
 
+# A stop moved while the phone had no signal is still Kasun's to drive to, as nobody could tell him.
 def _to_do(db: Session, trip: Trip, stop: Stop, now: datetime) -> StopStatus:
-    """Where a stop stands for Kasun: as Relay has it while the phone has signal, as the phone last saw it inside
-    the storm. A stop moved while the phone had no signal is still Kasun's to drive to: nobody could say."""
     if offline(now):
         event = _outbox(db)
         seen = event.payload.get("seen", {}).get(str(stop.id)) if event is not None else None
@@ -838,7 +772,6 @@ def _place(n: int, verb: str) -> Callable[[Session], str]:
 
 
 def _handle_delay(db: Session, now: datetime, people: Cast) -> bool:
-    """Nuwan marks the road delay a simulated driver reported as handled, from the on-call phone."""
     did = False
     for item in db.scalars(select(FeedItem).where(FeedItem.kind == FeedKind.DELAY, FeedItem.handled_at.is_(None))):
         event = db.get(FieldEvent, uuid.UUID(item.ref["event_id"])) if item.ref.get("event_id") else None
@@ -851,10 +784,9 @@ def _handle_delay(db: Session, now: datetime, people: Cast) -> bool:
     return did
 
 
+# With Kasun silent, Nuwan sends the stop likely to miss its close with the best free vehicle.
+# Not if Kasun is in contact, or the judge already sent a stop of this run with a backup.
 def _send_backup(db: Session, now: datetime, people: Cast) -> bool:
-    """With Kasun silent, Nuwan sends the stop whose likely range runs past its close with the best free vehicle,
-    the depot's standby in the story. Not if Kasun is in contact, or the judge already sent a stop of this run with
-    a backup, even one called off since."""
     trip = _running(db)
     if trip is None or db.scalar(select(Stop.id).where(Stop.backup_of.in_([s.id for s in trip.stops]))) is not None:
         return False
@@ -896,9 +828,9 @@ def _backup_label(db: Session) -> str:
     return "Nuwan sends a backup"
 
 
+# Once Kasun has been there. His delivery record may still be on his phone.
+# Not if the store already confirmed.
 def _receipt(db: Session, now: datetime, people: Cast) -> bool:
-    """Dilani checks the goods at the store's dock and confirms everything arrived, once Kasun has been there: the
-    record of the delivery may still be on Kasun's phone. Not if the store already confirmed."""
     order = db.scalar(select(Order).where(Order.order_ref == DRY_ORDER))
     trip = story_trip(db)
     if order is None or trip is None or trip.departed_at is None:
@@ -916,8 +848,8 @@ def _receipt(db: Session, now: datetime, people: Cast) -> bool:
     return True
 
 
+# Nuwan keeps the backup on its way after the store's receipt, while Kasun is still silent.
 def _keep_backup(db: Session, now: datetime, people: Cast) -> bool:
-    """Nuwan keeps the backup on its way after the store's receipt, while Kasun is still silent."""
     trip = _running(db)
     if trip is None:
         return False
@@ -941,7 +873,6 @@ def _keep_backup(db: Session, now: datetime, people: Cast) -> bool:
 
 
 def _answer_yes(db: Session, now: datetime, people: Cast) -> bool:
-    """At the dock, Kasun answers the one question about the stop with two copies: yes, delivered."""
     trip = _running(db)
     if trip is None or offline(now) or _cut_off(db, people):
         return False
@@ -966,8 +897,6 @@ def _answer_yes(db: Session, now: datetime, people: Cast) -> bool:
 
 
 def _finish(db: Session, now: datetime, people: Cast) -> bool:
-    """Kasun taps Finish trip at the last dock, once every stop is done, nothing waits on the phone and no question
-    is open."""
     trip = _running(db)
     if trip is None or offline(now) or _outbox(db) is not None or _cut_off(db, people):
         return False
@@ -990,14 +919,12 @@ def _finish(db: Session, now: datetime, people: Cast) -> bool:
     return _save(db, now, people, trip, record, None)
 
 
-# ------------------------------------------------------------------------------------------------ the photo
 PHOTO_SIZE = (480, 360)
 
 
+# A plain PNG drawn here, so the story needs no image files.
 @cache
 def stand_in_photo(piles: int) -> bytes:
-    """A plain drawing that stands in for the photo the autopilot's Kasun takes at a rear dock: cases in piles by a
-    roller door, nobody in it. Drawn here as a PNG, so the story needs no image files."""
     width, height = PHOTO_SIZE
     rows = [bytearray(width * 3) for _ in range(height)]
 
@@ -1006,12 +933,12 @@ def stand_in_photo(piles: int) -> bytes:
         for y in range(max(0, y0), min(height, y1)):
             rows[y][x0 * 3 : x1 * 3] = span
 
-    fill(0, 0, width, 200, (178, 174, 166))  # wall
-    fill(0, 200, width, height, (124, 122, 118))  # dock floor
+    fill(0, 0, width, 200, (178, 174, 166))
+    fill(0, 200, width, height, (124, 122, 118))
     fill(110, 34, 370, 200, (198, 200, 202))  # roller door
     for y in range(46, 200, 14):
         fill(110, y, 370, y + 2, (168, 170, 174))
-    fill(0, 196, width, 204, (92, 90, 86))  # dock edge
+    fill(0, 196, width, 204, (92, 90, 86))
     case_w, case_h, gap = 52, 38, 4
     pile_w = 2 * case_w + gap
     space = (width - piles * pile_w) // (piles + 1)
@@ -1021,7 +948,7 @@ def stand_in_photo(piles: int) -> bytes:
             for level in range(3):
                 x0 = left + col * (case_w + gap)
                 y1 = 336 - level * (case_h + gap)
-                fill(x0, y1 - case_h, x0 + case_w, y1, (142, 102, 62))  # carton edge
+                fill(x0, y1 - case_h, x0 + case_w, y1, (142, 102, 62))
                 fill(x0 + 2, y1 - case_h + 2, x0 + case_w - 2, y1 - 2, (178, 134, 86))
                 fill(x0 + case_w // 2 - 3, y1 - case_h + 2, x0 + case_w // 2 + 3, y1 - 2, (212, 192, 150))  # tape
 
@@ -1113,16 +1040,14 @@ STEPS: tuple[Step, ...] = (
 
 
 def pending(db: Session, workspace: Workspace, until: datetime) -> list[tuple[datetime, Step]]:
-    """Story steps due by `until` that no jump has settled yet, in story order: what a jump plays."""
     due = [(m, step) for m, step in _unsettled(db, workspace) if m + (GRACE if step.after else timedelta(0)) <= until]
     return sorted(due, key=lambda pair: pair[0])
 
 
+# A step a judge who lands on it would take waits LATER for them first.
 def on_time(
     db: Session, workspace: Workspace, now: datetime, people: Cast, playing: set[str]
 ) -> list[tuple[datetime, Step]]:
-    """Story steps due by `now` as the clock simply runs, for the characters nobody is playing, each with the time
-    its character takes it, in story order. A step a judge who lands on it would take waits LATER for them first."""
     due = []
     for moment, step in _unsettled(db, workspace, lambda s: people.of(s.who).username not in playing):
         taken = moment + (LATER if step.after else timedelta(0))
@@ -1131,11 +1056,10 @@ def on_time(
     return sorted(due, key=lambda pair: pair[0])
 
 
+# Nothing changes while the times are worked out, so the story truck is looked up once.
 def _unsettled(
     db: Session, workspace: Workspace, keep: Callable[[Step], bool] | None = None
 ) -> list[tuple[datetime, Step]]:
-    """Each step not settled yet that can apply as the day stands, with its time in the story. Nothing changes while
-    the times are worked out, so the story truck is looked up once for them all."""
     settled = workspace.state.get("story", {})
     out = []
     db.info[TRIP_KNOWN] = {}
@@ -1152,8 +1076,6 @@ def _unsettled(
 
 
 def settle(workspace: Workspace, step: Step, played: bool) -> None:
-    """A step is not played again once settled; a step taken `again` stays open once played, its time worked out
-    afresh (no flag waiting, no time)."""
     if step.again and played:
         return
     workspace.state = {**workspace.state, "story": {**workspace.state.get("story", {}), step.key: played}}
@@ -1163,13 +1085,13 @@ def label(db: Session, step: Step) -> str:
     return step.label(db) if callable(step.label) else step.label
 
 
+# Moments set by Kasun's own times, which move with them when the truck left late.
 ON_THE_ROAD = ("first_stop", "on_the_road", "receipt", "settled")
-"""Moments set by Kasun's own times, which move with them when the truck left late."""
 
 
+# Moments at the dock follow the story truck, so the handover sits just before it leaves.
+# Moments on the road follow Kasun's times. The storm's are fixed.
 def moments(db: Session) -> list[Moment]:
-    """The demo bar's moments. Those at the dock follow the published story truck: the handover sits just before
-    it leaves, whatever time the plan gave it. Those on the road follow Kasun's times; the storm's are fixed."""
     handover = _from_departure(-13, latest="03:31")(db)
     trip = story_trip(db)
     late = _late(db, trip) if trip is not None else timedelta(0)
@@ -1183,9 +1105,9 @@ def moments(db: Session) -> list[Moment]:
     return sorted(out, key=lambda m: m.at)
 
 
+# Worked out again after each step a jump plays. Before the Kandy plan is published the
+# handover only has its default time, and the steps on the way publish it.
 def moment_time(key: str) -> Callable[[Session], datetime] | None:
-    """A moment's time as the day stands, for a jump to work out again after each step it plays: before the Kandy
-    plan is published the handover only has its default time, and the steps on the way publish it."""
     if not any(m.key == key for m in MOMENTS):
         return None
     return lambda db: next(m.at for m in moments(db) if m.key == key)

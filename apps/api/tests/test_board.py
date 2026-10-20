@@ -1,6 +1,4 @@
-"""The plan board (DSP-02) through the API: the drag's fit for every trip, a stop that moves with every order of its
-store as one undo step, the plan's Edited and Ready marks, the fleet changes a dispatcher can make on a draft, the
-first read of a new day under concurrent requests, and the words a deferred store reads."""
+"""The plan board (DSP-02) through the API, including fleet changes and the deferral notice."""
 
 from __future__ import annotations
 
@@ -14,7 +12,7 @@ import pytest
 from copy_client import Copy
 
 COLOMBO = ZoneInfo("Asia/Colombo")
-DILANI_CHILLED = "ORD0098596"  # OUT117 Hemmathagama, the order that doesn't fit
+DILANI_CHILLED = "ORD0098596"  # OUT117 Hemmathagama, the chilled order that does not fit
 RUN_DATE = "2026-04-08"
 
 
@@ -51,7 +49,6 @@ def test_the_drag_names_the_stop_the_move_makes(new_copy: Callable[[], Copy]) ->
 
     fits = copy.get(f"/api/dispatch/plan/{plan}/fit?order_ref={DILANI_CHILLED}", "dispatcher")
     kegalle = next(f for f in fits if (f["vehicle_id"], f["trip_no"]) == ("VEH057", 2))
-    # the tooltip's numbers and the trip detail's "Drop to add OUT117 as stop 3"
     assert kegalle == {
         "vehicle_id": "VEH057",
         "trip_no": 2,
@@ -64,7 +61,7 @@ def test_the_drag_names_the_stop_the_move_makes(new_copy: Callable[[], Copy]) ->
         "stop": 3,
         "current": False,
     }
-    assert not any(f["current"] for f in fits)  # a Not placed order rides no trip yet
+    assert not any(f["current"] for f in fits)
 
     board = copy.post(
         f"/api/dispatch/plan/{plan}/move",
@@ -72,8 +69,8 @@ def test_the_drag_names_the_stop_the_move_makes(new_copy: Callable[[], Copy]) ->
         "dispatcher",
     )
     trip = _trip(board, "VEH057", 2)
-    # the second trip leaves after the first is back, so no stop order keeps every window: Relay keeps the
-    # dispatcher's, and the store that misses its window is the one just added
+    # The second trip leaves after the first is back, so no stop order meets every window.
+    # Relay keeps the dispatcher's order, and the store just added is the one that misses.
     assert [s["outlet_id"] for s in trip["stops"]] == ["OUT116", "OUT119", "OUT117"]
     assert [r["message"] for r in trip["rules"] if not r["passed"]] == [
         "Weight: 1,460.8 of 1,040 kg",
@@ -102,7 +99,6 @@ def test_a_stop_moves_with_every_order_given_as_one_undo_step(new_copy: Callable
 
     back = copy.post(f"/api/dispatch/plan/{plan}/undo", None, "dispatcher")
     assert [s["order_ref"] for s in _trip(back, "VEH057", 2)["stops"]] == refs
-    # back to exactly what Relay proposed, so the plan bar no longer says Edited
     assert back["plan"]["edited_at"] is None
     assert not back["can_undo"]
 
@@ -120,7 +116,7 @@ def test_a_move_names_orders_that_are_not_on_the_run(new_copy: Callable[[], Copy
 def test_the_plan_is_ready_when_the_deferral_has_a_reason(new_copy: Callable[[], Copy]) -> None:
     copy = _planning(new_copy)
     plan = _board(copy)["plan"]["id"]
-    assert _board(copy)["plan"]["ready_at"] is None  # the deferral still needs a reason
+    assert _board(copy)["plan"]["ready_at"] is None
 
     copy.post(f"/api/dispatch/plan/{plan}/deferrals/{DILANI_CHILLED}/confirm", {"reason": "reefer_short"}, "dispatcher")
     board = _board(copy)
@@ -142,7 +138,6 @@ def test_the_fleet_changes_on_a_draft_and_the_board_asks_for_a_new_proposal(new_
     lane = _lane(board, "VEH043")
     assert (lane["status"], lane["note"]) == ("workshop", "Brakes, back Fri")
     assert board["plan"]["fleet_changed_at"] is not None
-    # its trips stay until Relay proposes again, and break rule 9 so the plan can't go out like this
     assert len(lane["trips"]) == trips
     assert board["broken"] >= trips
     assert all("VEH043 is in the workshop today" in [r["message"] for r in t["rules"]] for t in lane["trips"])
@@ -173,7 +168,6 @@ def test_the_fleet_is_set_once_the_plan_is_out(new_copy: Callable[[], Copy]) -> 
 
 
 def test_a_new_days_first_reads_share_one_plan(new_copy: Callable[[], Copy]) -> None:
-    """The board's poll and a depot switch can both be the first read of a day: one plan, and no error."""
     from relay_api.db import SessionLocal, scope_to_workspace
     from relay_api.services import planning
     from relay_api.workspaces import find_workspace
@@ -237,7 +231,6 @@ def test_the_store_reads_one_reason_in_plain_words(
 
 
 def test_the_api_warms_the_story_days_first_proposals(new_copy: Callable[[], Copy]) -> None:
-    """`relay-api serve` warms the engine cache, so a judge's jump to the plan on a fresh install answers from it."""
     from sqlalchemy import delete, func, select
 
     from relay_api.cli import warm
@@ -256,10 +249,10 @@ def test_the_api_warms_the_story_days_first_proposals(new_copy: Callable[[], Cop
     warm()
     with SessionLocal() as db:
         assert set(db.scalars(select(EngineCache.depot))) == {"Kandy", "Peliyagoda"}
-    assert count(Workspace) == copies  # the scratch copy is gone
+    assert count(Workspace) == copies
     answers = count(EngineCache)
 
     copy = new_copy()
     played = copy.jump("plan")["played"]
     assert "Relay proposes the Kandy plan" in played
-    assert count(EngineCache) == answers  # the judge's proposal was already there
+    assert count(EngineCache) == answers

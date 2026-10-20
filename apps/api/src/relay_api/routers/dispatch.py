@@ -1,5 +1,4 @@
-"""The dispatcher's desk: the order queue (DSP-01) and the capacity outlook (DSP-05). The plan board, deferrals and
-live runs have routers of their own."""
+"""The dispatcher's desk. The order queue (DSP-01) and the capacity outlook (DSP-05)."""
 
 from __future__ import annotations
 
@@ -39,8 +38,8 @@ Dispatcher = Annotated[AppUser, Depends(require(Role.DISPATCHER))]
 
 
 class Flag(Schema):
+    # waited, van_only, large_truck, truck_only or mall
     kind: str
-    """waited, van_only, large_truck, truck_only, mall"""
     label: str
 
 
@@ -77,9 +76,8 @@ class NotOrdered(Schema):
     temps: list[str]
     pattern: str
     reminded_at: datetime | None
-    """The last Remind for this run, if the dispatcher sent one."""
+    # The store manager's number. The Call button needs it.
     phone: str | None
-    """The store manager's number, when the store's record has one; Call needs it."""
 
 
 class ChilledSummary(Schema):
@@ -123,8 +121,8 @@ def _flags(
     return flags
 
 
-# Needs attention first: waited last run, then orders that need a truck, chilled van-only, other van-only,
-# then everything else by the time the store's window closes.
+# Waited last run comes first, then orders that need a truck, chilled van-only, other van-only,
+# and the rest by when the store's window closes.
 def _attention_rank(row: QueueOrder) -> tuple[int, str, str]:
     kinds = {f.kind for f in row.flags}
     if "waited" in kinds:
@@ -246,7 +244,6 @@ def _day_name(d: date) -> str:
 
 
 def _expected_fresh(db: Session, day: date, outlets: dict[str, Outlet]) -> dict[str, set[str]]:
-    """The Fresh outlets that usually order on this weekday, with the temperatures they order."""
     expected: dict[str, set[str]] = {}
     for s in db.scalars(select(OrderStream).where(OrderStream.dow_name == day.strftime("%a"))):
         if outlets[s.outlet_id].brand == "Fresh":
@@ -255,7 +252,6 @@ def _expected_fresh(db: Session, day: date, outlets: dict[str, Outlet]) -> dict[
 
 
 def _not_ordered(db: Session, day: date, expected: dict[str, set[str]]) -> dict[str, set[str]]:
-    """Expected Fresh outlets with no order for the run yet, in outlet order."""
     ordered = {o.outlet_id for o in db.scalars(select(Order).where(Order.requested_date == day))}
     return {oid: temps for oid, temps in sorted(expected.items()) if oid not in ordered}
 
@@ -265,7 +261,6 @@ def _what(temps: set[str]) -> str:
 
 
 def _usual(temps: set[str]) -> str:
-    """What the store's reminder says it usually sends: "dry and chilled orders", "chilled order"."""
     return "dry and chilled orders" if len(temps) == 2 else "dry order" if "ambient" in temps else "chilled order"
 
 
@@ -288,8 +283,8 @@ class Reminded(Schema):
 
 @router.post("/reminders", response_model=list[Reminded])
 def remind(body: RemindIn, scope: ScopeDep, _user: Dispatcher) -> list[Reminded]:
-    """DSP-01 Remind and Remind all: a notice in each store's Relay app with the 4:00 PM cutoff. Only stores still
-    missing an order for the run are reminded; one that ordered meanwhile is left out of the answer."""
+    """DSP-01 Remind and Remind all, with the 4:00 PM cutoff in the notice.
+    A store that ordered meanwhile is left out of the answer."""
     db, now = scope.db, scope.now
     day = current_run(db, now)
     cutoff = cutoff_for(day)

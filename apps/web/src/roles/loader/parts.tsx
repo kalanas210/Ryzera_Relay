@@ -23,7 +23,6 @@ import { calledName } from "@/lib/names";
 import type { LoadLine, Shortfall } from "./api";
 import { colomboDay } from "./days";
 
-/** Load progress bar: petrol while loading, green when complete, with the short share in amber at the end. */
 export function LoadProgress({
   loaded,
   total,
@@ -37,7 +36,6 @@ export function LoadProgress({
   short?: number;
   height?: 6 | 8;
   complete?: boolean;
-  /** "116 of 383 cases loaded", in the reader's language. */
   label?: string;
 }) {
   const share = total ? Math.min(100, (loaded / total) * 100) : 0;
@@ -59,9 +57,8 @@ export function LoadProgress({
   );
 }
 
-/** "Stop 3 · Hemmathagama" on one line where it fits. Where it does not, the second part takes the next line and the
- *  dot goes with the break: the second part carries the dot in front of it, the row is pulled left by the dot's
- *  width, and a dot that starts a line falls outside the clip. A dangling "Stop 3 ·" never ends a line. */
+// The dot sits in front of the second part and the row is pulled left by its width. When the second part
+// wraps, the dot starts the new line and falls outside the clip, so no line ends in a dangling dot.
 export function DotJoin({ first, second, className }: { first: ReactNode; second: ReactNode; className?: string }) {
   return (
     <span className={cx("block overflow-x-clip", className)}>
@@ -78,7 +75,7 @@ export function DotJoin({ first, second, className }: { first: ReactNode; second
   );
 }
 
-/** The stop's title. In Sinhala and Tamil the place always takes its own line, as the " · " form does not fit. */
+// In Sinhala and Tamil the place always takes its own line, since the dot form does not fit.
 export function StopTitle({ seq, place }: { seq: number; place: string }) {
   const { t, lang } = useLoaderText();
   if (lang !== "en") {
@@ -92,9 +89,7 @@ export function StopTitle({ seq, place }: { seq: number; place: string }) {
   return <DotJoin first={t("load.stopShort", { n: seq })} second={<span className="latin">{place}</span>} />;
 }
 
-/** One of several texts in a box sized for the largest of them, so trading one for another never moves what is
- *  around it: a flag's answer arriving, a PIN error clearing, a label following the choice above it. The others
- *  are laid out in the same place, hidden, so the box holds the tallest and widest. */
+// Every option is laid out in one place, so the box holds the largest and nothing around it moves.
 export function Swap({
   shown,
   options,
@@ -117,12 +112,10 @@ export function Swap({
   );
 }
 
-/** How long a button that has just appeared, or just moved, waits before it takes a tap. */
 export const SETTLE_MS = 500;
 
-/** Wraps a button's tap so it does nothing in the first half second after the button appears or `moved` changes. A
- *  double tap meant for the button that was there before (a line's check, Go to handover) then lands on nothing,
- *  instead of on an irreversible Load complete that took its place under the finger. */
+// A tap in the first half second after the button appears or `moved` changes does nothing. A double tap
+// meant for the button that was there before then lands on nothing, not on an irreversible Load complete.
 export function useSettledTap(moved?: unknown): (action: () => void) => () => void {
   const since = useRef(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `moved` is the trigger, not a value read here
@@ -143,9 +136,6 @@ type StatusLine = { text: string; className: string; icon?: LucideIcon };
 
 type Text = ReturnType<typeof useLoaderText>["t"];
 
-/** Every way a flagged line's two status lines can read: waiting, not sent, no answer close to departure, or
- *  decided (with the day the cases come, any day of the week). The row is sized for the longest in the reader's
- *  language, so the dispatcher's answer arriving never changes its height under a finger. */
 function flagStates(
   t: Text,
   line: LoadLine,
@@ -169,8 +159,8 @@ function flagStates(
   };
   const states: Record<string, StatusLine[]> = {
     waiting: [first, { text: t("load.waitingFor", { name: calledName(dispatcher) }), className: cx(label, tone) }],
-    // A flag that has not left the tablet cannot be answered: it says so, in the waiting treatment, and turns into
-    // a problem 15 minutes before departure like any flag without an answer.
+    // A flag that has not left the tablet cannot be answered. It says so, and turns into a problem
+    // 15 minutes before departure like any flag without an answer.
     unsent: [first, { text: t("load.notSent"), className: cx(label, "text-asphalt-700"), icon: CloudOff }],
     unsentLate: [first, { text: t("load.notSent"), className: cx(labelStrong, "text-problem"), icon: CloudOff }],
     late: [first, { text: t("load.noAnswerYet"), className: cx(labelStrong, "text-problem"), icon: CircleAlert }],
@@ -196,10 +186,8 @@ function flagState(line: LoadLine, s: Shortfall, unsent: boolean, noAnswer: bool
   return noAnswer ? "late" : "waiting";
 }
 
-/** One case type for one stop. The whole row checks with one gloved tap; Flag is its own button, so a check is
- *  never read as a problem. Press and hold to count part of a line on. A line whose stop moved after it went on
- *  shows as changed until the loader taps it to confirm where it sits. Once the load is marked complete the row is
- *  a record: nothing on it checks or flags, and a flagged line still opens its flag. */
+// The whole row checks with one gloved tap. Flag is its own button, so a check is never read as a problem.
+// Press and hold counts part of a line on. Once the load is complete a flagged line still opens its flag.
 export function LoadLineRow({
   line,
   stop,
@@ -223,17 +211,13 @@ export function LoadLineRow({
   onCount: () => void;
   onFlag: () => void;
   large?: boolean;
-  /** The flag still waits 15 minutes before departure. */
   noAnswer?: boolean;
-  /** The flag is still on this tablet a minute after it was made. */
   unsent?: boolean;
-  /** The load is marked complete. */
   readOnly?: boolean;
 }) {
   const { t, lang } = useLoaderText();
   const press = useRef<number | undefined>(undefined);
   const held = useRef(false);
-  // The line's group and its Flag and View buttons say which line they are for: "Rice and dhal, Stop 3 · Dry"
   const nameId = useId();
   const whereId = useId();
   const flagged = line.status === "flag_waiting" || line.status === "decided";
@@ -276,7 +260,7 @@ export function LoadLineRow({
         ? "text-done"
         : "text-asphalt-700";
 
-  // The count sheet opens while the finger is still down; the sheet itself ignores the release of that press.
+  // The count sheet opens while the finger is still down. The sheet ignores the release of that press.
   const startPress = (event: PointerEvent) => {
     held.current = false;
     if (flagged || event.button !== 0) return;
@@ -289,7 +273,6 @@ export function LoadLineRow({
 
   const s = flagged ? line.shortfall : null;
   const states = s ? flagStates(t, line, s, dispatcher, label, labelStrong) : null;
-  // a 16 px icon centred on the first line of a status line that may wrap
   const iconTop = large ? "mt-[3px]" : "mt-px";
 
   const content = (
@@ -309,7 +292,6 @@ export function LoadLineRow({
         <span id={nameId} className={cx("text-asphalt-900", large ? "text-[24px] leading-8 font-semibold" : "t-field")}>
           {t(`cases.${line.case_type}`, { defaultValue: line.case_type })}
         </span>
-        {/* Status line 1 always names the stop. Where it does not fit, the kind takes the next line, dot and all. */}
         <span id={whereId} className={cx("flex items-start gap-1 text-asphalt-700", label)}>
           {chilled ? (
             <Snowflake size={16} strokeWidth={1.75} aria-hidden className={cx("shrink-0 text-chilled", iconTop)} />
@@ -354,9 +336,8 @@ export function LoadLineRow({
     </>
   );
 
-  // The tap area keeps room for a text column about 104 wide beside the slot and the count, or 140 for a flagged
-  // line in Sinhala or Tamil, whose status lines run long. Where the line button would squeeze it narrower (Tamil
-  // on a 375 wide phone, say), the button drops under the text instead of stacking the words three lines deep.
+  // The tap area keeps room for a text column about 104 wide, or 140 for a flagged line in Sinhala or Tamil.
+  // Where the Flag button would squeeze it narrower, the button drops under the text.
   const main = cx(
     "flex min-w-0 grow items-center gap-2 py-2 pl-2 text-left",
     flagged && lang !== "en" ? "basis-64" : "basis-53",
@@ -391,7 +372,7 @@ export function LoadLineRow({
           onPointerLeave={endPress}
           onPointerCancel={endPress}
           onContextMenu={(event) => {
-            // Android raises this during a long press: count once, and keep the release from toggling the line
+            // Android raises this during a long press. Count once, and keep the release from toggling.
             event.preventDefault();
             endPress();
             if (flagged) return;
@@ -422,9 +403,8 @@ export function LoadLineRow({
   );
 }
 
-/** "How many are on?": for a line that goes on in several trips from the shelf. Each open starts from what the
- *  line has on now (none, for a line not started), never from a count left on the stepper last time. Enter in the
- *  number saves, as Save does. */
+// For a line that goes on in several trips. Each open starts from what the line has on now, never from a
+// count left on the stepper last time.
 export function CountSheet({
   line,
   onClose,

@@ -51,8 +51,7 @@ const DEPOT_LABEL: Record<DepotName, string> = { Kandy: "Kandy hub", Peliyagoda:
 const NUMBER = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 const count = (n: number) => NUMBER[n] ?? String(n);
 
-/** What deferring a protected order anyway would change, asked as soon as Defer anyway opens: the engine keeps
- *  its answer, so the override itself is quick. */
+// Asked as soon as Defer anyway opens. The engine keeps its answer, so the override itself is quick.
 function useOverridePreview(planId: string, orderRef: string, enabled: boolean) {
   return useQuery({
     queryKey: ["override-preview", planId, orderRef],
@@ -66,8 +65,7 @@ function useOverridePreview(planId: string, orderRef: string, enabled: boolean) 
   });
 }
 
-/** DSP-03 Deferrals: what no plan could avoid, Relay's choice by rule, the pool, the cost, the protected store,
- *  the next-run check, and the exact words the store will read. */
+// DSP-03 Deferrals, ending with the exact words the store will read.
 export function DeferralsDrawer({
   open,
   onClose,
@@ -227,7 +225,6 @@ export function DeferralsDrawer({
   );
 }
 
-/** A card's heading, and the waiting store it is about when several orders wait. */
 function CardTitle({
   icon,
   order,
@@ -312,7 +309,6 @@ function Unavoidable({ group }: { group: Group }) {
   );
 }
 
-/** "A, B and C", as the API writes its lists. */
 function listed(items: string[]): string {
   return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
@@ -464,7 +460,7 @@ function WaitingRow({
   );
 }
 
-/** After publishing: when the store was told, and whether it pressed Got it on STM-03. */
+// STM-03. After publishing, when the store was told and whether it pressed Got it.
 function Seen({ order }: { order: Waiting }) {
   if (!order.notified_at) return null;
   return (
@@ -546,7 +542,8 @@ function Choice({ group }: { group: Group }) {
   );
 }
 
-/** On paper, all 23 fit: the trips a check by the published minutes alone would pass, and the clock's answer. */
+// "On paper, all 23 fit." Trips a check by the published minutes alone would pass, and the
+// clock's answer.
 function OnPaper({ paper }: { paper: NonNullable<Group["paper"]> }) {
   return (
     <section className="flex flex-col gap-2 rounded-card bg-asphalt-50 p-4">
@@ -684,7 +681,6 @@ function Protected({
   published: boolean;
 }) {
   const override = useOverride(depot, board.plan.id);
-  // a proposal from the plan bar sends the engine searching too; the override waits for it
   const replanning = useIsMutating({ mutationKey: replanKey(depot) }) > 0;
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -740,7 +736,7 @@ function Protected({
           </label>
           <textarea
             id={noteId}
-            autoFocus // the form opens because the dispatcher asked to write this note
+            autoFocus // The form opens because the dispatcher asked to write this note.
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="Write a note for the record"

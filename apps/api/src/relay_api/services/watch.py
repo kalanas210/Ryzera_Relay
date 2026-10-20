@@ -1,5 +1,4 @@
-"""What Relay notices on its own as the clock runs: a driver's phone gone quiet on a running trip, and a question to a
-driver that nobody has answered. Called on every tick and every jump, after the world has moved; idempotent."""
+"""What Relay notices on its own: a driver's phone gone quiet, and a question nobody answered."""
 
 from __future__ import annotations
 
@@ -17,7 +16,7 @@ from relay_api.services.notify import add_feed_item
 
 def watch(db: Session, now: datetime) -> None:
     field.escalate_unanswered(db, now)
-    # each phone's freshest contact: a stale second row from two first check-ins at once never reads as silence
+    # Freshest contact per phone. A stale second row from two first check-ins is not silence.
     last = func.max(DeviceContact.last_contact_at)
     quiet_users: dict[uuid.UUID, datetime] = dict(
         db.execute(
@@ -56,8 +55,7 @@ def watch(db: Session, now: datetime) -> None:
 
 
 def _at_the_wheel(db: Session) -> set[uuid.UUID | None]:
-    """Everyone who may be driving a trip on the road now: on every tick a whole morning's finished drivers have quiet
-    phones, and only these few need a closer look."""
+    # Only drivers on a trip now. Finished drivers have quiet phones and would all look silent.
     vehicles = set(db.scalars(select(Trip.vehicle_id).where(Trip.departed_at.is_not(None), Trip.finished_at.is_(None))))
     if not vehicles:
         return set()

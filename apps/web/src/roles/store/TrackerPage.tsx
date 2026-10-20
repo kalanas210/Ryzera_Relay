@@ -35,8 +35,7 @@ import {
   windowOf,
 } from "./words";
 
-/** STM-04 Your delivery: when it will arrive, from the driver's own records. While the driver's phone is quiet it
- *  says so plainly and gives the likely range; once the estimate has passed, the store can confirm receipt itself. */
+// STM-04 Your delivery. Arrival from the driver's records, with a range when their phone is quiet.
 export function TrackerPage() {
   const { orderRef } = useParams();
   const tracker = useTracker(orderRef);
@@ -197,7 +196,7 @@ function ArrivalCard({ tracker: t, home, now }: { tracker: Tracker; home: StoreH
   const silent = t.out_of_contact && t.status === "on_the_way";
   const range = t.range;
   const dock = dockWords(home.outlet.dock_type);
-  // the range never starts before now, so when it starts now, "from now" is the honest staffing call
+  // The range never starts before now. When it starts now, "from now" is the honest staffing call.
   const fromNow = range ? roundTo5(range[0]).getTime() <= roundTo5(now).getTime() + 5 * 60_000 : false;
   return (
     <Card className="flex flex-col gap-2 p-5">
@@ -279,7 +278,7 @@ function Row({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   );
 }
 
-/** ", after arriving at Mawanella": the last stop event the driver's phone sent before it went quiet. */
+// The last stop event the phone sent before it went quiet, like ", after arriving at Mawanella".
 function lastEvent(t: Tracker): string {
   const heard = t.last_heard ? new Date(t.last_heard).getTime() : Number.POSITIVE_INFINITY;
   const last = [...t.stops]
@@ -289,7 +288,7 @@ function lastEvent(t: Tracker): string {
   return last.state === "arrived" ? `, after arriving at ${last.place}` : `, after the delivery at ${last.place}`;
 }
 
-/** The only hint at a cause a store screen gives, and only where it is true of the roads. */
+// The only hint at a cause a store ever sees, and only where it is true of the roads.
 function hint(depot: string): string {
   return depot === "Kandy"
     ? "Hill roads often lose signal, so these times are our estimate."

@@ -5,7 +5,7 @@ import { api } from "@/api/client";
 import type { Board, Drawer, DrawerGroup, DrawerWaiting } from "./api";
 import { DeferralsDrawer } from "./Deferrals";
 
-// jsdom has <dialog> but not its methods; these do what the browser does to the open attribute.
+// jsdom has <dialog> but not its methods. These do what the browser does to the open attribute.
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");

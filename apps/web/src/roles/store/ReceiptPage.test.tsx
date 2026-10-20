@@ -167,7 +167,7 @@ describe("Confirm receipt", () => {
     openReceipt();
     fireEvent.click(await screen.findByRole("button", { name: "Flag Packet foods case" }));
     const add = screen.getByRole("button", { name: "Add to receipt", hidden: true });
-    expect(add).toBeDisabled(); // nothing is staged until a reason is picked
+    expect(add).toBeDisabled();
     fireEvent.click(screen.getByRole("radio", { name: "Damaged", hidden: true }));
     fireEvent.click(add);
 
@@ -233,7 +233,7 @@ describe("Confirm receipt", () => {
     const toCome = screen.getByRole("heading", { name: "Still to come on Thursday 9 April" });
     const report = screen.getByRole("button", { name: "Report a problem" });
     expect(toCome.compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(report.closest("section")).toBeNull(); // not a card of its own
+    expect(report.closest("section")).toBeNull(); // a quiet button, not a card
     expect(report.nextElementSibling).toHaveTextContent("You can still report a problem until 4:00 PM today");
   });
 });

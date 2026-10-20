@@ -1,9 +1,4 @@
-"""Database engine and sessions.
-
-Every request works inside one workspace (one copy of the delivery day). The session keeps the
-workspace id in `session.info`, and a single ORM hook adds `workspace_id = :id` to every query
-on a workspace-scoped table, so no endpoint can read another judge's copy by forgetting a filter.
-"""
+"""Database sessions. One ORM hook filters every workspace-scoped query by the workspace id."""
 
 from __future__ import annotations
 

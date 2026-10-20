@@ -5,6 +5,9 @@ Relay is one installable web app for four roles, one API, one planning engine an
 runs the same stack on one server. This page describes the build as it is in the repository today. Every section
 names the files that make it true.
 
+Diagrams of the system, the engine, the database, a request, the deployment and the delivery day are in
+[docs/diagrams](diagrams/README.md), as draw.io files and PNGs.
+
 ## The system at a glance
 
 ```mermaid

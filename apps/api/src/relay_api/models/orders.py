@@ -12,7 +12,6 @@ from relay_api.models.base import Base, WorkspaceScoped, new_id, str_enum
 
 class OrderStatus(enum.StrEnum):
     RECEIVED = "received"
-    """Confirmed to the store; waiting for the plan."""
     ALLOCATED = "allocated"
     DEFERRED = "deferred"
     LOADED = "loaded"
@@ -20,17 +19,15 @@ class OrderStatus(enum.StrEnum):
     DELIVERED = "delivered"
     FAILED = "failed"
     CONFIRMED = "confirmed"
-    """The store confirmed receipt."""
     DISPUTED = "disputed"
-    """The store reported an issue on receipt."""
 
 
 class OrderSource(enum.StrEnum):
     STORE = "store"
     SEED = "seed"
     SIMULATOR = "simulator"
+    # Opened by Relay to carry cases that went short on an earlier delivery.
     CARRIED = "carried"
-    """Opened by Relay to carry cases that went short on an earlier delivery."""
 
 
 class Order(WorkspaceScoped, Base):
@@ -43,9 +40,8 @@ class Order(WorkspaceScoped, Base):
     brand: Mapped[str] = mapped_column(String(8))
     temp: Mapped[str] = mapped_column(String(8))
     requested_date: Mapped[date] = mapped_column(Date)
-    """The delivery day the store ordered for."""
     run_date: Mapped[date] = mapped_column(Date, index=True)
-    """The run it will go on: the requested day, or a later one after a cutoff or a deferral."""
+    """The run it goes on. The requested day, or a later one after a cutoff or a deferral."""
     units: Mapped[int]
     weight_kg: Mapped[float] = mapped_column(Numeric(9, 1, asdecimal=False))
     volume_m3: Mapped[float] = mapped_column(Numeric(9, 3, asdecimal=False))
@@ -54,7 +50,7 @@ class Order(WorkspaceScoped, Base):
     placed_at: Mapped[datetime]
     placed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     client_ref: Mapped[str | None] = mapped_column(String(64))
-    """The store device's id for the order, so a resend never creates a second order."""
+    """The store device's id for the order, so a resend never makes a second order."""
     note: Mapped[str] = mapped_column(Text, default="")
 
     lines: Mapped[list[OrderLine]] = relationship(
@@ -71,7 +67,7 @@ class OrderLine(WorkspaceScoped, Base):
     case_type: Mapped[str] = mapped_column(ForeignKey("case_type.code"))
     qty: Mapped[int]
     carried_qty: Mapped[int] = mapped_column(default=0)
-    """Cases added from an earlier order that went short, included in qty."""
+    """Cases added from an earlier order that went short. Already counted in qty."""
     carried_from: Mapped[str | None] = mapped_column(String(12))
 
     order: Mapped[Order] = relationship(back_populates="lines")

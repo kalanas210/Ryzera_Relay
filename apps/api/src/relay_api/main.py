@@ -21,16 +21,12 @@ from relay_api.services.simulator import catch_up
 
 log = logging.getLogger("relay")
 
+# A proof photo plus its form. Caddy sets the same limit in front of the deployed API.
 MAX_BODY_BYTES = 2_000_000
-"""The largest request Relay reads: a proof photo (at most dock.MAX_PHOTO_BYTES) with the form around it. Caddy
-holds the same limit in front of the deployed API; this one covers docker compose and dev runs without it."""
 TOO_LARGE = "This is too large for Relay to take."
 
 
 class LimitBody:
-    """Refuse a request body over `limit` bytes with 413: at once when its Content-Length says so, or as soon as a
-    body sent without one passes the limit, before the route has it."""
-
     def __init__(self, app: ASGIApp, limit: int) -> None:
         self.app = app
         self.limit = limit
@@ -58,7 +54,6 @@ class LimitBody:
 
 
 async def _simulate_forever() -> None:
-    """Keep every recently used copy of the day moving, even when nobody is looking at it."""
     while True:
         await asyncio.sleep(2)
         try:
@@ -68,6 +63,7 @@ async def _simulate_forever() -> None:
 
 
 def _tick() -> None:
+    # Copies used in the last 6 hours keep moving, even when nobody is looking.
     cutoff = datetime.now(UTC) - timedelta(hours=6)
     with SessionLocal() as db:
         workspaces = db.scalars(select(Workspace).where(Workspace.last_active_at > cutoff)).all()
@@ -109,8 +105,7 @@ app.include_router(photos.router)
 
 @app.get("/api/health", tags=["health"])
 def health() -> JSONResponse:
-    """Up as soon as the database answers. `warming` stays true while the warm-up started by `relay-api serve` is
-    still asking the engine the story day's first proposals: a Propose meanwhile waits for that answer."""
+    """Up once the database answers. `warming` is true while the startup warm-up is still running."""
     with SessionLocal() as db:
         warming = warming_up(db)
     return JSONResponse({"status": "ok", "warming": warming})

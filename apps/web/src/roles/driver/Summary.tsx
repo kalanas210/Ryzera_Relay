@@ -23,9 +23,8 @@ import { useDriver } from "./sync";
 import type { DriverRun, DriverStop } from "./types";
 import { useDriverText } from "./words";
 
-/** DRV-05 Trip summary: every stop of the trip, what is still on the phone, and Finish trip, which works with no
- *  signal too (it joins the queue after the stops). DEG-02 happens here: when the signal comes back the stops send,
- *  and a stop that clashed with an office change asks its one question at the top. */
+// DRV-05 Trip summary. Finish trip works with no signal too and joins the queue after the stops.
+// DEG-02 happens here. When signal returns the stops send, and a clashed stop asks its one question.
 export function SummaryPage() {
   const { run, loaded, now, items, save, batch, reconnect, offline } = useDriver();
   const { t, clock, around, hub, tripLine, list, cases, caseItem } = useDriverText();
@@ -38,7 +37,6 @@ export function SummaryPage() {
   const delivered = trip.stops.filter((s) => s.status === "delivered");
   const failed = trip.stops.filter((s) => s.status === "failed");
   const done = delivered.length + failed.length;
-  // a stop the office gave to another vehicle is not this truck's to count
   const total = ownStops(trip).length;
   const last = delivered
     .map((s) => s.completed_at)
@@ -53,22 +51,19 @@ export function SummaryPage() {
   const mine = items.filter((i) => (i.record?.trip_id ?? trip.trip_id) === trip.trip_id);
   const waiting = countOf(mine.filter((i) => i.queued));
   const finishedLocally = mine.some((i) => i.record?.kind === "trip_finished" && i.queued);
-  // "No, something is wrong" cancels nothing: the stop stays at the dock with the driver until the dispatcher calls
+  // "No, something is wrong" cancels nothing. The stop waits for the dispatcher to call.
   const atTheDock = answeredNo(run, items).some((q) => trip.stops.some((s) => s.stop_id === q.stop_id));
   const name = calledName(run.dispatcher);
 
-  // what is on the phone, what is going now, or what has gone
   const finished = trip.finished_at;
   let sync = null;
   const what = (seqs: number[], mid = false) =>
     t(mid ? "summary.stopsListMid" : "summary.stopsList", { count: seqs.length, list: list(seqs) });
-  // the photo count two ways: "2 photos" in a list, and with its joining word where a language writes one on
   const photos = (n: number) => ({
     photos: t("summary.photos", { count: n }),
     photosWith: t("summary.photosWith", { count: n }),
   });
-  // what reached the office after the phone had no signal: this phone's own reconnect, together with what Relay
-  // says came in late for stops a demo jump recorded for the driver, as of the last of those sends
+  // Reconnect on this phone, plus what Relay says came in late for stops a demo jump recorded.
   const late = trip.stops.filter((s) => s.sent_at);
   const back = reconnect && reconnect.trip_id === trip.trip_id ? reconnect : null;
   const sent =
@@ -110,7 +105,6 @@ export function SummaryPage() {
     ) : null;
   }
 
-  // every delivery against its window
   const inside = delivered.filter(
     (s) => s.completed_at && Date.parse(s.completed_at) <= onRunDate(run.run_date, s.window_close).getTime(),
   ).length;
@@ -227,7 +221,6 @@ export function SummaryPage() {
   );
 }
 
-/** Stop row / field / summary: no way in, just what happened and whether it has reached the office. */
 function SummaryRow({
   run,
   stop,
@@ -247,7 +240,6 @@ function SummaryRow({
   const name = calledName(run.dispatcher);
   const extra: string[] = [];
   const short = stop.lines.filter((l) => l.short > 0);
-  // what came off the truck, as the proof says when a line was changed at the store
   const proofLines = local.delivery?.record.payload.lines;
   const handed = Array.isArray(proofLines)
     ? (proofLines as { qty?: number }[]).reduce((n, l) => n + (Number(l.qty) || 0), 0)

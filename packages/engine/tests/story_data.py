@@ -1,5 +1,4 @@
-"""The story day's inputs, read straight from the seed files: the orders, the vehicles, the usual runs and the
-expected clock's conditions. Shared by the engine tests; the fixtures that wrap them live in conftest.py."""
+"""The story day's inputs, read straight from the seed files. conftest.py wraps them in fixtures."""
 
 import csv
 from pathlib import Path
@@ -22,7 +21,6 @@ def _rows(path: Path) -> list[dict[str, str]]:
 
 
 def conditions_for(day: str) -> Conditions:
-    """The expected clock's inputs for one date, from the seed's reference and derived tables."""
     monsoon = next(r for r in _rows(REFERENCE / "calendar.csv") if r["date"] == day)["monsoon"]
     speed = {
         (r["district"], int(r["hour"])): float(r["speed_index"])

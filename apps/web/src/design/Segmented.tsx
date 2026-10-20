@@ -6,7 +6,6 @@ export type Segment<T extends string> = {
   value: T;
   label: ReactNode;
   icon?: LucideIcon;
-  /** The selected icon takes its status color, e.g. the chilled snowflake. */
   iconClass?: string;
   badge?: number;
   disabled?: boolean;
@@ -22,7 +21,6 @@ type Props<T extends string> = {
   className?: string;
 };
 
-/** Input / segmented control: a track with one selected segment. */
 export function Segmented<T extends string>({ value, onChange, segments, label, size = "store", className }: Props<T>) {
   return (
     <div
@@ -44,7 +42,7 @@ export function Segmented<T extends string>({ value, onChange, segments, label, 
             type="button"
             role="radio"
             aria-checked={selected}
-            // aria-disabled, not disabled: the segment keeps its hover and focus, so its tooltip can say why it's off
+            // aria-disabled, not disabled, so the segment keeps hover and focus and its tooltip can say why
             aria-disabled={s.disabled || undefined}
             title={s.title}
             onClick={() => {

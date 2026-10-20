@@ -1,11 +1,7 @@
-/** The driver's outbox: every action is written to IndexedDB first, then sent in the order it was made.
- *
- *  A record is one stop event (load accepted, arrived, delivered, a problem, trip finished, the answer to a question)
- *  or one photo. Each carries the id the phone gave it when it was made, so a resend after a dropped connection is
- *  harmless: the server answers "duplicate". Records go before photos, so on a weak signal the stop reaches the
- *  dispatcher first and the heavier photo follows. Nothing is ever dropped: a record that fails stays queued and is
- *  retried when the browser says it is back online, when the app returns to the foreground, and with the minute
- *  check-in. A record Relay refuses leaves the queue with Relay's reason, so the phone can say so. */
+// The driver's outbox. Every action goes to IndexedDB first, then out in the order it was made.
+// Each record carries the id the phone gave it, so a resend after a dropped connection is harmless.
+// A failed record stays queued. It is retried when the browser is back online, when the app returns
+// to the foreground, and with the minute check-in.
 import Dexie, { type EntityTable } from "dexie";
 
 export type RecordKind =
@@ -25,9 +21,9 @@ export type FieldRecord = {
   kind: RecordKind;
   trip_id: string | null;
   stop_id: string | null;
-  /** Scenario time on the phone when it happened; kept even if it reaches Relay an hour later. */
+  // scenario time on the phone when it happened, even if Relay hears an hour later
   occurred_at: string;
-  /** The stop version the phone last saw, so the server can spot an office change made meanwhile. */
+  // the stop version the phone last saw, so the server can spot an office change made meanwhile
   base_version: number | null;
   lat?: number | null;
   lng?: number | null;
@@ -38,7 +34,7 @@ export type FieldRecord = {
 export type PhotoRecord = {
   id: string;
   stop_id: string | null;
-  /** The record the photo belongs to, when it is not a stop's proof (a problem report's photo). */
+  // the record this photo belongs to, when it is not a stop's proof (a problem report's photo)
   event_id?: string | null;
   taken_at: string;
   blob: Blob;
@@ -48,7 +44,6 @@ export type PhotoRecord = {
 
 export type Outcome = "applied" | "duplicate" | "conflict" | "rejected";
 
-/** What Relay said about one record or photo, and when it had it on the scenario clock. */
 export type Answer = { id: string; outcome: Outcome; reason?: string; at?: string };
 
 type Common = {
@@ -57,9 +52,8 @@ type Common = {
   tries: number;
   queued_at: number;
   error?: string;
-  /** Saved while the phone had no signal, so it waited: the trip summary says when it went. */
   saved_offline?: boolean;
-  /** A record waits for its location fix until this wall-clock time, then goes with or without one. */
+  // a record waits for its location fix until this wall-clock time, then goes with or without one
   held_until?: number;
 };
 
@@ -70,13 +64,12 @@ export type Sent = {
   type: "record" | "photo";
   kind: string;
   outcome: Outcome;
-  /** Wall-clock time of the answer. */
   sent_at: number;
   reason?: string;
-  /** Scenario time Relay had it: "Saved offline, sent 7:14 AM". */
+  // scenario time Relay had it, for "Saved offline, sent 7:14 AM"
   at?: string;
   saved_offline?: boolean;
-  /** What was sent, kept so the phone can still show its own record after the queue lets go of it. */
+  // kept so the phone can still show its own record after the queue lets go of it
   record?: FieldRecord;
   photo?: Omit<PhotoRecord, "blob">;
 };
@@ -96,12 +89,11 @@ export type Transport = {
   sendPhoto: (photo: PhotoRecord) => Promise<Outcome | Omit<Answer, "id">>;
 };
 
-/** Thrown by a transport when the phone has no connection; anything else is a server answer. */
+// Thrown by a transport when the phone has no connection. Anything else is a server answer.
 export class Offline extends Error {}
 
 export type AddOptions = {
   savedOffline?: boolean;
-  /** Hold the record this long for its location; release() lets it go sooner. */
   holdMs?: number;
 };
 
@@ -110,9 +102,8 @@ export class Outbox {
   private flushing: Promise<FlushResult> | null = null;
   private readonly listeners = new Set<() => void>();
   private moving = new Set<string>();
-  /** Saved or let go while a run is sending: that run takes them next, so they count as on their way. */
+  // saved or let go while a run is sending, so that run takes them next and they count as on their way
   private joining = new Set<string>();
-  /** Something joined after the current pass read the queue, so the run reads it again before it ends. */
   private again = false;
 
   constructor(name = "relay-outbox") {
@@ -128,12 +119,10 @@ export class Outbox {
     for (const listener of this.listeners) listener();
   }
 
-  /** Ids on their way to Relay right now, with those the running send takes next. */
   inFlight(): ReadonlySet<string> {
     return this.joining.size ? new Set([...this.moving, ...this.joining]) : this.moving;
   }
 
-  /** Called once the item is in the queue: a run already sending reads the queue again before it ends. */
   private joined(id: string) {
     if (!this.flushing) return;
     this.again = true;
@@ -167,7 +156,6 @@ export class Outbox {
     this.changed();
   }
 
-  /** A held record may go now, with whatever the wait found (its location, or nothing). */
   async release(id: string, patch: Partial<Pick<FieldRecord, "lat" | "lng" | "accuracy_m">> = {}): Promise<void> {
     let released = false;
     await this.db.transaction("rw", this.db.queue, async () => {
@@ -180,7 +168,7 @@ export class Outbox {
     this.changed();
   }
 
-  /** Everything still waiting, records first, each kind in the order it was made. */
+  // Records go before photos, so on a weak signal the stop reaches the dispatcher first.
   async waiting(): Promise<Queued[]> {
     const all = await this.db.queue.orderBy("seq").toArray();
     return [...all.filter((q) => q.type === "record"), ...all.filter((q) => q.type === "photo")];
@@ -194,9 +182,8 @@ export class Outbox {
     return this.db.sent.orderBy("sent_at").reverse().limit(limit).toArray();
   }
 
-  /** Send what is waiting. Concurrent calls share one run, so a record is never sent twice at once. Anything saved or
-   *  let go while the run is sending goes in the same run, after what was ahead of it, unless the run found no
-   *  connection; then it waits with the rest for the next try. */
+  // Concurrent calls share one run, so a record is never sent twice at once. Anything saved while it
+  // runs goes out in the same run, unless the run found no connection. Then it waits for the next try.
   flush(transport: Transport): Promise<FlushResult> {
     this.flushing ??= this.drain(transport);
     return this.flushing;
@@ -216,7 +203,7 @@ export class Outbox {
         if (!this.again || pass.offline) return total;
       }
     } finally {
-      // let go in the same step that decides there is nothing more, so a record saved just after starts a new run
+      // Let go in the same step that decides there is nothing more, so a record saved just after starts a new run.
       this.flushing = null;
       this.moving = new Set();
       this.joining = new Set();
@@ -228,7 +215,7 @@ export class Outbox {
     const result: FlushResult = { sent: 0, conflicts: 0, offline: false, failed: 0, held: false };
     const queue = await this.waiting();
     const records = queue.filter((q): q is Extract<Queued, { type: "record" }> => q.type === "record");
-    // Order is kept: a record still waiting for its location holds back every record and photo after it.
+    // Order is kept. A record still waiting for its location holds back every record and photo after it.
     const heldAt = records.findIndex((q) => q.held_until !== undefined && q.held_until > Date.now());
     const ready = heldAt === -1 ? records : records.slice(0, heldAt);
     result.held = heldAt !== -1;

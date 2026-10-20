@@ -22,11 +22,9 @@ const CHOICES: { status: Lane["status"]; label: string; line: string; icon: type
   },
 ];
 
-/** A vehicle's status for this run, as the fleet dialog names it: "In service". */
 export const statusLabel = (status: Lane["status"]) => CHOICES.find((c) => c.status === status)?.label ?? status;
 
-/** The lane's button for the fleet: send a vehicle to the workshop, back into service, or onto standby for this
- *  run, so the judge can watch the plan respond. Only on a draft. */
+// Only on a draft. Lets the judge send a vehicle to the workshop or standby and watch the plan.
 export function FleetButton({ lane, onOpen }: { lane: Lane; onOpen: (lane: Lane) => void }) {
   return (
     <IconButton
@@ -55,7 +53,6 @@ export function FleetDialog({
   const [note, setNote] = useState("");
   const noteId = useId();
 
-  // each opening starts from the vehicle as it stands
   useEffect(() => {
     if (!lane) return;
     setStatus(lane.status);

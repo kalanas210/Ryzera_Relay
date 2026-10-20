@@ -74,7 +74,6 @@ describe("the Not ordered panel", () => {
       ]),
     );
     expect(screen.getByText("Reminded 3:14 PM")).toBeInTheDocument();
-    // an older reminder can go again, and says when the last one went
     expect(screen.getByRole("button", { name: "Remind again OUT041 Panadura" })).toBeInTheDocument();
     expect(screen.getByText(/Reminded 2:50 PM/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remind the other 2" }));

@@ -1,3 +1,4 @@
+// The tiles and the runs panel on Live runs, stop by stop.
 import {
   Check,
   ChevronDown,
@@ -43,7 +44,6 @@ import {
   vehicleWords,
 } from "./model";
 
-/** Key figure tiles: what is on the road right now. An icon takes its status tone only when its count is above 0. */
 export function Tiles({ panel }: { panel: RunsPanel }) {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const tiles: { icon: LucideIcon; value: string; label: string; tone: string }[] = [
@@ -99,12 +99,10 @@ type PanelProps = {
   onSelect: (vehicleId: string) => void;
   query: string;
   onMove: (row: RunRow, marker: RunMarker) => void;
-  /** A confirmation after a change on the desk; it takes the footnote's place while it shows. */
   toast: string | null;
 };
 
-/** Runs panel: every Fresh run of the depot's published plan, stop by stop, needing attention first. Progress comes
- *  only from the drivers' records and the stores' receipts. */
+// Progress comes only from the drivers' records and the stores' receipts.
 export function RunsPanelView({
   panel,
   vehicles,
@@ -135,7 +133,7 @@ export function RunsPanelView({
   const workshop = q ? [] : dir.workshop();
 
   return (
-    // clipped, not hidden: the toast at the foot stays in view while the page scrolls
+    // Clipped, not hidden, so the toast at the foot stays in view while the page scrolls.
     <section
       data-runs
       className="min-w-0 overflow-clip rounded-card border border-asphalt-200 bg-white"
@@ -247,7 +245,6 @@ function foldedNote(folded: VehicleRun[]) {
   return inContact ? "All in contact, nothing to act on" : "Nothing to act on";
 }
 
-/** Marker legend: recorded is solid, estimated is dashed, on every screen. */
 function Legend() {
   return (
     <span className="flex items-center gap-4 t-caption text-asphalt-700">
@@ -263,7 +260,6 @@ function Legend() {
   );
 }
 
-/** Up and Down move between rows (and between feed items), Enter opens. */
 export function moveFocus(event: KeyboardEvent<HTMLElement>, selector: string) {
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
   const all = [...document.querySelectorAll<HTMLElement>(selector)];
@@ -302,15 +298,14 @@ function RunRowView({
     row.departed_at && !row.finished_at && !row.is_backup
       ? row.markers.filter((m) => m.state === "next" || m.state === "pending")
       : [];
-  // the chip is about the trip on the road; a later trip's risk is said in the caption
+  // The chip is about the trip on the road. A later trip's risk is said in the caption.
   const late = row.markers.some((m) => m.late_risk);
   const kind = dir.vehicle(row.vehicle_id, row.vehicle_kind);
   const KindIcon = row.temp === "chilled" ? Snowflake : kind.endsWith("van") ? Van : Truck;
   const caption = rowCaption(vehicle);
   const selectId = useId();
 
-  // The row is a group named by its select button. The button's cover reaches across the row, so a click anywhere
-  // picks the run, while the stop track stays a list a screen reader can walk. The menu sits above the cover.
+  // The select button's cover spans the row, so a click anywhere picks the run. The menu sits above it.
   return (
     // biome-ignore lint/a11y/useSemanticElements: a run and its select button, not a set of form fields
     <div
@@ -396,8 +391,7 @@ function RunRowView({
   );
 }
 
-/** Last synced: the last time the phone reached Relay, which is not the last stop event. While a phone is silent it
- *  says so and for how long, and never why. */
+// Last synced is when the phone last reached Relay, not the last stop event.
 function LastSynced({ row, items, compact }: { row: RunRow; items: FeedItem[]; compact: boolean }) {
   if (row.out_of_contact && row.last_contact_at) {
     return (
@@ -439,8 +433,6 @@ function LastSynced({ row, items, compact }: { row: RunRow; items: FeedItem[]; c
   );
 }
 
-/** What the feed adds under Last synced: what came in when the phone was back, and the offline span ("7 records
- *  received", "Offline 5:41 to 7:14"), or a reported delay. */
 function syncNotes(row: RunRow, items: FeedItem[]): string[] {
   const mine = items.filter((i) => itemRows(i, [row]).some((r) => r.trip_id === row.trip_id));
   const back = mine.find((i) => i.kind === "back_in_contact");
@@ -454,8 +446,6 @@ function syncNotes(row: RunRow, items: FeedItem[]): string[] {
   return delay ? [`Delay at ${formatTime(delay.created_at)}`] : [];
 }
 
-/** Stop track: recorded stops solid, with a solid line into them; estimates dashed, with a dashed line. While a phone
- *  is silent, the estimated vehicle sits on the line to the stop Relay thinks it is driving to. */
 function Track({
   vehicle,
   size,
@@ -476,8 +466,7 @@ function Track({
   const solid = (s: Station) => (s.kind === "hub" ? s.recorded : isRecorded(s.marker) || !!s.marker.receipt_at);
   const line = size === 28 ? "top-[13px]" : "top-[11px]";
   return (
-    // Seven stops and the hub are wider than the column: that track scrolls on its own rather than cut a name short,
-    // and sits above the row's select cover so it can be scrolled
+    // Seven stops and the hub are wider than the column. The track scrolls on its own, above the cover.
     <ol
       className={cx("flex min-w-0 items-start", list.length >= LONG_TRACK && "relative z-40 overflow-x-auto pb-1")}
       aria-label={`${row.vehicle_id} stops`}
@@ -485,7 +474,6 @@ function Track({
       {list.map((s, i) => {
         const next = list[i + 1];
         const full = s.kind === "stop" ? markerStatus(s.marker, silent) : { text: s.status, tone: "muted" as Tone };
-        // On a long track the green check already says delivered, so the label keeps only the time.
         const status =
           s.kind === "stop" && list.length >= 5 && s.marker.state === "delivered" && s.marker.recorded
             ? { ...full, text: shortClock(s.marker.recorded) }
@@ -496,8 +484,8 @@ function Track({
         return (
           <li
             key={s.kind === "stop" ? s.marker.stop_id : `hub-${i}`}
-            // a hub takes a narrow fixed column and the stops share the rest evenly, never narrower than their
-            // longest word, so "Suduhumpola" is read in full beside "Hantana"; longer labels wrap at their spaces
+            // The hub gets a narrow fixed column. Stops share the rest, never narrower than their
+            // longest word.
             className={cx("relative flex flex-col items-center gap-1", s.kind === "hub" ? "w-20 flex-none" : "flex-1")}
           >
             {i > 0 ? (
@@ -543,7 +531,7 @@ function Track({
   );
 }
 
-/** Markers on a track too long for the Stops column at desk width with every name whole. */
+// From this many markers a track is too long for the Stops column with every name whole.
 const LONG_TRACK = 8;
 
 const TONE_TEXT: Record<Tone, string> = {
@@ -553,7 +541,6 @@ const TONE_TEXT: Record<Tone, string> = {
   problem: "text-problem",
 };
 
-/** Stop marker, desk sizes: delivered, arrived, next, estimated, late risk, moved, two copies, cancelled. */
 export function DeskMarker({ m, size, silent }: { m: RunMarker; size: 24 | 28; silent: boolean }) {
   const box = size === 28 ? "size-7" : "size-6";
   const icon = 14;
@@ -635,7 +622,6 @@ export function DeskMarker({ m, size, silent }: { m: RunMarker; size: 24 | 28; s
   }
 }
 
-/** The estimate mark: a white circle with a dashed ring. Never drawn in a record's style. */
 export function EstimateMark({ n, size, label }: { n?: number; size: 16 | 20 | 24 | 28; label?: string }) {
   const className = cx(
     "num inline-flex shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-asphalt-500 bg-white t-caption font-semibold text-asphalt-700",
@@ -660,7 +646,6 @@ function HubMarker() {
   );
 }
 
-/** Where Relay estimates a silent vehicle is: on the line before the stop it is probably driving to. */
 function EstimatedVehicle({ size, first }: { size: 24 | 28; first: boolean }) {
   return (
     <span
@@ -669,7 +654,6 @@ function EstimatedVehicle({ size, first }: { size: 24 | 28; first: boolean }) {
       title="Estimated position, not tracked"
       className={cx(
         "absolute top-0 left-0 z-20 inline-flex items-center justify-center rounded-full border-[1.5px] border-dashed border-asphalt-500 bg-white text-asphalt-700",
-        // on the way to the first stop it sits at the start of the track, inside it
         !first && "-translate-x-1/2",
         size === 28 ? "size-7" : "size-6",
       )}
@@ -679,7 +663,6 @@ function EstimatedVehicle({ size, first }: { size: 24 | 28; first: boolean }) {
   );
 }
 
-/** A standby vehicle: at the hub, free for problems like a silent run. */
 function StandbyRow({
   vehicleId,
   lane,

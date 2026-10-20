@@ -1,6 +1,5 @@
-/** The field roles read Relay in Sinhala, Tamil or English. Each person's choice is kept on the server and comes
- *  back when they sign in, on the dock tablet or on a phone. Place names, IDs, people's names and numbers stay in
- *  Latin letters and Western digits in every language. */
+// The field roles read Relay in Sinhala, Tamil or English, and the choice is kept on the server.
+// Place names, IDs, people's names and numbers stay in Latin letters and Western digits.
 import i18next from "i18next";
 import { initReactI18next, useTranslation } from "react-i18next";
 import { driver } from "./driver";
@@ -45,7 +44,6 @@ function parts(value: string | Date): { h: number; m: number } {
   return { h: Number(h), m: Number(m) };
 }
 
-/** A clock time the way each language writes it: "3:40 AM", "පෙ.ව. 3:40", "காலை 3:40". */
 export function clockIn(lang: Lang, value: string | Date): string {
   const { h, m } = parts(value);
   const h12 = h % 12 === 0 ? 12 : h % 12;
@@ -60,13 +58,11 @@ export function clockIn(lang: Lang, value: string | Date): string {
 
 const LOCALE: Record<Lang, string> = { en: "en-GB", si: "si-LK", ta: "ta-LK" };
 
-/** "Thursday", "බ්‍රහස්පතින්දා", "வியாழன்" */
 export function weekdayIn(lang: Lang, value: string | Date): string {
   const date = typeof value === "string" ? new Date(value.length === 10 ? `${value}T12:00:00+05:30` : value) : value;
   return new Intl.DateTimeFormat(LOCALE[lang], { timeZone: ZONE, weekday: "long" }).format(date);
 }
 
-/** "Wed 8 Apr" in each language. */
 export function shortDayIn(lang: Lang, value: string | Date): string {
   const date = typeof value === "string" ? new Date(value.length === 10 ? `${value}T12:00:00+05:30` : value) : value;
   return new Intl.DateTimeFormat(LOCALE[lang], { timeZone: ZONE, weekday: "short", day: "numeric", month: "short" })
@@ -74,7 +70,6 @@ export function shortDayIn(lang: Lang, value: string | Date): string {
     .replace(",", "");
 }
 
-/** The loader namespace, with the current language and its clock. */
 export function useLoaderText() {
   const { t, i18n: instance } = useTranslation("loader");
   const lang = (isLang(instance.language) ? instance.language : "en") as Lang;

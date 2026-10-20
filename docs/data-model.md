@@ -202,7 +202,7 @@ Base class used for declarative class definitions. The :class:`_orm.DeclarativeB
 
 ### `case_type`
 
-Standard case types a store orders in, so the planner gets real weight and volume.
+The standard case types a store orders in, with their real weight and volume.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -212,7 +212,7 @@ Standard case types a store orders in, so the planner gets real weight and volum
 | `temp` | varchar |  |
 | `kg` | numeric |  |
 | `m3` | numeric |  |
-| `load_rank` | smallint | Heaviest first within a stop: lower loads first. |
+| `load_rank` | smallint | Lower loads first. Heaviest cases go first within a stop. |
 
 ### `district`
 
@@ -231,7 +231,7 @@ Base class used for declarative class definitions. The :class:`_orm.DeclarativeB
 
 ### `hub_stock`
 
-What a hub's store holds of a case type for a run beyond the night's picks, and when the supplier's next drop arrives. The dispatcher reads it when the dock flags cases missing: a spare, or a delivery before the truck leaves, is worth holding the truck for.
+Spare cases at the hub beyond the night's picks, and when the supplier's next drop arrives. The dispatcher reads it when the dock flags missing cases. A spare, or a drop before the truck leaves, may be worth holding the truck for.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -243,7 +243,7 @@ What a hub's store holds of a case type for a run beyond the night's picks, and 
 
 ### `order_stream`
 
-A store that orders on this weekday, with this temperature, in nearly every week of the history. The order queue uses it to list the stores that have not ordered yet.
+A store that orders on this weekday and temperature in nearly every week of the history. The order queue uses it to list the stores that have not ordered yet.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -283,7 +283,7 @@ Each store's usual unloading time in minutes, from the route history (Relay's Ex
 
 ### `outlook_day`
 
-One open day at a depot: its forecast chilled orders, the fewest refrigerated vehicles that carry them all on Relay's clock (exact search under the plan's rules), and the refrigerated vehicles out of service that day.
+One open day at a depot. Its forecast chilled orders, the fewest refrigerated vehicles that carry them all on Relay's clock (an exact search under the plan's rules), and the vehicles out of service.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -294,11 +294,11 @@ One open day at a depot: its forecast chilled orders, the fewest refrigerated ve
 | `chilled_m3` | numeric |  |
 | `needed` | smallint |  |
 | `in_workshop` | jsonb | Vehicle IDs. |
-| `served_one_fewer` | smallint | optional; Chilled orders that one refrigerated vehicle fewer than needed can serve, on the days the search counted it. |
+| `served_one_fewer` | smallint | optional; Chilled orders that one vehicle fewer than needed can serve, on the days the search counted it. |
 
 ### `outlook_forecast`
 
-A depot's demand forecast for the capacity outlook (DSP-05): when it was made, what an ordinary week is, and how well the method did. The forecast (the Datathon's method) and the fewest-vehicles search need the order history, which the app never holds, so the seed carries their answers. A depot without a row has no outlook.
+A depot's demand forecast for the capacity outlook (DSP-05). The app never holds the order history, so the seed carries the forecast and the fewest-vehicles answers. A depot without a row has no outlook.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -310,13 +310,13 @@ A depot's demand forecast for the capacity outlook (DSP-05): when it was made, w
 | `backtest_year` | smallint |  |
 | `backtest_first_week` | smallint |  |
 | `backtest_last_week` | smallint |  |
-| `backtest_pct` | numeric | The method's mean weekly miss on the depot's Fresh volume over the backtest weeks, in %. |
+| `backtest_pct` | numeric | The method's mean weekly miss on the depot's Fresh volume over the backtest weeks, in percent. |
 | `last_year_pct` | numeric | The same for "same week last year times growth". |
 | `ordinary_week_m3` | numeric | Chilled m³ in an ordinary week of the baseline. |
 | `record_week_m3` | numeric |  |
 | `record_year` | smallint |  |
 | `record_week` | smallint | The depot's highest chilled week on record. |
-| `tech_order_max_m3` | numeric | The largest single Tech order in the depot's history. |
+| `tech_order_max_m3` | numeric |  |
 
 ### `outlook_week`
 
@@ -334,7 +334,7 @@ Forecast demand at a depot for one ISO week, in m³ per group, counted over the 
 
 ### `road_condition`
 
-Date-specific disruption by district; 100 is a clear road.
+Date-specific disruption by district. 100 is a clear road.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -354,7 +354,7 @@ Base class used for declarative class definitions. The :class:`_orm.DeclarativeB
 
 ### `service_history`
 
-Each store's last delivery before the story day, and whether its last order waited. Relay's second rule protects a store whose last order waited.
+Each store's last delivery before the story day, and whether its last order waited. Relay's rule 2 protects a store whose last order waited.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -365,7 +365,7 @@ Each store's last delivery before the story day, and whether its last order wait
 
 ### `traffic_speed`
 
-Typical congestion by district and hour; 100 is free flow.
+Typical congestion by district and hour. 100 is free flow.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -390,7 +390,7 @@ What a vehicle usually does on a weekday, learned from the route history.
 
 ### `usual_stop`
 
-The stores a vehicle's usual trip visits on a weekday, per run it makes (brand, temperature, district), learned from the route history. The proposal keeps vehicles on these runs first (Relay's rule 1).
+The stores a vehicle usually visits on a weekday, per run, learned from the route history. Relay's rule 1 keeps vehicles on these runs.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -459,7 +459,7 @@ Base class used for declarative class definitions. The :class:`_orm.DeclarativeB
 | `vehicle_id` | varchar | references `vehicle.vehicle_id`; optional |
 | `locale` | varchar |  |
 | `phone` | varchar | optional |
-| `judge_account` | boolean | One of the four accounts in the README; shown as a quick sign-in card in demo mode. |
+| `judge_account` | boolean | One of the four README accounts. Demo mode shows it as a quick sign-in card. |
 
 ## Copies of the day, the scenario clock and the audit trail
 
@@ -516,7 +516,7 @@ Every change a person or the simulator makes, in scenario time.
 
 ### `scheduled_event` (per copy)
 
-Something the world simulator does when the scenario clock reaches `due_at`: a store places an order, a driver reports a delay. Applied once, in order.
+Something the world simulator does when the scenario clock reaches due_at, like a store placing an order. Applied once, in order.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -528,7 +528,7 @@ Something the world simulator does when the scenario clock reaches `due_at`: a s
 
 ### `workspace`
 
-One copy of the delivery day with its own scenario clock. MAIN is the shared copy; judges can start private ones and reset them.
+One copy of the delivery day with its own scenario clock. MAIN is the shared copy. Judges can start private ones and reset them.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -540,7 +540,7 @@ One copy of the delivery day with its own scenario clock. MAIN is the shared cop
 | `last_active_at` | datetime |  |
 | `clock_anchor_real` | datetime |  |
 | `clock_anchor_sim` | datetime |  |
-| `clock_rate` | double | Scenario seconds per real second: 1 runs in real time, 0 holds the clock still. |
+| `clock_rate` | double | Scenario seconds per real second. 1 is real time, 0 holds the clock still. |
 | `state` | jsonb |  |
 
 ## Orders
@@ -591,8 +591,8 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `outlet_id` | varchar | references `outlet.outlet_id` |
 | `brand` | varchar |  |
 | `temp` | varchar |  |
-| `requested_date` | date | The delivery day the store ordered for. |
-| `run_date` | date | The run it will go on: the requested day, or a later one after a cutoff or a deferral. |
+| `requested_date` | date |  |
+| `run_date` | date | The run it goes on. The requested day, or a later one after a cutoff or a deferral. |
 | `units` | integer |  |
 | `weight_kg` | numeric |  |
 | `volume_m3` | numeric |  |
@@ -600,7 +600,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `source` | varchar |  |
 | `placed_at` | datetime |  |
 | `placed_by` | char | references `app_user.id`; optional |
-| `client_ref` | varchar | optional; The store device's id for the order, so a resend never creates a second order. |
+| `client_ref` | varchar | optional; The store device's id for the order, so a resend never makes a second order. |
 | `note` | text |  |
 
 ### `order_line` (per copy)
@@ -614,7 +614,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `position` | integer |  |
 | `case_type` | varchar | references `case_type.code` |
 | `qty` | integer |  |
-| `carried_qty` | integer | Cases added from an earlier order that went short, included in qty. |
+| `carried_qty` | integer | Cases added from an earlier order that went short. Already counted in qty. |
 | `carried_from` | varchar | optional |
 
 ## Plans, trips, stops, deferrals and changes after publishing
@@ -742,9 +742,9 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `kind` | varchar |  |
 | `from_date` | date |  |
 | `to_date` | date |  |
-| `reason` | text | The dispatcher's recorded reason. |
+| `reason` | text |  |
 | `store_notice` | text | The exact words the store reads. |
-| `explanation` | jsonb | What the engine found: unavoidable or its choice, the rule, the pool, the cost, the next-run check. |
+| `explanation` | jsonb | What the engine found. Unavoidable or its choice, the rule, the pool, the cost, the next-run check. |
 | `created_at` | datetime |  |
 | `confirmed_at` | datetime | optional |
 | `confirmed_by` | char | references `app_user.id`; optional |
@@ -753,7 +753,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 
 ### `engine_cache`
 
-The engine's answer for one exact set of inputs (see relay_api.services.engine_cache). Shared by every copy of the day, since the answer depends only on what the engine reads.
+The engine's answer for one exact set of inputs, shared by every copy of the day. See relay_api.services.engine_cache.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -809,7 +809,7 @@ One order delivered at one outlet. The data delivers every order as its own stop
 | `status` | varchar |  |
 | `arrived_at` | datetime | optional |
 | `completed_at` | datetime | optional |
-| `version` | integer | Bumped on every change the office makes, so a record made offline can be checked against it. |
+| `version` | integer | Goes up on every office change, so a record made offline can be checked against it. |
 | `backup_of` | char | references `stop.id`; optional |
 | `reason` | text |  |
 
@@ -836,7 +836,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `finished_at` | datetime | optional |
 | `expected_back` | datetime | optional |
 | `note` | text |  |
-| `loader_id` | char | references `app_user.id`; optional; Who is loading it now, or loaded it. |
+| `loader_id` | char | references `app_user.id`; optional |
 | `loading_started_at` | datetime | optional |
 | `claimed_at` | datetime | optional; When a person first worked on this load. From then on the world simulator leaves it alone. |
 | `turned_back_at` | datetime | optional |
@@ -925,8 +925,8 @@ Planned against loaded, confirmed by the loader and accepted by the driver.
 | `completed_by` | char | references `app_user.id`; optional |
 | `accepted_at` | datetime | optional |
 | `accepted_by` | char | references `app_user.id`; optional |
-| `accepted_on` | varchar | optional; 'phone' or 'tablet' (the driver's own PIN on the dock tablet). |
-| `difference` | text | What the driver said does not match, when the driver reported a difference instead of accepting. |
+| `accepted_on` | varchar | optional; 'phone' or 'tablet'. On the tablet the driver types their own PIN. |
+| `difference` | text | What the driver says does not match, when they report a difference instead of accepting. |
 
 ### `load_line` (per copy)
 
@@ -1068,7 +1068,7 @@ erDiagram
 
 ### `conflict` (per copy)
 
-A driver's offline record that clashes with an office change, and the one question that settles it.
+A driver's offline record that clashes with an office change. One question settles it.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1081,15 +1081,15 @@ A driver's offline record that clashes with an office change, and the one questi
 | `answer` | varchar | optional |
 | `opened_at` | datetime |  |
 | `answered_at` | datetime | optional |
-| `resolution` | text | Who settled it: the driver, or the dispatcher cancelling the backup's copy. |
-| `event_id` | char | optional; The record that clashed. |
+| `resolution` | text | Who settled it. Either the driver, or the dispatcher cancelling the backup's copy. |
+| `event_id` | char | optional |
 | `resolved_at` | datetime | optional |
 | `resolved_by` | char | references `app_user.id`; optional |
 | `escalated_at` | datetime | optional |
 
 ### `device_contact` (per copy)
 
-The last time each driver's phone reached Relay, and what it said was still waiting to send.
+The last time each driver's phone reached Relay, and how many records it still had to send.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1099,7 +1099,7 @@ The last time each driver's phone reached Relay, and what it said was still wait
 | `last_record_at` | datetime | optional |
 | `pending_records` | integer |  |
 | `device_id` | varchar | optional |
-| `gap_from` | datetime | optional; The last silence on a running trip, for "Offline 5:41 to 7:14". |
+| `gap_from` | datetime | optional; The last silence on a running trip, shown as Offline 5:41 to 7:14. |
 | `gap_to` | datetime | optional |
 
 ### `field_event` (per copy)
@@ -1108,13 +1108,13 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | char | primary key; Generated on the phone when the record is made. |
+| `id` | char | primary key; Made on the phone when the record is created. |
 | `user_id` | char | references `app_user.id` |
 | `device_id` | varchar |  |
 | `kind` | varchar |  |
 | `trip_id` | char | references `trip.id`; optional |
 | `stop_id` | char | references `stop.id`; optional |
-| `occurred_at` | datetime | When it happened, by the phone's scenario clock. Kept as recorded, even if it arrives an hour later. |
+| `occurred_at` | datetime | When it happened on the phone's scenario clock. Kept as recorded, even if it arrives late. |
 | `received_at` | datetime |  |
 | `base_version` | integer | optional; The stop version the phone last saw. |
 | `lat` | numeric | optional |
@@ -1122,7 +1122,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `accuracy_m` | numeric | optional |
 | `payload` | jsonb |  |
 | `outcome` | varchar |  |
-| `applied_at` | datetime | optional; When it took effect: on arrival, or when the question it raised was settled. |
+| `applied_at` | datetime | optional; When it took effect. That is on arrival, or when the question it raised was settled. |
 | `reject_reason` | text |  |
 
 ### `photo` (per copy)
@@ -1140,7 +1140,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `uploaded_at` | datetime |  |
 | `uploaded_by` | char | references `app_user.id`; optional |
 | `stop_id` | char | references `stop.id`; optional |
-| `event_id` | char | optional; The delivery record it belongs to; the photo is sent after it. |
+| `event_id` | char | optional; The delivery record it belongs to. The photo is sent after the record. |
 
 ### `problem_report` (per copy)
 
@@ -1161,7 +1161,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 
 ### `proof` (per copy)
 
-Proof of delivery for one stop: what was dropped, who received it, a photo or a signature.
+Proof of delivery for one stop. What was dropped, who received it, plus a photo or a signature.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1216,7 +1216,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `status` | varchar |  |
 | `confirmed_at` | datetime |  |
 | `confirmed_by` | char | references `app_user.id`; optional |
-| `before_driver_proof` | boolean | Confirmed at the store before the driver's phone had sent its proof. |
+| `before_driver_proof` | boolean | Confirmed at the store before the driver's phone sent its proof. |
 | `lines` | jsonb |  |
 | `client_ref` | varchar | optional |
 
@@ -1300,7 +1300,7 @@ Rows that belong to one copy of the delivery day. See relay_api.db for how queri
 | `body` | text |  |
 | `data` | jsonb |  |
 | `created_at` | datetime |  |
-| `show_after` | datetime | When it may ring. A notice to a store between 10:00 PM and 5:00 AM arrives silently at once, readable in the app, and rings at 5:00 AM. |
+| `show_after` | datetime | Between 10:00 PM and 5:00 AM a store notice shows in the app at once but only rings at 5:00 AM. |
 | `read_at` | datetime | optional |
 | `acknowledged_at` | datetime | optional |
-| `delivered_at` | datetime | optional; When a phone picked it up: a message to a silent driver waits for the next contact. |
+| `delivered_at` | datetime | optional; When a phone picked it up. A silent driver gets the message at the next contact. |

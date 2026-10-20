@@ -1,22 +1,18 @@
-/** The plan board's sentences, kept apart from the screens so each can be read and tested on its own. */
-
 import type { ChipKind } from "@/design/StatusChip";
 import { dayOf, formatTime, formatWeekday, kgValue, m3Value, numberFormat, tenths } from "@/lib/time";
 import type { Board, DepotName, Fit, PlanTrip } from "./api";
 
 export const DEPOT_LABEL: Record<DepotName, string> = { Kandy: "Kandy hub", Peliyagoda: "Peliyagoda" };
 
-/** A hub takes the article and a place name doesn't: "the Kandy hub's", "Peliyagoda's". */
+// A hub takes the article and a place name does not.
 const DEPOT_OWNS: Record<DepotName, string> = { Kandy: "the Kandy hub's", Peliyagoda: "Peliyagoda's" };
 
 export const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many);
 
-/** "VEH039", "VEH039 and VEH058", "VEH039, VEH043 and VEH058" */
 export function andList(items: string[]): string {
   return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
-/** Why Not placed holds what it holds, under its title. */
 export function noRoom(limiting: string[], waits: number): string {
   const them = waits > 1 ? "them" : "it";
   return limiting.length
@@ -25,7 +21,6 @@ export function noRoom(limiting: string[], waits: number): string {
     : `No trip left has room for ${them} in time.`;
 }
 
-/** "VEH057 trip 2" */
 export const tripName = (trip: { vehicle_id: string; trip_no: number }) => `${trip.vehicle_id} trip ${trip.trip_no}`;
 
 export function firstProposalText(depot: DepotName, orders: number): string {
@@ -36,7 +31,6 @@ export function firstProposalText(depot: DepotName, orders: number): string {
   );
 }
 
-/** The trips that break a rule now. */
 export function brokenTrips(board: Board): PlanTrip[] {
   return board.lanes.flatMap((l) => l.trips).filter((t) => t.broken > 0);
 }
@@ -47,7 +41,6 @@ function brokenWhere(board: Board): string {
   return trips.length > 1 ? ` on ${trips.length} trips` : "";
 }
 
-/** The plan bar's summary: "Kandy hub: 57 orders, 56 on 18 trips, 1 waits", or what keeps Publish off. */
 export function planSummary(board: Board, depot: DepotName): string {
   const broken = board.broken;
   if (broken) {
@@ -66,7 +59,6 @@ export function planSummary(board: Board, depot: DepotName): string {
   return `${counted}${day} with a reason.`;
 }
 
-/** Beside the plan bar's buttons: what is left to do before Publish turns on. */
 export function planHelper(board: Board): string {
   if (board.plan.fleet_changed_at) return "Fleet changed. Propose again to re-plan.";
   if (board.broken) return `Fix ${board.broken} broken ${plural(board.broken, "rule")} to publish.`;
@@ -74,7 +66,6 @@ export function planHelper(board: Board): string {
   return unreasoned ? `Give the ${plural(unreasoned, "deferral")} a reason to publish.` : "";
 }
 
-/** The plan's status chip, the most pressing state first. */
 export function planChip(board: Board): { kind: ChipKind; text: string } {
   const plan = board.plan;
   if (plan.fleet_changed_at) return { kind: "planChanged", text: `Fleet changed ${formatTime(plan.fleet_changed_at)}` };
@@ -88,7 +79,6 @@ export function planChip(board: Board): { kind: ChipKind; text: string } {
   return { kind: "proposed", text: plan.proposed_at ? `Proposed ${formatTime(plan.proposed_at)}` : "Proposed" };
 }
 
-/** Not placed, once every order is on a trip but a rule breaks. */
 export function everyOrderPlaced(board: Board): string {
   const trips = brokenTrips(board);
   const n = board.broken;
@@ -103,7 +93,6 @@ export function everyOrderPlaced(board: Board): string {
 
 const TRY_ANYWAY = "You can drop it here, but the plan won't publish until it fits.";
 
-/** The dark tooltip beside the trip an order is held over: what the trip would carry, and whether it fits. */
 export function fitTooltip(fit: Fit): string {
   const trip = tripName(fit);
   if (fit.current) return `Already on ${trip}.`;

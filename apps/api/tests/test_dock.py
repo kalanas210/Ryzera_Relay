@@ -1,6 +1,3 @@
-"""The night at the Kandy hub dock, through the API: the demo skips ahead to 2:40 AM, Rizwan counts and flags the
-rice and dhal for Dilani's store, Nuwan answers from home, the load is handed over and Kasun accepts it."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -53,13 +50,12 @@ def test_skipping_to_the_dock_plays_the_evening(new_copy: Callable[[], Copy]) ->
     assert notice["first_place"] == "Hemmathagama"
 
     load = _story_trip(copy)
-    assert [g["seq"] for g in load["groups"]] == [4, 3, 2, 1]  # the last stop goes in first
+    assert [g["seq"] for g in load["groups"]] == [4, 3, 2, 1]
     assert [g["place"] for g in load["groups"]] == ["Aranayake", "Hemmathagama", "Mawanella", "Kegalle"]
     assert load["groups"][0]["state"] == "done"
     assert load["groups"][1]["moved_from"] == 2
     assert load["groups"][2]["moved_from"] == 3
     assert (load["loaded"], load["cases"]) == (86, 383)
-    # heaviest case type first within a stop
     assert [line["case_type"] for line in load["groups"][1]["lines"]] == ["rice_dhal", "packet_foods", "tea_biscuit"]
 
 
@@ -78,9 +74,7 @@ def test_flag_answer_and_handover(new_copy: Callable[[], Copy]) -> None:
 
     load = copy.post(f"/api/dock/lines/{rice['id']}/flag", {"kind": "missing", "qty": 6}, "loader")
     assert load["flags_waiting"] == 1
-    # a flagged line cannot be ticked off while the dispatcher decides
     copy.post(f"/api/dock/lines/{rice['id']}", {"loaded": 36}, "loader", expect=409)
-    # and the load cannot be completed
     copy.post(f"/api/dock/trips/{load['trip_id']}/complete", None, "loader", expect=409)
 
     feed = copy.get("/api/dispatch/live/feed?depot=Kandy", "dispatcher")
@@ -91,11 +85,10 @@ def test_flag_answer_and_handover(new_copy: Callable[[], Copy]) -> None:
     assert shortfall["stop_cases"] == 102
     assert shortfall["store_contact"] == "Dilani Jayawardena"
     assert (shortfall["run_date"], shortfall["trip_stops"]) == ("2026-04-08", 4)
-    # the hub has no spare, and the supplier's rice and dhal comes at 5:00 AM, after the truck leaves
+    # The hub has no spare. The supplier's rice and dhal comes at 5:00 AM, after the truck leaves.
     assert shortfall["hub_spare"] == 0
     assert datetime.fromisoformat(shortfall["next_delivery_at"]) == datetime(2026, 4, 8, 5, 0, tzinfo=COLOMBO)
     assert shortfall["photo_id"] is None
-    # the tablet cannot place calls, so it shows the number that reaches the dispatcher on call
     assert load["dispatcher_phone"] == "081 000 2145"
     assert load["plan_changed_by"] == "Nuwan Perera"
 
@@ -103,7 +96,6 @@ def test_flag_answer_and_handover(new_copy: Callable[[], Copy]) -> None:
         f"/api/dispatch/live/shortfalls/{shortfall['id']}/decide", {"decision": "send_short"}, "dispatcher"
     )
     assert not feed["now"]
-    # once decided, the item reads as a shortfall on the truck, no longer as cases missing
     assert feed["earlier"][0]["title"] == "Shortfall on VEH045, stop 3"
     assert feed["earlier"][0]["outcome"] == (
         "Send short, add to Thursday. The 6 missing cases joined ORD0098747, marked from Wednesday."
@@ -143,7 +135,6 @@ def test_flag_answer_and_handover(new_copy: Callable[[], Copy]) -> None:
     moved = next(n for n in notices if n["kind"] == "order_moved")
     assert "now expected later" in moved["body"]
 
-    # the dispatcher's record of the shortfall follows it to the end: the store read it, the truck was handed over
     copy.post(f"/api/store/notices/{short['id']}/ack", None, "store_manager")
     record = copy.get("/api/dispatch/live/feed?depot=Kandy", "dispatcher")["earlier"][0]["shortfall"]
     assert record["store_seen_at"] is not None
@@ -178,13 +169,12 @@ def test_loading_now_moves_past_a_waiting_flag(new_copy: Callable[[], Copy]) -> 
     load = _story_trip(copy)
     assert [g["state"] for g in load["groups"]] == ["done", "loading", "to_load", "to_load"]
 
-    # stop 3's rice and dhal waits for the dispatcher, and the rest of stop 3 goes on
     rice = _line(load, HEMMATHAGAMA_DRY, "rice_dhal")
     copy.post(f"/api/dock/lines/{rice['id']}/flag", {"kind": "missing", "qty": 6}, "loader")
     for case_type in ("packet_foods", "tea_biscuit"):
         line = _line(load, HEMMATHAGAMA_DRY, case_type)
         load = copy.post(f"/api/dock/lines/{line['id']}", {"loaded": line["qty"]}, "loader")
-    # so the one stop being loaded now is stop 2, even before a case of it is on
+    # Stop 2 is the one being loaded now, even before a case of it is on.
     assert [g["state"] for g in load["groups"]] == ["done", "to_load", "loading", "to_load"]
 
     tea = _line(load, MAWANELLA_DRY, "tea_biscuit")
@@ -218,7 +208,7 @@ def test_the_world_leaves_a_load_a_person_started(new_copy: Callable[[], Copy]) 
     copy.post(f"/api/dock/lines/{first['id']}", {"loaded": first["qty"]}, "loader")
     before = copy.get(f"/api/dock/trips/{card['trip_id']}", "loader")["loaded"]
 
-    copy.advance(60)  # the world loads every other truck by now
+    copy.advance(60)
     after = copy.get(f"/api/dock/trips/{card['trip_id']}", "loader")
     assert after["loaded"] == before
     assert after["handover"]["completed_at"] is None
@@ -243,7 +233,6 @@ def test_a_load_a_person_finished_still_leaves(new_copy: Callable[[], Copy]) -> 
 
     copy.jump("settled")
     first = copy.get(f"/api/dock/trips/{first['trip_id']}", "loader")
-    # nobody plays this driver, so the world still does: the load is accepted on the phone and the truck leaves
     assert first["state"] == "left"
     assert first["handover"]["accepted_on"] == "phone"
     assert first["handover"]["completed_by"] == "Suresh Kumar"
@@ -262,7 +251,7 @@ def test_a_second_trip_waits_for_the_vehicle(new_copy: Callable[[], Copy]) -> No
 
     copy.jump("settled")
     assert copy.get(f"/api/dock/trips/{first['trip_id']}", "loader")["state"] == "loading"
-    # trip 2 is picked and waits at the bay, but VEH057 is not back from a trip it never left on
+    # Trip 2 is picked and waits at the bay, but VEH057 is not back from a trip it never left on.
     second = copy.get(f"/api/dock/trips/{second['trip_id']}", "loader")
     assert second["departed_at"] is None
     assert second["handover"]["accepted_at"] is None
@@ -277,7 +266,6 @@ def test_the_world_passes_over_a_load_a_person_holds(new_copy: Callable[[], Copy
     copy.sign_in("suresh", "loader")
     first, _ = _world_trips(copy, "VEH057")
     with SessionLocal() as other:
-        # a person's action is in flight on this load: the tick neither waits for it nor writes over it
         lock_trip(other, first["trip_id"])
         copy.advance(5)
         assert copy.get(f"/api/dock/trips/{first['trip_id']}", "loader")["loaded"] == first["loaded"]
@@ -298,7 +286,7 @@ def test_a_moved_stop_marks_the_lines_already_on(new_copy: Callable[[], Copy]) -
     load = _story_trip(copy)
     assert load["lines_to_check"] == 0
     loaded = [line for line in load["groups"][0]["lines"] if line["loaded"]]
-    # what a stop reorder after loading began leaves behind (services.changes marks these lines)
+    # What a stop reorder after loading began leaves behind. services.changes marks these lines.
     with SessionLocal() as db:
         db.execute(
             update(LoadLine).where(LoadLine.id.in_([line["id"] for line in loaded])).values(changed_by_plan=True)
@@ -308,7 +296,6 @@ def test_a_moved_stop_marks_the_lines_already_on(new_copy: Callable[[], Copy]) -
     assert load["lines_to_check"] == len(loaded)
     assert all(line["changed_by_plan"] for line in load["groups"][0]["lines"] if line["loaded"])
 
-    # the loader looks at a line again, and its mark goes
     line = loaded[0]
     load = copy.post(f"/api/dock/lines/{line['id']}", {"loaded": line["qty"]}, "loader")
     assert load["lines_to_check"] == len(loaded) - 1
@@ -323,7 +310,7 @@ def test_a_stop_moved_twice_names_the_place_it_last_held(new_copy: Callable[[], 
     before = _story_trip(copy)
     mawanella = next(g for g in before["groups"] if g["order_ref"] == MAWANELLA_DRY)
 
-    # 9:12 PM moved Hemmathagama from stop 2 to stop 3; now Nuwan swaps stops 3 and 4 as well
+    # 9:12 PM moved Hemmathagama from stop 2 to stop 3. Now Nuwan swaps stops 3 and 4 as well.
     board = copy.get("/api/dispatch/plan?depot=Kandy", "dispatcher")
     trip = next(t for lane in board["lanes"] for t in lane["trips"] if (t["vehicle_id"], t["trip_no"]) == ("VEH045", 1))
     refs = [s["order_ref"] for s in trip["stops"]]
@@ -332,10 +319,8 @@ def test_a_stop_moved_twice_names_the_place_it_last_held(new_copy: Callable[[], 
 
     load = _story_trip(copy)
     hemmathagama = next(g for g in load["groups"] if g["order_ref"] == HEMMATHAGAMA_DRY)
-    # it was stop 3 until this change, not stop 2: that place it left at 9:12 PM
     assert (hemmathagama["seq"], hemmathagama["moved_from"]) == (4, 3)
     assert hemmathagama["moved_at"] == load["plan_changed_at"]
-    # a stop the second change left alone keeps its own move and time
     still = next(g for g in load["groups"] if g["order_ref"] == MAWANELLA_DRY)
     assert (still["moved_from"], still["moved_at"]) == (mawanella["moved_from"], mawanella["moved_at"])
 
@@ -353,22 +338,20 @@ def test_a_flagged_line_waits_on_the_dispatcher_not_a_check(new_copy: Callable[[
     rice = _line(load, HEMMATHAGAMA_DRY, "rice_dhal")
     copy.post(f"/api/dock/lines/{rice['id']}", {"loaded": 30}, "loader")
     copy.post(f"/api/dock/lines/{rice['id']}/flag", {"kind": "missing", "qty": 6}, "loader")
-    # a stop reorder while the flag waits marks the 30 already on
     with SessionLocal() as db:
         db.execute(update(LoadLine).where(LoadLine.id == rice["id"]).values(changed_by_plan=True))
         db.commit()
     load = copy.get(f"/api/dock/trips/{load['trip_id']}", "loader")
-    assert load["lines_to_check"] == 0  # the loader cannot confirm a flagged line, so it is not one to check
+    assert load["lines_to_check"] == 0
 
-    # once the cases turn up and the flag is withdrawn, the line is the loader's again, mark and all
     load = copy.delete(f"/api/dock/lines/{rice['id']}/flag", "loader")
     assert load["lines_to_check"] == 1
     load = copy.post(f"/api/dock/lines/{rice['id']}", {"loaded": 36}, "loader")
     assert load["lines_to_check"] == 0
 
 
+# Enough of a JPEG for the dock. Relay checks the type and size, the tablet does the resizing.
 JPEG = bytes([0xFF, 0xD8, 0xFF, 0xE0, *([0] * 64), 0xFF, 0xD9])
-"""Enough of a JPEG for the dock: Relay checks the type and size, the tablet does the resizing."""
 
 
 def _put_photo(copy: Copy, line_id: str, data: bytes = JPEG, kind: str = "image/jpeg") -> Any:
@@ -385,7 +368,7 @@ def test_damaged_cases_carry_a_photo(new_copy: Callable[[], Copy]) -> None:
     copy.sign_in("rizwan", "loader")
     copy.sign_in("nuwan", "dispatcher")
     packet = _line(_story_trip(copy), HEMMATHAGAMA_DRY, "packet_foods")
-    assert _put_photo(copy, packet["id"]).status_code == 409  # the flag comes first
+    assert _put_photo(copy, packet["id"]).status_code == 409
 
     copy.post(f"/api/dock/lines/{packet['id']}/flag", {"kind": "damaged", "qty": 2}, "loader")
     assert _put_photo(copy, packet["id"], b"not a photo", "text/plain").status_code == 409
@@ -394,14 +377,12 @@ def test_damaged_cases_carry_a_photo(new_copy: Callable[[], Copy]) -> None:
     first = _line(response.json(), HEMMATHAGAMA_DRY, "packet_foods")["shortfall"]["photo_id"]
     assert first is not None
 
-    # the dispatcher sees what the dock saw, and so does whoever is signed in on the tablet
     [item] = copy.get("/api/dispatch/live/feed?depot=Kandy", "dispatcher")["now"]
     assert item["shortfall"]["photo_id"] == first
     assert copy.client.get(f"/api/photos/{first}?as=dispatcher").content == JPEG
     copy.sign_in("suresh", "loader")
     assert copy.client.get(f"/api/photos/{first}?as=loader").status_code == 200
 
-    # a second photo replaces the first, and withdrawing the flag takes the photo with it
     second = _line(_put_photo(copy, packet["id"]).json(), HEMMATHAGAMA_DRY, "packet_foods")["shortfall"]["photo_id"]
     assert second != first
     assert copy.client.get(f"/api/photos/{first}?as=dispatcher").status_code == 404
@@ -433,7 +414,6 @@ def test_skipping_past_the_handover_finishes_a_load_the_judge_started(new_copy: 
     copy.post(f"/api/dock/lines/{tea['id']}", {"loaded": tea["qty"]}, "loader")
 
     state = copy.jump("handover")
-    # the judge started this load, so the story's flag is not played on it; the rest is finished for the truck to go
     assert "Rizwan flags 6 rice and dhal cases missing" not in state["played"]
     assert "Rizwan finishes loading" in state["played"]
     load = copy.get(f"/api/dock/trips/{load['trip_id']}", "loader")
@@ -466,7 +446,7 @@ def test_a_loader_reaches_only_their_own_hubs_loads(new_copy: Callable[[], Copy]
 
     copy = new_copy()
     copy.jump("loading")
-    copy.sign_in("rizwan", "loader")  # a Kandy loader
+    copy.sign_in("rizwan", "loader")
     with SessionLocal() as db:
         workspace = find_workspace(db, copy.code)
         assert workspace is not None
@@ -478,7 +458,6 @@ def test_a_loader_reaches_only_their_own_hubs_loads(new_copy: Callable[[], Copy]
         trip_id, line_id, loaded = trip.id, line.id, line.loaded_qty
 
     headers = {"X-Relay-Role": "loader"}
-    # another hub's load reads as not there, and nothing on it changes
     assert copy.client.get(f"/api/dock/trips/{trip_id}", headers=headers).status_code == 404
     assert copy.client.post(f"/api/dock/lines/{line_id}", json={"loaded": 1}, headers=headers).status_code == 404
     flag = copy.client.post(f"/api/dock/lines/{line_id}/flag", json={"kind": "missing", "qty": 1}, headers=headers)
@@ -489,5 +468,4 @@ def test_a_loader_reaches_only_their_own_hubs_loads(new_copy: Callable[[], Copy]
     with SessionLocal() as db:
         assert db.get(LoadLine, line_id).loaded_qty == loaded  # type: ignore[union-attr]
 
-    # the loader's own hub is still theirs
     assert _story_trip(copy)["vehicle_id"] == "VEH045"

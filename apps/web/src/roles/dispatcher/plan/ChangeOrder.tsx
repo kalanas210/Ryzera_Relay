@@ -7,8 +7,7 @@ import { cx } from "@/lib/cx";
 import { formatTime } from "@/lib/time";
 import { type DepotName, type PlanTrip, useReorder, useReorderPreview } from "./api";
 
-/** Changing a published trip's stop order (the 9:12 PM swap): Relay shows the cost first, to the minute, and who it
- *  will tell; the dispatcher confirms with a note for the record. */
+// Changing a published trip's stop order (the 9:12 PM swap). Relay shows the cost first, to the minute.
 export function ChangeOrder({
   planId,
   depot,

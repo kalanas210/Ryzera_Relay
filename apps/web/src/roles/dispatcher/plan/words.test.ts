@@ -78,7 +78,7 @@ describe("plan bar", () => {
       kind: "ready",
       text: "Ready 4:52 PM",
     });
-    // Undo back to the proposal clears edited_at, so the chip no longer says Edited
+    // Undo back to the proposal clears edited_at, so the chip no longer says Edited.
     expect(planChip(board({ plan: { edited_at: null } })).kind).toBe("proposed");
     expect(planChip(board({ broken: 1, trips: [trip("VEH043", 1, 1)] })).kind).toBe("ruleBroken");
     expect(planChip(board({ plan: { fleet_changed_at: "2026-04-07T16:40:00+05:30" } })).text).toBe(

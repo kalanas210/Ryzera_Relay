@@ -1,16 +1,4 @@
-"""The engine's answers, kept by their exact inputs.
-
-The planning engine is deterministic: the same orders, vehicles, conditions and usual runs always give the same
-plan. A search takes 20 to 40 seconds on a desktop, and every judge's private copy of the day asks the same first
-question, so the answer is stored under a hash of everything the engine reads, including the engine's own source.
-Change any input, or the engine, and the key changes with it. `relay-api serve` fills the story day's first
-answers in the background (see relay_api.cli.warm); a new fleet or new orders still make the engine search, and
-the plan board shows that wait.
-
-One key is searched once at a time. A Propose that asks while the warm-up, or another request, is already searching
-for the same key waits on that key's advisory lock in PostgreSQL and then reads the answer, instead of running a
-second search beside the first. While the warm-up runs it holds a lock of its own, which `warming_up` reports.
-"""
+"""The engine's answers, stored under a hash of every input and the engine's own source."""
 
 from __future__ import annotations
 
@@ -73,10 +61,9 @@ class Answer:
     analyses: list[GroupAnalysis]
 
 
+# Advisory lock classes. SEARCHING is held per key, WARMING by the warm-up while it runs.
 SEARCHING = 7101
-"""The class of the advisory lock that one search for a key holds, with the key's first 32 bits as its id."""
 WARMING = 7102
-"""The class of the advisory lock the warm-up holds while it runs (id 0)."""
 
 
 def _lock_id(key: str) -> int:
@@ -88,9 +75,8 @@ def propose_cached(db: Session, run: RunInput) -> Answer:
     row = db.get(EngineCache, key)
     if row is not None:
         return _decode(row.result)
-    # The search runs on a connection of its own, holding the key's lock, and keeps its answer there: the answer is
-    # stored and the lock let go together, so whoever waited on the lock finds the answer, whatever the caller's own
-    # transaction does next.
+    # A search takes 20 to 40 seconds, so each key is searched once. Others wait on its lock.
+    # It uses its own connection, so the answer is stored and the lock let go together.
     with db.get_bind().engine.connect() as conn, conn.begin():
         conn.execute(select(func.pg_advisory_xact_lock(SEARCHING, _lock_id(key))))
         kept = conn.scalar(select(EngineCache.result).where(EngineCache.key == key))
@@ -108,16 +94,13 @@ def propose_cached(db: Session, run: RunInput) -> Answer:
 
 @contextmanager
 def warming(engine: Engine) -> Iterator[None]:
-    """Hold the warm-up's lock while the block runs. A shared lock, so two processes warming at once both count,
-    and PostgreSQL lets it go by itself if the process dies."""
     with engine.connect() as conn, conn.begin():
         conn.execute(select(func.pg_advisory_xact_lock_shared(WARMING, 0)))
         yield
 
 
 def warming_up(db: Session) -> bool:
-    """Whether a warm-up is still asking the engine the story day's first questions. A Propose that starts now may
-    wait for the warm-up's answer, up to half a minute, rather than be quick."""
+    # True while a warm-up runs. A Propose that starts now may wait up to half a minute.
     held = db.scalar(
         text(
             "select exists (select 1 from pg_locks where locktype = 'advisory' and granted"

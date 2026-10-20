@@ -115,7 +115,6 @@ function show(items: FeedItem[], rows: RunRow[] = [kasun], earlier: FeedItem[] =
 
 beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  // who is signed in and the scenario clock never answer here
   vi.spyOn(api, "get").mockImplementation(() => new Promise(() => {}));
 });
 
@@ -193,7 +192,7 @@ describe("decisions the feed asks for", () => {
       handled_at: at("06:15"),
       ref: { trip_id: "trip-045", stop_id: "stop-4", backup_trip_id: "trip-060" },
     });
-    // to the minute, the desk's model has VEH060 at Aranayake at 8:04
+    // The model has VEH060 at Aranayake at 8:04. The feed shows it rounded to 8:05.
     const loading = { ...backup, departed_at: null, markers: [{ ...backup.markers[0]!, estimate: at("08:04") }] };
     const { unmount } = show([moved], [kasun, loading]);
     expect(screen.getByText("VEH060 arrives around 8:05, after Aranayake's 7:30 AM close.")).toBeInTheDocument();
@@ -237,7 +236,6 @@ describe("decisions the feed asks for", () => {
     );
     second.unmount();
 
-    // once Kasun says it was not delivered, keeping the backup's copy comes first
     const denied = {
       ...kasun,
       markers: kasun.markers.map((m) => (m.seq === 4 ? { ...m, state: "conflict" as const, denied: true } : m)),
@@ -256,7 +254,7 @@ describe("decisions the feed asks for", () => {
   });
 });
 
-/** Rizwan's flag at 2:47 AM, decided by Nuwan at 2:52 AM. */
+// Rizwan's flag at 2:47 AM, decided by Nuwan at 2:52 AM.
 const shortfall: ShortfallDetail = {
   id: "s-1",
   kind: "damaged",
@@ -366,7 +364,6 @@ describe("the record of what was decided", () => {
         }),
       ],
     );
-    // the only item in the feed opens on the desk
     expect(screen.getByRole("img", { name: "The damaged rice and dhal cases, from the dock" })).toBeInTheDocument();
   });
 });

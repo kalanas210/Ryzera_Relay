@@ -1,5 +1,5 @@
-"""What the dock tablet reads: tonight's loads (LDR-01), one load in loading order (LDR-02), a flag and its
-answer (LDR-03) and the handover (LDR-04)."""
+"""What the dock tablet reads. Tonight's loads (LDR-01), one load (LDR-02), a flag and its answer (LDR-03)
+and the handover (LDR-04)."""
 
 from __future__ import annotations
 
@@ -43,12 +43,12 @@ class LoadCardOut(Schema):
     driver: str | None
     loader: str | None
     plan_changed_at: datetime | None
+    # The first trip's planned return. A second trip is picked before its vehicle is back.
     pick_before: datetime | None
-    """A second trip is picked before its vehicle is back from the first: the first trip's planned return."""
 
 
 class DepartedOut(Schema):
-    """One row per departure time: the loads that left in the same minute for one district."""
+    """One row per departure time. The loads that left in the same minute for one district."""
 
     at: datetime
     district: str
@@ -63,8 +63,8 @@ class WorkshopOut(Schema):
 
 
 class DockNoticeOut(Schema):
-    """A plan change the dock must see. The words are built on the tablet in the loader's language from the
-    fields; `title` and `body` are the English."""
+    """A plan change the dock must see. The tablet builds the words from the fields in the loader's language.
+    title and body are the English."""
 
     id: uuid.UUID
     trip_id: uuid.UUID
@@ -72,8 +72,8 @@ class DockNoticeOut(Schema):
     kind: Literal["swap", "reorder"]
     stops: list[int]
     by: str | None
+    # For a swap, the stop that now goes onto the truck earlier.
     first_place: str | None
-    """For a swap: the stop that now goes onto the truck earlier."""
     other_place: str | None
     loads_first: bool
     done: bool
@@ -94,8 +94,8 @@ class TonightOut(Schema):
     left: list[DepartedOut]
     left_count: int
     workshop: list[WorkshopOut]
+    # Style and Tech loads, picked by the day shift.
     daytime: int
-    """Style and Tech loads, picked by the day shift."""
     notices: list[DockNoticeOut]
     loaders: list[PersonOut]
     dispatcher: str | None
@@ -114,7 +114,6 @@ class ShortfallOut(Schema):
     added_to_day: date | None
     store_contact: str | None
     photo_id: uuid.UUID | None
-    """A photo of damaged cases, added after the flag."""
 
 
 class LoadLineOut(Schema):
@@ -123,9 +122,8 @@ class LoadLineOut(Schema):
     qty: int
     loaded: int
     status: LineStatus
+    # Already on the truck for a stop the dispatcher moved. Clears when a loader checks or counts it again.
     changed_by_plan: bool
-    """Already on the truck for a stop the dispatcher moved, so it may sit in the wrong place. Clears when a
-    loader checks or counts the line again."""
     shortfall: ShortfallOut | None
 
 
@@ -140,9 +138,9 @@ class StopGroupOut(Schema):
     short: int
     moved_from: int | None
     moved_at: datetime | None
+    # Done means every line is checked or decided. Loading is the one stop being loaded now, the first in
+    # loading order with a line still to load or in progress. Any other stop is to_load.
     state: GroupState
-    """Done: every line is checked or decided. Loading: the one stop being loaded now, the first in loading order
-    with a line still to load or in progress. Any other stop is to_load."""
     lines: list[LoadLineOut]
 
 
@@ -188,14 +186,12 @@ class TripLoadOut(Schema):
     short: int
     lines_total: int
     lines_done: int
+    # Lines a plan change marked after they went on. A flagged line waits on the dispatcher instead.
     lines_to_check: int
-    """Lines a plan change marked after they went on (`changed_by_plan`) that a loader can confirm: a flagged line
-    waits on the dispatcher instead."""
     flags_waiting: int
     groups: list[StopGroupOut]
     handover: HandoverOut
     dispatcher: str | None
+    # The tablet cannot place calls, so it shows the number of the dispatcher on call.
     dispatcher_phone: str | None
-    """The number that reaches the dispatcher on call. The tablet cannot place calls, so it shows the number."""
     plan_changed_by: str | None
-    """Who made the latest change to this load after it was published."""

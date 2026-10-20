@@ -1,5 +1,3 @@
-"""The eleven rules, on the moves the Designathon's plan board shows."""
-
 import pytest
 from story_data import story_orders, story_vehicles, usual_runs
 
@@ -16,7 +14,7 @@ def ctx(network: Network, wednesday: Conditions) -> Context:
 
 
 def test_dilanis_chilled_order_breaks_three_rules_on_the_van(ctx: Context) -> None:
-    # DSP-02 / broken rule: VEH057 trip 2 with Kegalle's two chilled orders and Dilani's
+    # DSP-02, VEH057 trip 2 with Kegalle's two chilled orders and Dilani's
     trips = [
         Trip("VEH057", 1, ["ORD0098545", "ORD0098552", "ORD0098554", "ORD0098556", "ORD0098550"], 220),
         Trip("VEH057", 2, ["ORD0098594", "ORD0098599", "ORD0098596"], 372),
@@ -38,7 +36,7 @@ def test_the_fit_hint_says_why_in_a_few_words(ctx: Context) -> None:
     badulla = Trip("VEH040", 1, ["ORD0098585", "ORD0098587"], 120)
     fits, hint = fit_hint(ctx, ctx.orders["ORD0098596"], badulla, [badulla])
     assert (fits, hint) == (False, "Serves Badulla only")
-    # DSP-02: VEH057's first trip is full as well as in Kandy, and the district is what the hint names
+    # DSP-02. VEH057's first trip is full as well as in Kandy, and the district is what the hint names.
     kandy = Trip("VEH057", 1, ["ORD0098545", "ORD0098552", "ORD0098554", "ORD0098556", "ORD0098550"], 220)
     fits, hint = fit_hint(ctx, ctx.orders["ORD0098596"], kandy, [kandy])
     assert (fits, hint) == (False, "Serves Kandy only")

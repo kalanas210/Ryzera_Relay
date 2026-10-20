@@ -9,10 +9,10 @@ const STYLE: Record<MarkerState, string> = {
   done: "bg-done-soft border-done text-done",
   short: "bg-attention-soft border-attention text-attention",
   failed: "bg-problem-soft border-problem text-problem",
-  // the driver's run: a delivered stop is a solid check, one that could not be delivered a solid cross
+  // In the driver's run a delivered stop is a solid check and an undelivered one a solid cross.
   delivered: "bg-done border-done text-white",
   undelivered: "bg-problem border-problem text-white",
-  // a stop handed to another vehicle: still on the list, no longer this truck's (components.md: attention ring)
+  // A stop handed to another vehicle. Still on the list, no longer this truck's (components.md, attention ring).
   moved: "bg-attention-soft border-attention text-attention",
 };
 
@@ -22,9 +22,8 @@ const SIZE = {
   40: { box: "size-10", text: "t-h2", icon: 24 },
 } as const;
 
-/** A stop's number in a circle, shared by the dock, the driver and the store's tracker. Signal yellow marks the
- *  stop being worked on: loaded now at the dock, next on the road. On the driver's phone a delivered stop shows a
- *  check and an undelivered one a cross, with the number kept for screen readers. */
+// Signal yellow marks the stop being worked on, loaded now at the dock or next on the road.
+// The check and cross replace the number on screen, and the number stays for screen readers.
 export function StopMarker({
   n,
   state,

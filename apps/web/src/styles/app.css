@@ -1,7 +1,6 @@
 @import "tailwindcss";
 
-/* Relay design tokens, from docs/design/04-style-guide.md and specs/components.md.
-   Tailwind's default palette is removed: every color in the app is one of these tokens. */
+/* Design tokens (docs/design/04-style-guide.md, specs/components.md). Tailwind's default palette is removed. */
 
 @font-face {
   font-family: "Atkinson Hyperlegible Next";
@@ -93,7 +92,7 @@
   accent-color: var(--relay-petrol-700);
 }
 
-/* Night: the driver route only, following the phone's dark setting (spec-driver.md, Night token table).
+/* Night mode is for the driver route only. It follows the phone's dark setting (spec-driver.md, Night token table).
    data-night pins it either way from the driver's menu. */
 .night-capable {
   color-scheme: light dark;
@@ -151,8 +150,7 @@
 }
 
 @layer base {
-  /* The root stays at 16px so every rem-based size (touch targets of 48, 56 and 64) is what the design says;
-     body text is set to the design's 15px on body. */
+  /* The root stays at 16px so rem sizes (touch targets of 48, 56 and 64) match the design. */
   html {
     font-family: var(--font-sans);
     font-size: 16px;
@@ -168,8 +166,8 @@
     line-height: 22px;
     background: var(--relay-asphalt-50);
   }
-  /* Atkinson first: it has no Sinhala or Tamil letters, so those fall through to Yaldevi or Noto Sans Tamil
-     glyph by glyph, while IDs, names and digits stay in Atkinson in every language. */
+  /* Atkinson comes first. It has no Sinhala or Tamil letters, so those fall through to Yaldevi or Noto Sans
+     Tamil glyph by glyph, while IDs, names and digits stay in Atkinson. */
   :lang(si) {
     font-family: "Atkinson Hyperlegible Next", "Yaldevi", sans-serif;
   }
@@ -224,8 +222,8 @@
   :lang(si) .t-caption, :lang(ta) .t-caption { line-height: 18px; }
   :lang(si) .t-field, :lang(ta) .t-field, :lang(si) .t-field-button, :lang(ta) .t-field-button { line-height: 28px; }
 
-  /* Numbers line up in columns; never a monospace face. */
+  /* Numbers line up in columns, never in a monospace face. */
   .num { font-variant-numeric: tabular-nums; }
-  /* IDs, brand names and people's names stay in Latin, in Atkinson, in every language. */
+  /* IDs, brand names and people's names stay in Latin letters, in Atkinson, in every language. */
   .latin { font-family: "Atkinson Hyperlegible Next", sans-serif; }
 }

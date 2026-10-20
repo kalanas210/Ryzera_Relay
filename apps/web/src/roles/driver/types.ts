@@ -1,4 +1,4 @@
-/** What the driver's phone reads from Relay (apps/api schemas/driver.py) and sends back. */
+// What the phone reads from Relay (apps/api schemas/driver.py) and sends back.
 import type { FieldRecord, Outcome } from "@/offline/outbox";
 
 export type StopStatus = "pending" | "arrived" | "delivered" | "failed" | "moved" | "cancelled";
@@ -8,7 +8,7 @@ export type DriverLine = {
   name: string;
   ordered: number;
   loaded: number;
-  /** Cases the dispatcher decided to send short; they come on the store's next order. */
+  // Cases the dispatcher decided to send short. They come on the store's next order.
   short: number;
   short_until: string | null;
 };
@@ -27,7 +27,7 @@ export type DriverStop = {
   window_open: string;
   window_close: string;
   planned: string;
-  /** The time Relay last sent: rounded to 5 minutes on the phone, never pushed later while offline. */
+  // The time Relay last sent. Rounded to 5 minutes on the phone, never pushed later while offline.
   expected: string | null;
   arrived_at: string | null;
   completed_at: string | null;
@@ -36,7 +36,6 @@ export type DriverStop = {
   lines: DriverLine[];
   receiver: string | null;
   has_photo: boolean;
-  /** When Relay had the stop's records, if the phone held them with no signal: "Saved offline, sent 7:14 AM". */
   sent_at: string | null;
 };
 
@@ -88,7 +87,6 @@ export type DriverTrip = {
   planned_back: string;
   expected_back: string | null;
   finished_at: string | null;
-  /** Nobody has started loading yet, loading, the handover waiting for the driver, or accepted. */
   load: "not_started" | "loading" | "to_accept" | "accepted";
   loader: string | null;
   handover: Handover;
@@ -105,7 +103,7 @@ export type Question = {
   status: "waiting_for_driver" | "escalated" | "resolved";
   answer: string | null;
   opened_at: string;
-  /** The phone's own records for the stop as Relay has them, for a phone that holds none of them itself. */
+  // The phone's own records for the stop as Relay has them, for a phone that holds none itself.
   arrived_at: string | null;
   delivered_at: string | null;
   cases: number;
@@ -113,13 +111,12 @@ export type Question = {
   has_photo: boolean;
   signed: boolean;
   backup_vehicle: string | null;
-  /** Who is driving the second copy: "Stop 4 was also given to Nimal". */
   backup_driver: string | null;
   moved_at: string | null;
   moved_by: string | null;
   answered_at: string | null;
   resolved_at: string | null;
-  /** "driver" when the driver said yes, "dispatcher" when the office cancelled the copy first. */
+  // "driver" when the driver said yes, "dispatcher" when the office cancelled the copy first.
   resolution: string;
 };
 
@@ -128,16 +125,14 @@ export type DriverNotice = {
   kind: string;
   title: string;
   body: string;
-  /** What the message is about: a moved stop's stop_id and trip_id. */
   data: Record<string, unknown>;
   created_at: string;
   read_at: string | null;
 };
 
-/** The story's scripted loss of signal for this driver: inside it the phone behaves as if it had no network. */
+// The story's scripted loss of signal for this driver. Inside it the phone acts as if offline.
 export type Outage = { from: string; to: string };
 
-/** A photo the story's phone outbox holds; a stand-in is one the demo's autopilot took, fetched to keep with it. */
 export type HeldPhoto = {
   id: string;
   stop_id: string | null;
@@ -155,15 +150,13 @@ export type DriverRun = {
   vehicle_id: string | null;
   published: boolean;
   dispatcher: string | null;
-  /** The dispatcher on call, for "Call Nuwan at dispatch". */
   dispatcher_phone?: string | null;
   trip: DriverTrip | null;
   later: DriverTrip[];
-  /** Open questions, and the settled ones of this run so the phone can say how each was settled. */
   questions: Question[];
   notices: DriverNotice[];
   outage: Outage | null;
-  /** Inside the story's outage only: what the story's phone outbox holds, so a demo jump's stops show as saved here. */
+  // Only inside the story's outage. What its phone outbox holds, so a jump's stops show as saved here.
   held?: { records: FieldRecord[]; photos: HeldPhoto[] } | null;
 };
 
@@ -181,5 +174,4 @@ export type ProblemReason =
   | "damaged_in_transit"
   | "vehicle_problem";
 
-/** Why a line came off the truck short at the store. */
 export type LineReason = "damaged" | "refused" | "not_on_truck";

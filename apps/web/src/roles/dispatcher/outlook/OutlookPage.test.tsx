@@ -37,7 +37,8 @@ function week(iso_week: number, first_day: string, last_day: string, days: Outlo
   } satisfies OutlookWeek;
 }
 
-// week 15 as drawn: 6 needed with 5 in service, two in the workshop; week 16: 6 of 7, the seventh the standby
+// Week 15 as drawn, 6 needed with 5 in service and two in the workshop.
+// Week 16, 6 of 7, the seventh the standby.
 const run = day("2026-04-08", 6, 5, { in_workshop: ["VEH039", "VEH058"], from_order_book: true, waits: 1 });
 const ahead = day("2026-04-15", 6, 7);
 const outlook: Outlook = {
@@ -112,7 +113,7 @@ describe("the outlook grid", () => {
     render(<OutlookGrid data={outlook} />);
     act(() => header(16).focus());
 
-    // label queries read a no-break space as a plain one
+    // Label queries read a no-break space as a plain one.
     expect(screen.getByLabelText(/^Wed 15 Apr:/).getAttribute("aria-label")).toContain(", the busiest day this week.");
     expect(screen.getByLabelText(/^Thu 16 Apr:/).getAttribute("aria-label")).not.toContain("busiest");
   });

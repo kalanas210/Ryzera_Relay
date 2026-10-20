@@ -1,7 +1,3 @@
-"""Changing the Kandy plan once it is published, through the API: a new stop order is held to the rules of every trip
-the vehicle runs, the later trip's stores hear their new time, a loaded truck keeps its order, and the board's undo
-ends when the plan goes out."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -21,7 +17,6 @@ def _trip(board: Any, vehicle_id: str, trip_no: int) -> Any:
 
 
 def _earlier(trip: Any, stop: int) -> dict[str, list[str]]:
-    """The trip's orders with stop `stop` moved one place earlier, as the board's arrow sends them."""
     refs = [s["order_ref"] for s in trip["stops"]]
     refs[stop - 2], refs[stop - 1] = refs[stop - 1], refs[stop - 2]
     return {"order_refs": refs}
@@ -59,7 +54,6 @@ def test_the_later_trips_stores_hear_their_new_time(new_copy: Callable[[], Copy]
     assert "OUT095 Tennekumbura is told the new time, around 12:20 PM." in preview["told"]
 
     copy.post(path, body, "dispatcher")
-    # the later trip's stored times now follow the truck's return, so nothing is left to tell its stores
     again = copy.post(f"{path}/preview", body, "dispatcher")
     assert not [line for line in again["costs"] if "on trip 2" in line]
     assert not [line for line in again["told"] if "Tennekumbura" in line]
@@ -72,13 +66,12 @@ def test_a_loaded_truck_keeps_its_stop_order(new_copy: Callable[[], Copy]) -> No
     board = _board(copy)
     path = f"/api/dispatch/plan/{board['plan']['id']}/trips/VEH045/1/reorder"
     body = _earlier(_trip(board, "VEH045", 1), 2)
-    copy.post(f"{path}/preview", body, "dispatcher")  # still open at the dock
+    copy.post(f"{path}/preview", body, "dispatcher")
 
     copy.jump("handover")  # Rizwan marks the load complete a minute before Kasun reaches the dock
     copy.sign_in("rizwan", "loader")
     tonight = copy.get("/api/dock/loads", "loader")
     assert any(c["vehicle_id"] == "VEH045" for c in tonight["ready"])
-    # the board stops offering a new order for the packed truck, and only for it
     board = _board(copy)
     assert _trip(board, "VEH045", 1)["load_locked"]
     assert not _trip(board, "VEH042", 2)["load_locked"]
@@ -111,4 +104,4 @@ def test_undo_ends_when_the_plan_is_published(new_copy: Callable[[], Copy]) -> N
     tonight = copy.get("/api/dock/loads", "loader")
     assert tonight["loads"] == 15
     card = next(c for group in ("loading", "ready", "to_load") for c in tonight[group] if c["vehicle_id"] == "VEH045")
-    assert card["loaded"] > 0  # the dock's work is still there
+    assert card["loaded"] > 0

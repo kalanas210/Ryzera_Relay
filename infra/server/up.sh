@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Runs on the server after each deploy: make the secrets once, rebuild, start, and keep nightly backups.
+# Runs on the server after each deploy. Makes the secrets once, rebuilds, starts and sets up backups.
 set -eu
 ENV=/opt/relay/.env
 cd /opt/relay/src
@@ -22,7 +22,7 @@ fi
 docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file "$ENV" up -d --build --remove-orphans
 docker image prune -f >/dev/null
 
-# nightly database backup at 3:30 AM Sri Lanka time, the last 14 kept
+# Nightly backup at 3:30 AM Sri Lanka time. backup.sh keeps the last 14.
 sudo tee /etc/cron.d/relay-backup >/dev/null <<'CRON'
 CRON_TZ=Asia/Colombo
 30 3 * * * ubuntu sh /opt/relay/src/infra/server/backup.sh >> /opt/relay-backups/backup.log 2>&1

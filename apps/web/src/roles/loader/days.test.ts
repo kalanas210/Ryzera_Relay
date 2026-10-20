@@ -12,7 +12,7 @@ describe("days on the dock", () => {
   });
 
   it("reads a time as the day it is in Colombo, not in UTC", () => {
-    // 3:40 AM on Wednesday in Colombo is still Tuesday evening in UTC
+    // 3:40 AM Wednesday in Colombo is still Tuesday evening in UTC.
     expect(colomboDay("2026-04-07T22:10:00Z")).toEqual({ weekday: 3, day: 8, month: 3 });
     expect(colomboDay(new Date("2026-04-07T18:29:00Z")).weekday).toBe(2);
     expect(colomboDay(new Date("2026-04-07T18:30:00Z")).weekday).toBe(3);

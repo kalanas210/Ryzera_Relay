@@ -25,8 +25,8 @@ const order = (over: Partial<StoreOrder>): StoreOrder => ({
   ...over,
 });
 
-/** Tuesday 7:30 PM: Wednesday's orders closed at 4:00 PM, the chilled order moved to Thursday, and the store's
- *  standing Thursday orders are in. */
+// Tuesday 7:30 PM. Wednesday's orders closed at 4:00 PM and the chilled order moved to Thursday.
+// The store's standing Thursday orders are already in.
 const evening: StoreHome = {
   outlet: {
     outlet_id: "OUT117",
@@ -107,7 +107,7 @@ function openForm(path = "/store/order") {
   return client;
 }
 
-/** Text as a reader sees it: the no-break spaces that keep "4:00 PM" together read as spaces. */
+// No-break spaces read as plain spaces, the way a person sees them.
 const text = (s: string) => s.replace(/\s/g, " ");
 
 describe("Place an order after the cutoff", () => {
@@ -120,11 +120,9 @@ describe("Place an order after the cutoff", () => {
     expect(text(notes[0]?.textContent ?? "")).toBe(
       "Your chilled order ORD0098596 has already moved to Thursday. Those 92 cases are coming, so order only what else you need.",
     );
-    // every order already sent for Thursday is named, in one sentence
     expect(screen.getByText(/Already sent for Thursday/).textContent).toBe(
       "Already sent for Thursday: dry order ORD0098747 and chilled order ORD0098748",
     );
-    // both types have an order, so the form starts on chilled and says a send adds a second one
     expect(screen.getByRole("radio", { name: "Chilled" })).toHaveAttribute("aria-checked", "true");
     expect(text(screen.getByText(/This adds a second order/).textContent ?? "")).toBe(
       "You already sent a chilled order for Thursday, ORD0098748. This adds a second order.",
@@ -172,7 +170,6 @@ describe("Place an order after the cutoff", () => {
 
 describe("Place an order", () => {
   it("keeps the type the store is counting when a later answer changes the default", async () => {
-    // 2:12 PM, the chilled order sent: the form starts on dry
     home = {
       ...evening,
       now: "2026-04-07T14:12:00+05:30",
@@ -186,7 +183,6 @@ describe("Place an order", () => {
     fireEvent.click(await screen.findByRole("button", { name: "More rice and dhal cases" }));
     expect(screen.getByRole("radio", { name: "Dry" })).toHaveAttribute("aria-checked", "true");
 
-    // a dry order arrives from elsewhere: both types now have one, but the counted dry cases stay in view
     home = { ...home, orders: [...home.orders, order({})] };
     await client.invalidateQueries({ queryKey: ["store", "home"] });
     expect(await screen.findByText(/You already sent a dry order/)).toBeInTheDocument();

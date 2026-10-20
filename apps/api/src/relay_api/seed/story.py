@@ -1,12 +1,4 @@
-"""Put the story day into a workspace: the orders already in at 2:05 PM on Tuesday, the ones that will
-arrive later (as scheduled events for the world simulator), and each vehicle's status and driver.
-
-Dilani's two Wednesday orders are left out on purpose: placing them is the first step of the judge
-walkthrough. The story autopilot places them if a judge skips ahead, or at 2:14 PM if nobody is playing Dilani.
-
-MAIN, the copy every browser opens until it starts or joins a private one, is shared by everyone, so its clock is
-held at the start of the story: only a private copy's clock runs and jumps.
-"""
+"""Puts the story day into a workspace. Orders placed after 2:05 PM become scheduled events."""
 
 from __future__ import annotations
 
@@ -36,12 +28,11 @@ from relay_api.models import (
 from relay_api.models.base import Base
 from relay_api.seed.reference import read
 
+# The shared copy of the day. Its clock is held at the start, only a private copy's clock runs.
 MAIN = "MAIN"
-"""The shared copy of the day."""
 
 
 def parse_lines(text: str) -> list[tuple[str, int]]:
-    """'rice_dhal:36;packet_foods:44' becomes [('rice_dhal', 36), ('packet_foods', 44)]."""
     out = []
     for part in filter(None, text.split(";")):
         code, qty = part.split(":")
@@ -89,6 +80,8 @@ def seed_workspace(db: Session, seed_dir: Path, workspace: Workspace) -> None:
     driver_of = {u.vehicle_id: u.id for u in users if u.role is Role.DRIVER and u.vehicle_id}
 
     for row in story_orders(seed_dir):
+        # Dilani's two Wednesday orders are left out. Placing them is the first walkthrough step.
+        # The autopilot places them if a judge skips ahead, or at 2:14 PM if nobody plays Dilani.
         if row["outlet_id"] in judge_stores and row["requested_date"] == DELIVERY_DAY:
             continue
         placed_at = datetime.fromisoformat(row["placed_at"]).replace(tzinfo=COLOMBO)
@@ -111,7 +104,6 @@ def seed_workspace(db: Session, seed_dir: Path, workspace: Workspace) -> None:
 
 
 def clear_workspace(db: Session, workspace: Workspace) -> None:
-    """Delete every row of the workspace, children first, keeping the workspace itself."""
     for table in reversed(Base.metadata.sorted_tables):
         model = next((m.class_ for m in Base.registry.mappers if m.local_table is table), None)
         if model is not None and issubclass(model, WorkspaceScoped):
@@ -119,12 +111,10 @@ def clear_workspace(db: Session, workspace: Workspace) -> None:
 
 
 def held_at_start(workspace: Workspace) -> bool:
-    """The shared copy's clock as it should be: held at Tuesday 2:05 PM."""
     return workspace.clock_rate == 0 and workspace.clock_anchor_sim == STORY_START
 
 
 def _start_clock(workspace: Workspace, now: datetime) -> None:
-    """The story starts again at 2:05 PM: running in real time in a private copy, held in the shared one."""
     workspace.clock_anchor_real = now
     workspace.clock_anchor_sim = STORY_START
     workspace.clock_rate = 0.0 if workspace.is_default else 1.0

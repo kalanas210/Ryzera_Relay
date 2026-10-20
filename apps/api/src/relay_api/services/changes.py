@@ -1,11 +1,4 @@
-"""Changing a plan after it is published.
-
-Once the plan is out, the dock is loading from it, drivers have their run sheets and stores have a time. A change
-still happens (a store asks, a road closes), so Relay shows the dispatcher what it costs before it is confirmed,
-and then tells everyone it touches: the dock sees a banner and moved tags, the driver's run updates, and each store
-whose time moved gets the new one, on the vehicle's later trip too. A new order that breaks a rule on any trip of the
-vehicle is refused, and so is one for a truck that is already loaded.
-"""
+"""Changing a published plan, with a preview of what the change costs first."""
 
 from __future__ import annotations
 
@@ -65,10 +58,9 @@ class ReorderPreview(Schema):
     told: list[str]
 
 
+# A store on the vehicle's later trip. That trip leaves once this one is back, so its time moves.
 @dataclass(frozen=True)
 class _Retimed:
-    """A store on the vehicle's later trip: that trip leaves once this one is back, so its expected time moves."""
-
     trip: Trip
     stop: Stop
     order: Order
@@ -81,21 +73,16 @@ class _Retimed:
 class _Outcome:
     preview: ReorderPreview
     report: TripReport
-    """The changed trip, timed in its new order."""
     others: list[tuple[Trip, TripReport]]
-    """The vehicle's other trips, timed after the change."""
     retimed: list[_Retimed]
 
 
 def preview_reorder(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[str]) -> ReorderPreview:
-    """What a new stop order costs, with the departure kept: each store's expected time and margin, before and
-    after, the rules it would break on any of the vehicle's trips, and who Relay will tell."""
     return _work_out(db, plan, trip, order_refs).preview
 
 
 def _ensure_open(db: Session, trip: Trip) -> None:
-    """The truck is packed for the stop order (the last stop goes in first), so a new order can only reach a load
-    that is still open. The dock locks a load the same way once it is marked complete."""
+    # The truck is loaded last stop first, so a new stop order needs a load that is still open.
     if trip.departed_at is not None:
         raise PlanError(f"{trip.vehicle_id} has left the hub. Change its run from Live runs.")
     handover = db.scalar(select(Handover).where(Handover.trip_id == trip.id))
@@ -125,7 +112,7 @@ def _work_out(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[str]) ->
         for t in stored_trips(db, plan)
     ]
     reports, _ = evaluate(ctx, trips)
-    # the vehicle's trips run one after another, so a trip that comes back later can break the next one's rules
+    # A vehicle's trips run one after another, so a late return can break the next trip's rules.
     mine = {r.trip.trip_no: r for r in reports if r.trip.vehicle_id == trip.vehicle_id}
     report = mine[trip.trip_no]
     after = {e.order_id: e for e in report.expected}
@@ -167,7 +154,7 @@ def _work_out(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[str]) ->
     retimed = []
     for other, other_report in others:
         if other.trip_no < trip.trip_no:
-            continue  # an earlier trip is back before this one leaves
+            continue
         expected = {e.order_id: e for e in other_report.expected}
         for stop in sorted(other.stops, key=lambda s: s.seq):
             order = by_id[stop.order_id]
@@ -199,7 +186,7 @@ def _work_out(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[str]) ->
         )
 
     told = []
-    if trip.brand == "Fresh":  # the night loads are the ones the dock tablet lists, banner included
+    if trip.brand == "Fresh":  # only night loads show on the dock tablet, banner included
         told.append(f"The {DEPOT_LABEL.get(plan.depot, plan.depot)} dock sees the new loading order.")
     driver = look.driver_of(trip, plan.run_date)
     if driver is not None:
@@ -227,8 +214,6 @@ def _work_out(db: Session, plan: Plan, trip: Trip, order_refs: Sequence[str]) ->
 def reorder(
     db: Session, now: datetime, plan: Plan, trip: Trip, order_refs: Sequence[str], user: AppUser | None, note: str
 ) -> PlanChange:
-    """Apply what the preview showed: the trip's new times and loading order, the later trip's expected times, and
-    a word to the driver and to every store whose time moved."""
     outcome = _work_out(db, plan, trip, order_refs)
     preview = outcome.preview
     if preview.broken:
@@ -357,8 +342,7 @@ def reorder(
 
 
 def _reload_order(db: Session, trip: Trip, moved_refs: set[str], orders: dict[uuid.UUID, Order]) -> None:
-    """Loading order follows the new stop order: the last stop first, heaviest case type first. A line already on
-    the truck for a stop that moved is marked, because it may sit in the wrong place."""
+    # A line already on the truck for a moved stop is marked, it may sit in the wrong place.
     ranks = {c.code: c.load_rank for c in db.scalars(select(CaseType))}
     lines = db.scalars(select(LoadLine).where(LoadLine.trip_id == trip.id)).all()
     seq_of = {s.id: s.seq for s in trip.stops}

@@ -1,12 +1,7 @@
-/** Every string on the driver's phone (DRV-01 to DRV-05, and the DEG-01 and DEG-02 states it passes through), in
- *  English, Sinhala and Tamil.
- *
- *  The Sinhala comes from the driver spec's language table and the degradation spec where they give it, and follows
- *  the same word choices elsewhere; the Tamil is written for the build from the strings those specs give. Both need a
- *  check by a native reader, as the design asks. Place names are written in the reader's script, so they match the
- *  road signs; IDs, brand names and people's names stay in Latin letters. Kasun's run has four stops, so the places
- *  below are those four; any other place stays in Latin letters. No-break spaces keep "පිටුපස ඩොක් එක" and
- *  "කඩයට දන්වා ඇත" on one line, as the design asks. */
+// Every string on the driver's phone (DRV-01 to DRV-05, and the DEG-01 and DEG-02 states).
+// Sinhala follows the specs' language tables and Tamil is written from them. Both need a native reader.
+// Place names use the reader's script to match road signs, but only Kasun's four stops are listed.
+// Any other place stays in Latin letters. No-break spaces keep a few phrases on one line.
 
 type Strings<T> = { [K in keyof T]: T[K] extends string ? string : Strings<T[K]> };
 
@@ -86,8 +81,8 @@ const en = {
     "11": "December",
   },
   places: { Kegalle: "Kegalle", Mawanella: "Mawanella", Hemmathagama: "Hemmathagama", Aranayake: "Aranayake" },
-  /** Going to a place, "to Aranayake": the whole word where a language joins its ending to the name ("அரநாயக்கவுக்கு"),
-   *  and placeTo for any other place. */
+  // The whole word for going to a place, where a language joins its ending to the name.
+  // Any other place uses placeTo.
   placesTo: {
     Kegalle: "to Kegalle",
     Mawanella: "to Mawanella",

@@ -96,13 +96,12 @@ import {
 
 type Filter = "all" | "reefer" | "ambient";
 
-/** DSP-02 Plan board: Relay's proposal, every trip's meters and rules, and the orders that don't fit. */
+// DSP-02 Plan board. Relay's proposal, every trip's meters and rules, and the orders that don't fit.
 export function PlanPage() {
   const [depotParam, setDepot] = useDepot("Kandy");
   const depot: DepotName = depotParam === "Peliyagoda" ? "Peliyagoda" : "Kandy";
   const board = useBoard(depot);
   const propose = usePropose(depot);
-  // proposing and "Defer anyway" in the drawer both send the engine searching; the board waits for either
   const replanning = useIsMutating({ mutationKey: replanKey(depot) }) > 0;
   const data = board.data;
   const [view, setView] = useState<"board" | "check">("board");
@@ -118,14 +117,12 @@ export function PlanPage() {
   const unreasoned = data ? data.waiting.filter((w) => w.deferral && !w.deferral.confirmed_at).length : 0;
   const publishable = Boolean(data && !published && !data.broken && !unreasoned);
 
-  // "Propose again" asks first when the board holds moves made by hand, which a new proposal replaces
   const askPropose = () => {
     if (!data || published || replanning) return;
     if (edited) setConfirm(true);
     else propose.mutate(undefined);
   };
 
-  // P proposes again, D opens the deferrals and Ctrl Enter goes to the publish check, as the shortcuts sheet lists
   const keys = useRef({ askPropose, publishable, waits: data?.waiting.length ?? 0, view, ready: false });
   keys.current = {
     askPropose,
@@ -174,8 +171,7 @@ export function PlanPage() {
       <DeskHeader title="Plan board" meta={meta} depot={depot as Depot} onDepot={(d) => setDepot(d)} allowAll={false} />
       <div className={cx("flex min-w-0 flex-col gap-4 p-4 md:px-6", boardView && "xl:min-h-0 xl:flex-1")}>
         {!data ? (
-          // once a load has failed, the error stays until a board arrives: each new try would otherwise flash
-          // "Loading" in its place, since a query with no data goes back to pending when it fetches again
+          // Keep the error until a board arrives. A query with no data is pending again on every retry.
           board.errorUpdateCount > 0 ? (
             <ErrorState
               title="Relay could not load the plan."
@@ -297,7 +293,6 @@ function FirstProposal({
   );
 }
 
-// ------------------------------------------------------------------------------------------------ plan bar
 function PlanBar({
   board,
   depot,
@@ -399,8 +394,6 @@ function PlanBar({
   );
 }
 
-// ------------------------------------------------------------------------------------------------ the board
-/** What a drag carries: the orders, how to name them, and the card the ghost draws. */
 type DragData = Moving & { ghost: Ghost };
 type Ghost = {
   outlet_id: string;
@@ -426,8 +419,6 @@ function parseSlot(id: string): { vehicle_id: string; trip_no: number } | null {
 const isMoveKey = (event: ReactKeyboardEvent) =>
   event.code === "KeyM" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
 
-/** A stop or an order card that can be picked up: by pointer, by Space or Enter with the arrow keys, or with M for
- *  the Trip picker. */
 function useMovable(id: string, data: DragData, disabled: boolean, onPicker: (moving: Moving) => void) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id, data, disabled });
   const onKeyDown = (event: ReactKeyboardEvent) => {
@@ -468,12 +459,11 @@ function Workspace({
   const [over, setOver] = useState<{ id: string; rect: ClientRect } | null>(null);
   const [picker, setPicker] = useState<Moving | null>(null);
   const [fleet, setFleet] = useState<Lane | null>(null);
-  // the move on its way: the orders, where they go, and what Relay said that trip would carry
   const [pending, setPending] = useState<{ to: string; refs: string[]; fit: Fit | null } | null>(null);
   const asking = useRef<AbortController | null>(null);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    // a finger swipes to scroll the board, and a press and hold picks a card up
+    // A finger swipes to scroll the board. A press and hold picks a card up.
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } }),
     useSensor(KeyboardSensor),
   );
@@ -482,7 +472,7 @@ function Workspace({
   const lanes = board.lanes.filter(
     (l) => filter === "all" || (filter === "reefer" ? l.temp === "reefer" : l.temp === "ambient"),
   );
-  // a vehicle sent to the workshop keeps its lane while trips are still on it, so its broken rule shows
+  // A vehicle sent to the workshop keeps its lane while trips are on it, so its broken rule shows.
   const running = lanes.filter((l) => l.status !== "workshop" || l.trips.length);
   const out = lanes.filter((l) => l.status === "workshop" && !l.trips.length);
   const allTrips = board.lanes.flatMap((l) => l.trips);
@@ -495,8 +485,7 @@ function Workspace({
 
   const counts = useMemo(() => countLanes(board.lanes), [board.lanes]);
 
-  // Ctrl Z undoes the last move on the board, as the shortcuts sheet lists; never while typing, and never once the
-  // plan is published, when a change goes trip by trip instead.
+  // Ctrl Z undoes the last move, but not once the plan is published, when changes go trip by trip.
   const { mutate: undoMove, isPending: undoing } = useUndo(depot, board.plan.id);
   const canUndo = board.can_undo && !published;
   useEffect(() => {
@@ -518,14 +507,12 @@ function Workspace({
     setPending({ to, refs: input.order_refs, fit });
     move.mutate(input, {
       onSettled: () => setPending(null),
-      // a move made from the keyboard leaves focus on the trip it went to, ready for the next key
       onSuccess: () => {
         if (focus) requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-slot="${to}"]`)?.focus());
       },
     });
   };
 
-  // the Trip picker hands focus back to the stop or order it was opened from, when nothing moved
   const opener = useRef<HTMLElement | null>(null);
   const openPicker = (moving: Moving) => {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -579,7 +566,6 @@ function Workspace({
 
   const fitFor = (id: string) => fits?.find((f) => slotKey(f.vehicle_id, f.trip_no) === id) ?? null;
   const overFit = over && over.id !== NOT_PLACED ? fitFor(over.id) : null;
-  // a Not placed card held over Not placed needs no words; a stop held there is coming off its trip
   const tooltip =
     !drag || !over
       ? null
@@ -610,7 +596,7 @@ function Workspace({
       onDragOver={onDragOver}
       onDragEnd={onDragEnd}
       onDragCancel={endDrag}
-      // only the lanes (and the page, below the widest layout) scroll under a held card, never the window
+      // Only the lanes (and the page, below the widest layout) scroll under a held card. Never the window.
       autoScroll={{ canScroll: (element) => element.hasAttribute("data-drag-scroll") }}
       accessibility={{ announcements, screenReaderInstructions: { draggable: INSTRUCTIONS } }}
     >
@@ -720,7 +706,6 @@ function notPlacedWords(label: string, from: { vehicle_id: string; trip_no: numb
   return `Take ${label} off ${tripName(from)}. It waits${next ? ` for ${formatWeekday(dayOf(next))}` : ""} and needs a reason before you publish.`;
 }
 
-/** The dark tooltip right of the trip a card is held over (left of it when the window ends first). */
 function DragTooltip({ rect, text }: { rect: ClientRect; text: string }) {
   const width = 280;
   const right = rect.left + rect.width + 12;
@@ -729,7 +714,7 @@ function DragTooltip({ rect, text }: { rect: ClientRect; text: string }) {
     <div
       role="tooltip"
       style={{ left: onRight ? right : Math.max(8, rect.left - 12 - width), top: rect.top + rect.height / 2, width }}
-      // above the drag ghost (999), which follows the pointer over the same trip
+      // Above the drag ghost (999), which follows the pointer over the same trip.
       className="pointer-events-none fixed z-[1000] -translate-y-1/2 rounded-button bg-asphalt-900 px-3 py-2 t-dense text-white shadow-float"
     >
       <span
@@ -744,7 +729,6 @@ function DragTooltip({ rect, text }: { rect: ClientRect; text: string }) {
   );
 }
 
-/** The card under the pointer while it moves: Order row / board card / dragging. */
 function GhostCard({ ghost }: { ghost: Ghost }) {
   return (
     <div className="flex w-[264px] cursor-grabbing gap-1 rounded-button border-2 border-petrol-700 bg-white py-2 pr-3 pl-1 shadow-float">
@@ -800,7 +784,6 @@ function vehicleKind(lane: Lane): string {
   return `${lane.temp === "reefer" ? "Refrigerated" : "Dry-box"} ${lane.type}`;
 }
 
-// ------------------------------------------------------------------------------------------------ not placed
 function NotPlaced({
   board,
   drag,
@@ -823,7 +806,6 @@ function NotPlaced({
   const analysis = board.analyses.find((a) => a.temp_class === "chilled" && a.unavoidable > 0);
   const day = formatWeekday(dayOf(board.plan.run_date));
   const title = published ? "Deferred" : "Not placed";
-  // a stop held over this column can come off its trip
   const takesStop = Boolean(drag?.from);
 
   return (
@@ -972,7 +954,6 @@ function OrderCard({
   };
   const { setNodeRef, isDragging, handle } = useMovable(`order:${order.order_ref}`, data, published, onPicker);
   if (isDragging || moving) {
-    // the card's place while it moves: Not placed keeps its shape, and says what is on its way
     return (
       <div
         ref={setNodeRef}
@@ -1010,7 +991,6 @@ function OrderCard({
   );
 }
 
-/** On a deferred card once the plan is out: when the store saw the notice, as the deferral record says it. */
 function SeenLine({ deferral }: { deferral: NonNullable<Waiting["deferral"]> }) {
   return deferral.acknowledged_at ? (
     <span className="inline-flex h-6 items-center gap-1 t-caption font-semibold text-done">
@@ -1022,7 +1002,6 @@ function SeenLine({ deferral }: { deferral: NonNullable<Waiting["deferral"]> }) 
   );
 }
 
-// ------------------------------------------------------------------------------------------------ lanes
 function LaneRow({
   lane,
   selected,
@@ -1042,7 +1021,7 @@ function LaneRow({
 }) {
   const reefer = lane.temp === "reefer";
   const Icon = lane.type === "van" ? Van : reefer ? Snowflake : Truck;
-  // a group named for the vehicle, so a screen reader ties each trip card to the vehicle it is on
+  // A group named for the vehicle, so a screen reader ties each trip card to the vehicle it is on.
   return (
     // biome-ignore lint/a11y/useSemanticElements: a vehicle and its trip cards, not a set of form fields
     <div
@@ -1131,11 +1110,10 @@ function TripCard({
   const { setNodeRef, isOver } = useDroppable({ id: slotKey(trip.vehicle_id, trip.trip_no), disabled: published });
   const broken = trip.broken > 0;
   const fresh = trip.brand === "Fresh";
-  // the vehicle's day so far: this trip and the ones before it on the same budget
+  // The vehicle's day so far, this trip and the ones before it on the same budget.
   const minutes = lane.trips
     .filter((t) => t.trip_no <= trip.trip_no && (t.brand === "Fresh") === fresh)
     .reduce((sum, t) => sum + t.std_minutes, 0);
-  // while a move is on its way, the meters already show what Relay said the trip would carry
   const weight = arriving?.fit?.weight_kg ?? trip.weight_kg;
   const volume = arriving?.fit?.volume_m3 ?? trip.volume_m3;
   return (
@@ -1276,7 +1254,6 @@ function FitHint({ fit }: { fit: Fit }) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ trip detail
 const ACCESS: Record<string, { word: string; icon: typeof Warehouse }> = {
   rear_dock: { word: "Rear dock", icon: Warehouse },
   street: { word: "Curb", icon: StoreIcon },
@@ -1297,7 +1274,6 @@ function TripDetail({
   depot: DepotName;
   board: Board;
   drag: DragData | null;
-  /** The trip is held under a card that comes from elsewhere: where it would stop. */
   dropFit: Fit | null;
   onPicker: (moving: Moving) => void;
 }) {
@@ -1323,7 +1299,6 @@ function TripDetail({
     n: i + 1,
   }));
   if (incoming) {
-    // the stop the held card would become, and every stop after it one place later
     const at = Math.min(Math.max(incoming.at, 1), rows.length + 1);
     rows.splice(at - 1, 0, { drop: incoming.label, n: at });
     rows.forEach((row, i) => {
@@ -1515,8 +1490,8 @@ function TripDetail({
   );
 }
 
-/** One stop of the selected trip. On a draft it moves: dragging it, or M, takes every order of that store on the
- *  trip. On a published trip it can only move earlier, with the cost shown first. */
+// On a draft, dragging a stop or pressing M takes every order of that store on the trip.
+// On a published trip a stop can only move earlier, with the cost shown first.
 function StopRow({
   stop,
   n,
@@ -1571,7 +1546,6 @@ function StopRow({
       </li>
     );
   }
-  // the list item stays a list item; the row inside it is what picks up
   return (
     <li>
       <div

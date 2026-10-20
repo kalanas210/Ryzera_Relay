@@ -1,11 +1,10 @@
 import { crc32, deflateSync } from "node:zlib";
 import { expect, type Locator, type Page } from "@playwright/test";
 
-/** Helpers that only read and act the way a person does: by role and visible text, never by CSS class or test id. */
+// Helpers that find things the way a person does, by role and visible text, never by CSS class or test id.
 
-/** Drags one element onto another with the mouse, in small steps, as the plan board's drag and drop (dnd-kit, which
- *  starts a drag after 6 px of movement) needs. The target is scrolled into view first. `whileHeld` runs with the
- *  card held over the target, before it is let go. */
+// Moves in small steps, because dnd-kit starts a drag only after 6 px of movement.
+// whileHeld runs with the card held over the target, before it is let go.
 export async function drag(
   page: Page,
   from: Locator,
@@ -24,7 +23,6 @@ export async function drag(
   await page.mouse.move(x + 12, y + 12, { steps: 4 });
   await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 24 });
   try {
-    // the board has worked out where the card would land once the tooltip beside the target says what it would carry
     await expect(page.getByRole("tooltip")).toBeVisible();
     await whileHeld?.();
   } finally {
@@ -32,7 +30,6 @@ export async function drag(
   }
 }
 
-/** Signs a signature box with a short zigzag, as a finger would. */
 export async function sign(page: Page, box: Locator): Promise<void> {
   const area = await box.boundingBox();
   if (!area) throw new Error("The signature box is not on screen");
@@ -45,8 +42,7 @@ export async function sign(page: Page, box: Locator): Promise<void> {
   await page.mouse.up();
 }
 
-/** A small real PNG for the driver's proof photo: a parcel-brown square on grey. The phone shrinks and re-encodes
- *  whatever the camera gives it, so the image has to decode. */
+// The phone shrinks and re-encodes whatever the camera gives it, so this has to be a real PNG that decodes.
 export function photo(): { name: string; mimeType: string; buffer: Buffer } {
   const width = 64;
   const height = 48;
@@ -80,8 +76,8 @@ export function photo(): { name: string; mimeType: string; buffer: Buffer } {
   return { name: "delivery.png", mimeType: "image/png", buffer };
 }
 
-/** The page is no wider than its window: nothing scrolls sideways. The width a page shows is the root's client width,
- *  which leaves out a visible scroll bar, so a headed run cannot hide an overflow behind one. */
+// Uses the root's client width, which leaves out a visible scroll bar, so a headed run cannot hide
+// an overflow behind one.
 export async function expectNoSidewaysScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -89,8 +85,8 @@ export async function expectNoSidewaysScroll(page: Page): Promise<void> {
   expect(overflow, "the page scrolls sideways").toBeLessThanOrEqual(0);
 }
 
-/** Collects what the browser reports as errors on a page: console errors and uncaught exceptions. `allow` names the
- *  errors a test causes on purpose, such as the 401 a wrong PIN answers, which Chromium logs as a console error. */
+// allow names the errors a test causes on purpose, such as the 401 a wrong PIN answers,
+// which Chromium logs as a console error.
 export function watchErrors(page: Page, { allow = [] }: { allow?: RegExp[] } = {}): string[] {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -101,9 +97,9 @@ export function watchErrors(page: Page, { allow = [] }: { allow?: RegExp[] } = {
   return errors;
 }
 
-/** The scenario clock shows minutes, and real seconds pass while a test acts: a time the test caused can land on the
- *  next minute. "6:39 PM" also accepts "6:40 PM". Store screens keep the time and AM or PM together with a no-break
- *  space, so any space matches. */
+// The scenario clock shows minutes, and real seconds pass while a test acts, so a time the test
+// caused can land on the next minute. "6:39 PM" also accepts "6:40 PM".
+// Store screens put a no-break space between the time and AM or PM, so any space matches.
 export function minuteOrNext(time: string): RegExp {
   const match = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(time);
   if (!match) throw new Error(`Not a clock time: ${time}`);
@@ -118,20 +114,17 @@ export function minuteOrNext(time: string): RegExp {
   return new RegExp(`(${h}:${m}\\s${half}|${next})`);
 }
 
-/** How long the driver's pill may take to read All synced. A record saved while the outbox is already sending goes in
- *  that same send (apps/web/src/offline/outbox.ts, flush), so the pill usually turns within seconds. A send that fails
- *  waits for the next trigger, at the latest the minute check-in, so the wait allows a little over a minute. */
+// The pill usually turns within seconds, because a record saved during a send goes in that same send.
+// A failed send waits for the next trigger, at the latest the minute check-in, so allow a little over a minute.
 export const SYNC_TIMEOUT_MS = 75_000;
 
-/** The driver's pill reads All synced: Relay has every record and photo the phone saved. */
 export async function expectAllSynced(page: Page): Promise<void> {
   await expect(page.getByRole("status", { name: "All synced" })).toBeVisible({ timeout: SYNC_TIMEOUT_MS });
 }
 
-/** Taps a dock button that takes a tap only once it has been on screen for half a second (SETTLE_MS on the loader's
- *  screens), until the screen it leads to shows. A tap that came too early did nothing and is made again; once the
- *  next screen is there, nothing is tapped twice. A button that saves is disabled while it saves, so a second tap
- *  waits for the first to finish rather than send it again. */
+// Dock buttons take a tap only after half a second on screen (SETTLE_MS on the loader's screens).
+// A tap that came too early did nothing, so it is made again until the next screen shows.
+// A button that saves is disabled while it saves, so a second tap never sends twice.
 export async function dockTap(button: Locator, next: Locator): Promise<void> {
   await expect(button).toBeVisible();
   await expect(async () => {

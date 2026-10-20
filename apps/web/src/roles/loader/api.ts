@@ -66,7 +66,7 @@ export type Tonight = {
   loading: LoadCard[];
   ready: LoadCard[];
   to_load: LoadCard[];
-  /** One row per departure time: the loads that left in the same minute for one district. */
+  // One row per departure time, for the loads that left in the same minute for one district.
   left: { at: string; district: string; vehicles: string[] }[];
   left_count: number;
   workshop: { vehicle_id: string; vehicle_type: "truck" | "van"; vehicle_kind: string; back_on: string | null }[];
@@ -88,7 +88,6 @@ export type Shortfall = {
   added_to_order_ref: string | null;
   added_to_day: string | null;
   store_contact: string | null;
-  /** A photo of damaged cases, sent after the flag. */
   photo_id: string | null;
 };
 
@@ -99,7 +98,7 @@ export type LoadLine = {
   loaded: number;
   status: LineStatus;
   shortfall: Shortfall | null;
-  /** Its stop moved after it went on, so where it sits on the truck needs a look. A re-check clears it. */
+  // Its stop moved after it went on, so where it sits on the truck needs a look. A re-check clears it.
   changed_by_plan: boolean;
 };
 
@@ -153,15 +152,13 @@ export type TripLoad = {
   short: number;
   lines_total: number;
   lines_done: number;
-  /** Lines a plan change marked that a loader can confirm; flagged lines wait on the dispatcher instead. */
   lines_to_check: number;
   flags_waiting: number;
   groups: StopGroup[];
   handover: Handover;
   dispatcher: string | null;
-  /** The number that reaches the dispatcher on call; the tablet cannot place calls, so it shows it. */
+  // The tablet cannot place calls, so it shows this number to dial from a phone.
   dispatcher_phone: string | null;
-  /** Who made the latest change to this load after it was published. */
   plan_changed_by: string | null;
 };
 
@@ -175,18 +172,17 @@ export function useTonight() {
   });
 }
 
-/** Every write to one trip's load shares this key and runs in tap order. */
 const writeKey = (tripId: string) => ["dock", "write", tripId];
 const writeScope = (tripId: string) => ({ id: `dock-trip-${tripId}` });
 
-/** Bumped by every write to a trip, so a poll that crossed a tap on the wire is never shown over it. */
+// Bumped by every write to a trip, so a poll that crossed a tap on the wire is never shown over it.
 const writes = new Map<string, number>();
 
 function bump(tripId: string) {
   writes.set(tripId, (writes.get(tripId) ?? 0) + 1);
 }
 
-/** Only the last write still pending may put its answer on screen: an earlier answer predates the later taps. */
+// Only the last pending write may put its answer on screen. An earlier answer predates the later taps.
 function isLast(client: QueryClient, tripId: string) {
   return client.isMutating({ mutationKey: writeKey(tripId) }) === 1;
 }
@@ -208,15 +204,13 @@ export function useTripLoad(tripId: string | undefined) {
   });
 }
 
-/** Line writes held on this tablet while it is offline. TanStack pauses them and sends them in order when the
- *  connection comes back, so this is the real number still to send. */
+// TanStack pauses writes while offline and sends them in order later, so this is the real number to send.
 export function useLinesToSend(): number {
   const online = useOnline();
   const pending = useIsMutating({ mutationKey: ["dock", "write"] });
   return online ? 0 : pending;
 }
 
-/** Counts a trip shows everywhere, recomputed after an optimistic change to its lines. */
 export function recount(load: TripLoad): TripLoad {
   const lines = load.groups.flatMap((g) => g.lines);
   const done = (l: LoadLine) => l.status === "checked" || l.status === "decided";
@@ -235,7 +229,6 @@ export function recount(load: TripLoad): TripLoad {
   };
 }
 
-/** The same load with one line's count changed, as the server will record it. */
 export function withLine(load: TripLoad, lineId: string, change: Pick<LoadLine, "loaded"> & Partial<LoadLine>) {
   return recount({
     ...load,
@@ -261,8 +254,7 @@ function findLine(load: TripLoad | undefined, lineId: string): LoadLine | undefi
 
 type LineWrite = { lineId: string; loaded: number };
 
-/** A gloved tap checks a line at once. Taps reach the server one at a time, in the order they were made; only the
- *  answer to the last one replaces the screen, and a failure puts back just its own line. */
+// Taps reach the server one at a time, in order. A failure puts back just its own line.
 export function useSetLine(tripId: string) {
   const client = useQueryClient();
   const key = ["dock", "trip", tripId];
@@ -280,7 +272,7 @@ export function useSetLine(tripId: string) {
     onError: (_error, { lineId, loaded }, context) => {
       const was = context?.was;
       const now = findLine(client.getQueryData<TripLoad>(key), lineId);
-      // a later tap on the same line has already replaced this one
+      // A later tap on the same line has already replaced this one.
       if (was && now?.loaded === loaded) {
         client.setQueryData<TripLoad>(key, (load) => load && withLine(load, lineId, was));
       }
@@ -293,8 +285,6 @@ export function useSetLine(tripId: string) {
   });
 }
 
-/** Flags, Load complete and the tablet acceptance queue behind any taps on the same trip, and follow the same rule
- *  for whose answer reaches the screen. */
 function useTripMutation<I>(tripId: string, fn: (input: I) => Promise<TripLoad>) {
   const client = useQueryClient();
   const key = ["dock", "trip", tripId];
@@ -317,12 +307,12 @@ export type FlagWrite = {
   lineId: string;
   kind: "missing" | "damaged";
   qty: number;
-  /** When it was flagged, on the scenario clock, and by whom: what the line shows until Relay answers. */
+  // On the scenario clock.
   at: string;
   by: string | null;
 };
 
-/** The same load with one line flagged, as the server will record it: the flagged cases come off the count. */
+// The flagged cases come off the count, as the server will record it.
 export function withFlag(load: TripLoad, { lineId, kind, qty, at, by }: FlagWrite): TripLoad {
   return recount({
     ...load,
@@ -358,9 +348,7 @@ export function withFlag(load: TripLoad, { lineId, kind, qty, at, by }: FlagWrit
 
 const flagKey = (tripId: string) => [...writeKey(tripId), "flag"];
 
-/** A flag saves on the tablet first: the line shows it at once, and it reaches Relay in tap order behind any taps
- *  before it. Without a connection it waits on the tablet and keeps trying, so it is never lost; a refusal from
- *  Relay puts the line back. */
+// With no signal the flag waits on the tablet and keeps trying. A refusal from Relay puts the line back.
 export function useFlag(tripId: string) {
   const client = useQueryClient();
   const key = ["dock", "trip", tripId];
@@ -389,10 +377,9 @@ export function useFlag(tripId: string) {
   });
 }
 
-/** A flag that has not reached Relay a minute after it was made reads "Not sent yet". */
+// A flag that has not reached Relay a minute after it was made reads "Not sent yet".
 const NOT_SENT_AFTER_MS = 60_000;
 
-/** The lines whose flag is still on this tablet a minute after it was made. */
 export function useUnsentFlags(tripId: string): Set<string> {
   const pending = useMutationState({
     filters: { mutationKey: flagKey(tripId), status: "pending" },
@@ -409,7 +396,7 @@ export function useUnsentFlags(tripId: string): Set<string> {
   return new Set(pending.filter((p) => now - p.at >= NOT_SENT_AFTER_MS).map((p) => p.lineId));
 }
 
-/** A photo of damaged cases goes after its flag, in the same queue, so the flag never waits on the photo. */
+// The photo goes after its flag in the same queue, so the flag never waits on it.
 export function useFlagPhoto(tripId: string) {
   const client = useQueryClient();
   const key = ["dock", "trip", tripId];
@@ -423,7 +410,7 @@ export function useFlagPhoto(tripId: string) {
     },
     retry: (_count, error) => error.offline,
     onSuccess: (load) => {
-      // a tap made after the photo has the newer answer
+      // A tap made after the photo has the newer answer.
       if (client.isMutating({ mutationKey: writeKey(tripId) }) === 0) client.setQueryData(key, load);
     },
   });

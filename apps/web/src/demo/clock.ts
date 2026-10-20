@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useDemoState } from "@/app/session";
 
-/** Scenario time, ticking between fetches of the demo state. Every screen reads "now" from here,
- *  so cutoff countdowns and "no word since 5:41 AM" follow the story's clock, not the wall clock. */
+// Scenario time. Every screen reads "now" from here, so countdowns follow the story's clock.
 export function useSimNow(tickMs = 1000): Date | null {
   const { data, dataUpdatedAt } = useDemoState();
   const [, setTick] = useState(0);

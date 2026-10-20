@@ -1,14 +1,5 @@
-"""Build the seed's story day from the competition data and the Designathon scenario.
-
-Run once, by someone who has the organizers' dataset in data/raw (git ignores it):
-
-    uv run python seed/scripts/build_story.py
-
-It writes the files under seed/data/story and seed/data/derived, which are committed, so
-`docker compose up` never needs the raw data. The numbers come from the same model the
-Designathon scenario was checked with (tools/data-check/relay_model.py): the Kandy hub's orders
-are copied from the scenario appendix, and every other order is sized the same way.
-"""
+"""Builds seed/data/story and seed/data/derived from the raw dataset (data/raw) and the scenario.
+Run once with `uv run python seed/scripts/build_story.py`. The output is committed."""
 
 from __future__ import annotations
 
@@ -46,9 +37,9 @@ CASES = {
     "appliance": ("Appliance", "Tech", "ambient", 213.6, 0.707, 1),
 }
 DRY = ["rice_dhal", "packet_foods", "tea_biscuit"]
-CHILLED = ["dairy", "produce", "meat_fish"]  # the order the scenario lists case counts in
+CHILLED = ["dairy", "produce", "meat_fish"]  # the order the scenario lists the counts in
 
-# Real towns and city areas in each outlet's district. The scenario's own names come first.
+# Real towns in each outlet's district. The scenario's own names come first.
 TOWNS = {
     "Colombo": ["Borella", "Kollupitiya", "Bambalapitiya", "Wellawatte", "Dehiwala", "Mount Lavinia", "Nugegoda",
                 "Maharagama", "Kottawa", "Homagama", "Battaramulla", "Rajagiriya", "Kotahena", "Moratuwa",
@@ -73,14 +64,12 @@ TOWNS = {
     "Kegalle": ["Kegalle", "Mawanella"],
 }
 
-# Drivers the scenario names; the rest of the fleet gets generated names.
 STORY_DRIVERS = {
     "VEH042": "Sampath Lakmal",
     "VEH045": "Kasun Bandara",
     "VEH057": "Priyantha Silva",
     "VEH060": "Nimal Fernando",
 }
-# Generated driver names keep a first name and a surname from the same community.
 NAMES = {
     "sinhala": (
         ["Chaminda", "Ruwan", "Tharindu", "Mahesh", "Ajith", "Pradeep", "Lasith", "Dinesh", "Nalin", "Roshan", "Kamal",
@@ -130,7 +119,6 @@ def write(path: Path, header: list[str], data: list[dict]) -> None:
     print(f"wrote {path.relative_to(REPO)} ({len(data)} rows)")
 
 
-# ---------------------------------------------------------------- store names
 def store_names() -> dict[str, tuple[str, str]]:
     given = {r["outlet_id"]: r["store_name"] for r in rows("outlets")}
     used: dict[tuple[str, str], set[str]] = {}
@@ -146,22 +134,21 @@ def store_names() -> dict[str, tuple[str, str]]:
         taken = used.setdefault((r.district, r.brand), set())
         fresh_towns = used.get((r.district, "Fresh"), set())
         pool = TOWNS[r.district]
-        # Style and Tech stores prefer the bigger towns (early in the list); Fresh takes the next free one.
+        # Style and Tech take the bigger towns (early in the list). Fresh takes the next free one.
         town = next(t for t in pool if t not in taken and (r.brand != "Fresh" or t not in fresh_towns))
         taken.add(town)
         names[oid] = (f"Waypoint {r.brand} {town}", town)
     return names
 
 
-# ---------------------------------------------------------------- order sizes and case lines
 def mult(day: str, group: str, depot: str) -> float:
     fc = M.FC[(M.FC.date == day) & (M.FC.depot == depot) & (M.FC.g == group)]
     return float(fc.iloc[0].lift * fc.iloc[0].growth) if len(fc) else 1.0
 
 
+# Outlet mean on ordinary days of that weekday in 2026 weeks 1 to 13,
+# times the depot's lift and growth.
 def forecast_size(outlet: str, temp: str, day: str) -> dict:
-    """The scenario's forecast order: the outlet's mean on ordinary days of that weekday in 2026 weeks 1 to 13,
-    times the forecast's lift and growth for its depot."""
     dow = M.CAL.loc[day, "dow_name"]
     depot = M.OUT.loc[outlet, "depot"]
     brand = M.OUT.loc[outlet, "brand"]
@@ -178,13 +165,12 @@ def forecast_size(outlet: str, temp: str, day: str) -> dict:
                 m3=round(k.order_volume_m3.mean() * m, 3))
 
 
-# Typical shares of each case type, from the case mixes the scenario gives (OUT116 to OUT119).
+# Usual share of each case type, from the case mixes the scenario gives for OUT116 to OUT119.
 TYPICAL = {"ambient": (0.35, 0.39, 0.26), "chilled": (0.43, 0.35, 0.22)}
 
 
+# The order keeps its own kg and m3. The cases only have to land close to them and to the usual mix.
 def case_mix(temp: str, units: int, kg: float, m3: float) -> list[tuple[str, int]]:
-    """A whole-case mix of the three case types that stays close to the order's weight and volume and
-    to a store's usual mix. The order's own weight and volume stay as the data gives them."""
     codes = DRY if temp == "ambient" else CHILLED
     k = [CASES[c][3] for c in codes]
     v = [CASES[c][4] for c in codes]
@@ -213,7 +199,6 @@ def lines_for(outlet: str, brand: str, temp: str, units: int, kg: float, m3: flo
     return ";".join(f"{c}:{n}" for c, n in case_mix(temp, units, kg, m3))
 
 
-# ---------------------------------------------------------------- the order book
 def order_book(day: str, tech: list[str], appendix: dict[tuple[str, str], dict]) -> list[dict]:
     streams = M.day_streams(M.CAL.loc[day, "dow_name"], tech)
     first = M.first_id(day)
@@ -236,9 +221,9 @@ def order_book(day: str, tech: list[str], appendix: dict[tuple[str, str], dict])
     return out
 
 
+# When each Wednesday order reached Relay on Tuesday. The scenario fixes Dilani's two orders, the
+# outlets still to order at 3:12 PM and OUT032's two late orders. The rest arrive through the day.
 def placement_times(book: list[dict], facts: dict) -> None:
-    """When each Wednesday order reached Relay on Tuesday. The scenario fixes Dilani's two orders, the
-    outlets still to order at 3:12 PM and OUT032's two late orders; the rest arrive through the day."""
     rng = random.Random(20260407)
     q = facts["queue"]
     late = set(q["late_ids"])
@@ -255,7 +240,7 @@ def placement_times(book: list[dict], facts: dict) -> None:
         else:
             o["placed_at"] = M.fmt(rng.randint(M.hm("08:30"), M.hm("15:10")))
         o["placed_at"] = f"{TUE} {o['placed_at']}"
-    # the same outlet's dry and chilled orders arrive a few minutes apart, dry first
+    # One outlet's dry and chilled orders arrive a few minutes apart, dry first.
     by_outlet: dict[str, list[dict]] = {}
     for o in book:
         by_outlet.setdefault(o["outlet_id"], []).append(o)
@@ -272,7 +257,7 @@ def main() -> None:
                 for r in rows("orders")}
     wed_appendix = {(o, t): v for (d, o, t), v in appendix.items() if d == WED}
     thu_appendix = {(o, t): v for (d, o, t), v in appendix.items() if d == THU}
-    # The scenario's ORD0098747 already carries the 6 rice and dhal cases that go short on Wednesday night.
+    # The scenario's ORD0098747 already holds the 6 rice and dhal cases that go short on Wednesday.
     # In the product the dispatcher's decision adds them, so the seed holds Dilani's own Thursday order.
     short = facts["thursday"]["short_cases"]
     own = dict(thu_appendix[("OUT117", "ambient")])
@@ -282,21 +267,18 @@ def main() -> None:
                cases=" ".join(str(n) for n in facts["thursday"]["own_cases"]))
     thu_appendix[("OUT117", "ambient")] = own
 
-    # store names -------------------------------------------------------------
     names = store_names()
     write(REFERENCE / "store_names.csv", ["outlet_id", "name", "short_name"],
           [dict(outlet_id=o, name=n, short_name=s) for o, (n, s) in sorted(names.items())])
 
-    # case types ----------------------------------------------------------------
     write(REFERENCE / "case_types.csv", ["code", "name", "brand", "temp", "kg", "m3", "load_rank"],
           [dict(code=c, name=v[0], brand=v[1], temp=v[2], kg=v[3], m3=v[4], load_rank=v[5]) for c, v in CASES.items()])
 
-    # orders --------------------------------------------------------------------
     wed_tech = sorted(o for (o, t) in wed_appendix if M.OUT.loc[o, "brand"] == "Tech")
     wed = order_book(WED, ["OUT049", *wed_tech], wed_appendix)
     placement_times(wed, facts)
     thu = order_book(THU, facts["thursday"]["tech_outlets"], thu_appendix)
-    for o in thu:  # standing orders for Thursday, already in when the story starts
+    for o in thu:  # standing orders, already in when the story starts
         o["placed_at"] = f"{TUE} 11:00"
     counts = pd.Series([o["brand"] + ("" if o["brand"] != "Fresh" else "_" + o["temp"]) for o in wed
                         if o["order_ref"] not in facts["queue"]["late_ids"]]).value_counts().to_dict()
@@ -304,17 +286,15 @@ def main() -> None:
     header = ["order_ref", "outlet_id", "brand", "temp", "requested_date", "units", "kg", "m3", "placed_at", "lines"]
     write(STORY / "orders.csv", header, wed + thu)
 
-    # the shortfall's destination: Dilani's Thursday dry order carries 6 cases from Wednesday
-    # (the appendix already includes them in ORD0098747's rice and dhal count)
-
-    # people --------------------------------------------------------------------
     people = [
-        # The dispatch number the dock tablet shows under "Call Nuwan at dispatch" (the tablet cannot place calls).
-        # The scenario prints no number, so this is a placeholder no real line has: no subscriber number starts with 0.
+        # The number the dock tablet shows under "Call Nuwan at dispatch". The tablet cannot place calls.
+        # The scenario prints no number, so this is a placeholder.
+        # No real subscriber number starts with 0.
         dict(username="nuwan", display_name="Nuwan Perera", role="dispatcher", depot="", locale="en", judge="1",
              phone="081 000 2145"),
-        # The four judge accounts start in English so the screens can be reviewed; Rizwan reads Tamil most easily
-        # and switches with one tap, and the tablet brings each loader's own language back at sign-in.
+        # The four judge accounts start in English so the screens can be reviewed.
+        # Rizwan reads Tamil best and switches with one tap.
+        # The tablet brings each loader's own language back at sign-in.
         dict(username="rizwan", display_name="Mohamed Rizwan", role="loader", depot="Kandy", locale="en", pin="2580", judge="1"),
         dict(username="anjali", display_name="Anjali Wickramasinghe", role="loader", depot="Kandy", locale="si", pin="1357"),
         dict(username="suresh", display_name="Suresh Kumar", role="loader", depot="Kandy", locale="ta", pin="4826"),
@@ -339,18 +319,17 @@ def main() -> None:
           ["username", "display_name", "role", "depot", "outlet_id", "vehicle_id", "locale", "pin", "judge", "phone"],
           people)
 
-    # hub stock: scenario fact 23, the Kandy hub's rice and dhal supplier drop at 5:00 AM, with no spare before it
+    # Scenario fact 23: the Kandy rice and dhal supplier drops at 5:00 AM, with no spare before it.
     write(STORY / "hub_stock.csv", ["depot", "case_type", "run_date", "spare", "next_delivery_at"],
           [dict(depot="Kandy", case_type="rice_dhal", run_date=WED, spare=0, next_delivery_at=f"{WED}T05:00:00+05:30")])
 
-    # vehicle days ----------------------------------------------------------------
     status_wed = {r["vehicle_id"]: r["wednesday"] for r in rows("vehicles")}
     fuel = {r["vehicle_id"]: float(r["mon_l"]) + float(r["tue_l"]) for r in rows("fuel")}
     typ = weekday_litres()
     vdays = []
     for day in (WED, THU):
         for vid in sorted(M.VEH.index):
-            # Thursday: VEH039 is repaired, and VEH058 is back from its service as the hub's usual standby
+            # On Thursday VEH039 is repaired and VEH058 is back from service as the usual standby.
             st = status_wed.get(vid, "running") if day == WED else ("standby" if vid == "VEH058" else "available")
             status = {"workshop": "workshop", "standby": "standby"}.get(st, "available")
             if day == WED:
@@ -361,10 +340,8 @@ def main() -> None:
                               fuel_used_l="" if used is None else round(used, 1)))
     write(STORY / "vehicle_days.csv", ["run_date", "vehicle_id", "status", "fuel_used_l"], vdays)
 
-    # service history: last delivery and last deferral per store and temperature ---------------
     write(STORY / "history.csv", ["outlet_id", "temp", "last_delivered", "deferred_on"], history())
 
-    # derived: usual runs, unloading times, and which stores order on which weekday ------------------
     write(DERIVED / "usual_runs.csv", ["vehicle_id", "dow_name", "trip_no", "brand", "temp", "district", "share"], usual_runs())
     write(DERIVED / "usual_stops.csv",
           ["vehicle_id", "dow_name", "trip_no", "brand", "temp", "district", "outlet_id", "share", "run_share"],
@@ -377,7 +354,6 @@ def main() -> None:
 
 
 def weekday_litres() -> dict[tuple[str, str], float]:
-    """Each vehicle's average litres per weekday in 2026 weeks 1 to 13, counting the drive back to the depot."""
     leg = pd.concat([M.LEGS_TR, M.LEGS_TE]).merge(M.CAL[["iso_year", "iso_week", "dow_name"]], left_on="date", right_index=True)
     leg = leg[(leg.iso_year == 2026) & (leg.iso_week <= 13)]
     rt = leg.groupby(["date", "dow_name", "vehicle_id", "route_id", "district"]).distance_km.sum().reset_index()
@@ -389,10 +365,10 @@ def weekday_litres() -> dict[tuple[str, str], float]:
     return {(v, d): float(mean.loc[v, d]) for v in mean.index for d in mean.columns}
 
 
+# The scenario fixes two: OUT119's Monday chilled order waited a day, and Hemmathagama's
+# last chilled delivery was Saturday 4 April. Every other stream walks back over the operating days
+# on which it usually orders.
 def history() -> list[dict]:
-    """For every Wednesday order stream: the store's previous delivery of that temperature before Wednesday,
-    walking back over operating days on which that stream usually orders. The scenario fixes two facts:
-    OUT119's Monday chilled order waited a day, and Hemmathagama's last chilled delivery was Saturday 4 April."""
     out = []
     days = [d for d in M.CAL.index if "2026-03-23" <= d < WED and M.CAL.loc[d, "is_operating"] == 1]
     streams_by_day = {d: set(M.fixed_streams(M.CAL.loc[d, "dow_name"])) for d in days}
@@ -400,7 +376,7 @@ def history() -> list[dict]:
         last = next((d for d in reversed(days) if (outlet, temp) in streams_by_day[d]), "")
         deferred = ""
         if (outlet, temp) == ("OUT119", "chilled"):
-            last, deferred = TUE, MON  # Monday's order waited and rode on Tuesday
+            last, deferred = TUE, MON  # Monday's order waited and went out on Tuesday
         if (outlet, temp) == ("OUT117", "chilled"):
             last = "2026-04-04"
         out.append(dict(outlet_id=outlet, temp=temp, last_delivered=last, deferred_on=deferred))
@@ -427,10 +403,10 @@ def usual_runs() -> list[dict]:
     return out
 
 
+# A usual trip can be a different run (brand, temperature, district) in different weeks.
+# Each run made on at least a quarter of those weekdays gets rows.
+# Its stores are the ones on at least half of its trips.
 def usual_stops() -> list[dict]:
-    """The stores each vehicle's usual trip visits on a weekday. A trip that goes to one run (brand, temperature and
-    district) on some weeks and another on others has one row set per run it makes on at least a quarter of those
-    weekdays; its stores are the ones on at least half of those trips. run_share is how often the run happens."""
     lg = pd.concat([M.LEGS_TR, M.LEGS_TE]).merge(M.CAL[["dow_name"]], left_on="date", right_index=True)
     temp = M.DEL.dropna(subset=["route_id"]).groupby("route_id").temp_requirement.first()
     starts = lg[lg.seq == 0].copy()
@@ -460,25 +436,23 @@ def outlet_dwell() -> list[dict]:
             for (o, m), r in q.iterrows()]
 
 
-# ---------------------------------------------------------------- capacity outlook (DSP-05)
 OUTLOOK_DEPOT = "Kandy"
 
 
+# DSP-05, the capacity outlook, copied from the scenario appendix. validate_scenario.py checks it
+# against the forecast and the exact search, so the app only reads the answers.
+# What can be derived again is checked here.
 def outlook() -> None:
-    """The Kandy hub's six-week outlook, copied from the scenario appendix (relay:outlook, relay:outlook_days and
-    relay:facts "outlook"), which validate_scenario.py checks against the forecast and the exact search. Both need
-    the order history, so the app only reads their answers. What can be derived again is left out and checked here
-    instead: the week's open days and total, the busiest day from 8 April, and one load per refrigerated vehicle
-    per open day, which follows from the vehicles each day has out of service."""
     facts = json.loads(block("facts"))
     fo = facts["outlook"]
     story = facts["story"]
     fleet = {r["vehicle_id"]: r for r in rows("vehicles") if r["depot"] == OUTLOOK_DEPOT and r["temp"] == "reefer"}
-    # VEH039 (refrigeration fault) and VEH058 (booked service) are out Monday 6 to Wednesday 8 April
+    # VEH039 has a refrigeration fault and VEH058 a booked service.
+    # Both are out Monday 6 to Wednesday 8 April.
     out = sorted(v for v, r in fleet.items() if r["wednesday"] == "workshop")
     one_load = sum(float(r["volume_cap_m3"]) for r in fleet.values())
-    # five_serve_wednesdays is the exact search with one refrigerated vehicle fewer than needed. The scenario counts
-    # it for the Wednesdays ahead that need six (six_days) and for the run itself, so only those rows carry it
+    # five_serve_wednesdays is the exact search with one refrigerated vehicle fewer than needed.
+    # The scenario counts it only for the Wednesdays ahead that need six (six_days), and the run itself.
     one_fewer = set(fo["six_days"]) | {WED}
 
     days = []
@@ -531,8 +505,8 @@ def outlook() -> None:
     meta = dict(
         depot=OUTLOOK_DEPOT,
         forecast_updated=MON,
-        # relay_model.FC forecasts from 2026 week 13 on the 13 weeks before it; the backtest forecasts 2025 weeks
-        # 14 to 23 from 2025 week 13 (relay_model.backtest_kandy_fresh)
+        # relay_model.FC forecasts from 2026 week 13 on the 13 weeks before it. The backtest forecasts
+        # 2025 weeks 14 to 23 from 2025 week 13, see relay_model.backtest_kandy_fresh.
         baseline_year=2026, baseline_first_week=1, baseline_last_week=13,
         backtest_year=2025, backtest_first_week=14, backtest_last_week=23,
         backtest_pct=fo["backtest"][0], last_year_pct=fo["backtest"][1],

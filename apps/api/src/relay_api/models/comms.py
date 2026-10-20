@@ -1,4 +1,4 @@
-"""What reaches people: store notices, and the dispatcher's feed of things that need a decision."""
+"""Store notices, and the dispatcher's feed of things that need a decision."""
 
 from __future__ import annotations
 
@@ -25,12 +25,11 @@ class Notification(WorkspaceScoped, Base):
     data: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime]
     show_after: Mapped[datetime]
-    """When it may ring. A notice to a store between 10:00 PM and 5:00 AM arrives silently at once, readable in
-    the app, and rings at 5:00 AM."""
+    """Between 10:00 PM and 5:00 AM a store notice shows in the app at once but only rings at 5:00 AM."""
     read_at: Mapped[datetime | None]
     acknowledged_at: Mapped[datetime | None]
     delivered_at: Mapped[datetime | None]
-    """When a phone picked it up: a message to a silent driver waits for the next contact."""
+    """When a phone picked it up. A silent driver gets the message at the next contact."""
 
 
 class FeedKind(enum.StrEnum):
@@ -43,8 +42,8 @@ class FeedKind(enum.StrEnum):
     CONFLICT = "conflict"
     BACK_IN_CONTACT = "back_in_contact"
     STOP_MOVED = "stop_moved"
+    # A store confirmed receipt on a silent run while a backup is on the road.
     RECEIPT = "receipt"
-    """A store confirmed receipt from a silent run while a backup is on the road."""
 
 
 class FeedItem(WorkspaceScoped, Base):

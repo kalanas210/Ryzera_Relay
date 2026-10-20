@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    // The app shell is cached so the driver's phone opens Relay with no signal; records wait in IndexedDB.
+    // The app shell is cached so the driver's phone opens Relay with no signal. Records wait in IndexedDB.
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: false,
@@ -42,7 +42,7 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   server: {
-    // every loopback name, so separate browser tabs on localhost and 127.0.0.1 keep separate sign-ins while testing
+    // Every loopback name, so tabs on localhost and 127.0.0.1 keep separate sign-ins while testing.
     host: true,
     port: 5173,
     proxy: { "/api": { target: api, changeOrigin: false } },

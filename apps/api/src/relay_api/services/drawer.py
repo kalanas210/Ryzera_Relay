@@ -1,6 +1,4 @@
-"""The deferrals drawer (DSP-03): what no plan could avoid, what Relay chose and by which rule, the pool of
-orders that could have waited, what the choice costs, the protected store, the next-run check, and the exact
-words the waiting store will read."""
+"""The deferrals drawer (DSP-03): what no plan could avoid, what Relay chose, and why."""
 
 from __future__ import annotations
 
@@ -40,10 +38,9 @@ from relay_engine.standard import budget_for, trip_minutes
 
 WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
 
+# Each order on the board: its trip, and its stop as planned and as Relay expects it.
 Where = dict[str, tuple[TripReport, StopTiming, StopTiming]]
-"""Each order on the board: its trip, and its stop as planned and as Relay expects it."""
 History = dict[tuple[str, str], ServiceHistory]
-"""Each store's last delivery and last wait, by outlet and temperature."""
 
 
 def _kg(value: float) -> str:
@@ -81,8 +78,7 @@ def drawer(db: Session, now: datetime, plan: Plan) -> dict[str, Any]:
         o = by_ref[ref]
         return f"{o.outlet_id} {outlets[o.outlet_id].short_name}"
 
-    # What no plan could avoid is counted on the run with every order in it: after an override the engine plans
-    # without the overridden order, so its own count would leave that order out.
+    # Count on the run with every order in it. After an override the engine plans without that order.
     found = {a["temp_class"]: a for a in plan.summary.get("analyses", [])}
     before = {a["temp_class"]: a for a in plan.summary.get("analyses_before_override") or []}
     groups = []
@@ -110,7 +106,7 @@ def drawer(db: Session, now: datetime, plan: Plan) -> dict[str, Any]:
                 and day.status is VehicleStatus.AVAILABLE
             ]
         )
-        # an order taken off the board by hand waits because of that move, not by any of the three rules
+        # An order taken off the board by hand waits because of that move, not because of a rule.
         rules_by_order = {
             o.order_ref: "hand"
             if deferral_of[o.order_ref].explanation.get("manual")
@@ -323,8 +319,6 @@ def _weighed(
     by_ref: dict[str, Order],
     outlets: dict[str, Outlet],
 ) -> str:
-    """Rule 3 for one waiting order, from the weights Relay compared: the trip that reaches its district, what
-    already rides it, and what the order would make of it."""
     net = ctx.network
     order = ctx.orders.get(ref)
     if order is None:
@@ -354,7 +348,6 @@ def _weighed(
     def ids(refs: Sequence[str]) -> str:
         return and_list(by_ref[r].outlet_id for r in refs)
 
-    # the trip that carries a protected store first: that is where the rules met
     trip = next((r for r in same if set(r.trip.order_ids) & set(protected)), max(same, key=lambda r: r.weight_kg))
     riders = list(trip.trip.order_ids)
     vehicle = net.vehicles[trip.trip.vehicle_id]
@@ -378,7 +371,6 @@ def _weighed(
     together = f"{ids(alt)} together would be {_kg(alt_kg)}"
     if alt_kg > vehicle.weight_cap_kg + 1e-6:
         return f"{lead} {together}, over the {kind}'s {cap}."
-    # light enough: try it on the clock, with the vehicle's other trip as it is
     others = [r.trip for r in reports if r.trip.vehicle_id == trip.trip.vehicle_id and r is not trip]
     tried, _ = evaluate(ctx, [*others, EngineTrip(trip.trip.vehicle_id, trip.trip.trip_no, alt)])
     broken = [b for r in tried for b in r.broken]
@@ -515,10 +507,7 @@ def _costs(
     return lines
 
 
-# ------------------------------------------------------------------------------------------------ override
 def override_preview(db: Session, plan: Plan, order_ref: str) -> dict[str, Any]:
-    """What deferring a protected order anyway would change, before the dispatcher writes the note: the same
-    question the override asks the engine, so the answer is kept and the override itself is quick."""
     if plan.status is PlanStatus.PUBLISHED:
         raise PlanError("This plan is published. Change it trip by trip instead.")
     orders = run_orders(db, plan.depot, plan.run_date)
@@ -527,7 +516,7 @@ def override_preview(db: Session, plan: Plan, order_ref: str) -> dict[str, Any]:
         raise PlanError(f"{order_ref} is not on this run")
     forced = {*plan.summary.get("overridden", []), order_ref}
     ctx = context(db, plan, orders)
-    run = RunInput(  # exactly what propose_plan asks for the override
+    run = RunInput(
         network=ctx.network,
         depot=plan.depot,
         orders=[ctx.orders[o.order_ref] for o in orders if o.order_ref not in forced],
@@ -568,17 +557,14 @@ def override_preview(db: Session, plan: Plan, order_ref: str) -> dict[str, Any]:
     return {"order_ref": order_ref, "consequence": f"If you defer it, {consequence}", "lines": lines}
 
 
-# ------------------------------------------------------------------------------------------------ on paper
+# A departure no window limits. On paper a trip can leave whenever the vehicle is free.
 PAPER_LATEST = 4999
-"""A departure no window limits: on paper, a trip can leave whenever the vehicle is free."""
 
 
 def _paper(
     db: Session, plan: Plan, ctx: Context, reports: Sequence[TripReport], temp_class: str
 ) -> dict[str, Any] | None:
-    """The plan the published standard alone would pass: weight, volume, temperature, access, one district a trip,
-    two trips and 270 Fresh minutes a vehicle, and nothing about the clock. When it carries every order of the
-    group, it shows which trips it changes and where the clock breaks them. Kept with the plan until it changes."""
+    # The plan the standard alone would pass. Two trips, 270 Fresh minutes a vehicle, no clock.
     kept = plan.summary.get("paper") or {}
     if kept.get("version") == plan.version and temp_class in kept.get("groups", {}):
         cached: dict[str, Any] | None = kept["groups"][temp_class]
@@ -618,7 +604,7 @@ def _paper_plan(
     options = []
     for (brand, district), members in groups.items():
         if len(members) > 12:
-            return None  # too many stores to walk every trip; the engine samples these, and so would this
+            return None  # too many stores to try every trip, and the engine samples these too
         for size in range(1, len(members) + 1):
             for combo in itertools.combinations(members, size):
                 outlets = [o.outlet_id for o in combo]
@@ -676,7 +662,6 @@ def _paper_plan(
         takes = []
         for i, option in enumerate(trips):
             if frozenset(option.orders) in own:
-                # Relay's own trip, kept; named as a run when it moves to the vehicle's other trip
                 moved = own.index(frozenset(option.orders)) != i
                 takes.append(f"its {option.district} run" if moved else option.district)
             elif len(option.orders) == by_district[option.district] and len(option.orders) > 1:
@@ -713,16 +698,15 @@ def _paper_plan(
             )
             break
     if not rows or not lines:
-        return None  # the paper plan works on the clock too, or changes nothing: no story to tell
+        return None
     return {"orders": len(orders), "rows": rows, "fails": lines}
 
 
 def _on_the_clock(
     ctx: Context, vehicle_id: str, trips: Sequence[Option], relay: Sequence[EngineTrip]
 ) -> list[TripReport]:
-    """Paper trips timed the way Relay times its own: a trip Relay also runs keeps Relay's stop order and departure;
-    any other gets Relay's best stop order from the moment the vehicle is free, or the closing order when no order
-    keeps every window."""
+    # Times paper trips the way Relay does. A trip Relay also runs keeps its stop order and departure.
+    # Any other gets Relay's best order from when the vehicle is free, or the closing order.
     net = ctx.network
     timed: list[EngineTrip] = []
     ready = float(ctx.vehicles[vehicle_id].ready_at)

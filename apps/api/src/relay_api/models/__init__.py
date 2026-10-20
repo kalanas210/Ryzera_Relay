@@ -1,4 +1,4 @@
-"""All tables. Importing this module registers every model on Base.metadata (Alembic relies on it)."""
+"""Imports every model so Base.metadata knows all the tables. Alembic needs that."""
 
 from relay_api.models.base import Base, WorkspaceScoped
 from relay_api.models.comms import FeedItem, FeedKind, Notification

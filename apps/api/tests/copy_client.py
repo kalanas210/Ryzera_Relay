@@ -9,9 +9,6 @@ PINS = {"rizwan": "2580", "suresh": "4826", "anjali": "1357", "kasun": "3690"}
 
 
 class Copy:
-    """One private copy of the story day, driven through the API the way the web app drives it: every request
-    names the role it acts as, and every change carries the X-Relay-Client header."""
-
     def __init__(self, client: Any) -> None:
         self.client = client
         response = client.post("/api/demo/workspaces")

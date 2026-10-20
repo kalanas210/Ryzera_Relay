@@ -1,14 +1,4 @@
-"""The driver's run as the phone reads it (DRV-01 to DRV-05): today's trip with its handover, every stop with the times
-Relay last sent, any question waiting for the driver, and the messages held while the phone was silent.
-
-The phone keeps the last snapshot in IndexedDB and works from it while offline, so everything a screen needs is in one
-answer; the times in it are the ones Relay last told the stores, so the phone never pushes an expected time later.
-
-Inside the story's scripted outage nothing the phone sends reaches Relay. The run it reads then is the demo's stand-in
-for the phone's own memory: each stop as the phone last saw it before the signal went, with no message handed over,
-and the records the story's phone outbox holds, so the stops a demo jump played for the driver show on this phone as
-saved there.
-"""
+"""The driver's run as the phone reads it (DRV-01 to DRV-05)."""
 
 from __future__ import annotations
 
@@ -57,8 +47,8 @@ from relay_api.schemas.driver import (
 from relay_api.services import backup, dock, field, story, words
 from relay_api.services.ordering import current_run
 
+# A record that reached Relay this long after it was made was saved on the phone with no signal.
 SENT_LATE = timedelta(minutes=2)
-"""A stop record that reached Relay this long after it was made was saved on the phone with no signal."""
 
 
 def vehicle_today(db: Session, user: AppUser, run_date: date) -> str | None:
@@ -74,7 +64,7 @@ def run(db: Session, now: datetime, user: AppUser, workspace: Workspace) -> Driv
     published = False
     if vehicle_id is not None:
         plans = db.scalars(select(Plan).where(Plan.run_date == run_date, Plan.status == PlanStatus.PUBLISHED)).all()
-        # the driver's own hub's plan: another hub publishing first says nothing about this run
+        # Use the driver's own hub's plan. Another hub publishing first says nothing about this run.
         vehicle = look.vehicles.get(vehicle_id)
         published = any(p.depot == vehicle.depot for p in plans) if vehicle is not None else bool(plans)
         trips = list(
@@ -91,6 +81,7 @@ def run(db: Session, now: datetime, user: AppUser, workspace: Workspace) -> Driv
     current = next((t for t in trips if t.finished_at is None), trips[-1] if trips else None)
     later = [t for t in trips if t is not current and t.finished_at is None]
     dispatcher = look.dispatcher()
+    # In the scripted outage the run is the demo's stand-in for the phone's own memory.
     quiet = story.no_signal(workspace, user, now)
     memory = (story.memory(db) or {}) if quiet else {}
     seen: dict[str, list[Any]] = memory.get("seen", {})
@@ -101,7 +92,6 @@ def run(db: Session, now: datetime, user: AppUser, workspace: Workspace) -> Driv
         .order_by(Conflict.opened_at)
     ).all()
     if quiet:
-        # what the phone had heard before the signal went, and nothing since
         questions = [c for c in questions if c.opened_at < quiet["from"]]
         notices = db.scalars(
             select(Notification)
@@ -136,7 +126,6 @@ def _held(memory: dict[str, Any]) -> HeldOut:
 
 
 def _sent_at(db: Session, stop: Stop) -> datetime | None:
-    """When Relay had the stop's last record, if the phone held it for a while with no signal."""
     event = db.scalar(
         select(FieldEvent)
         .where(
@@ -221,7 +210,7 @@ def _trip(
         version: int = stop.version
         status: StopState = stop.status.value
         if seen and str(stop.id) in seen:
-            version, status = seen[str(stop.id)]  # as the phone last saw it: a move made since never reached it
+            version, status = seen[str(stop.id)]
             copy = None if status != StopStatus.MOVED.value else copy
         stops_out.append(
             DriverStopOut(
@@ -276,8 +265,6 @@ def _trip(
 
 
 def _question(db: Session, look: dock.Lookup, conflict: Conflict) -> QuestionOut:
-    """The one question, with what the card says about it: the phone's own records for the stop, who is driving the
-    second copy, and who moved it when."""
     stop = db.get(Stop, conflict.stop_id)
     assert stop is not None
     clashed = db.scalars(

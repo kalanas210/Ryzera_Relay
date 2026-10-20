@@ -3,7 +3,7 @@ import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { SignIn } from "@/auth/SignIn";
 import { RoleLayout } from "./RoleLayout";
 
-/** Each role's screens load as their own chunk, so a driver's phone never downloads the dispatcher's board. */
+// Each role loads as its own chunk, so a driver's phone never downloads the dispatcher's board.
 function page<M, K extends keyof M>(load: () => Promise<M>, name: K) {
   return lazy(async () => ({ default: (await load())[name] as ComponentType }));
 }
@@ -61,7 +61,6 @@ export const router = createBrowserRouter([
     ),
     children: [
       {
-        // the driver's run and its outbox wrap every driver screen
         Component: page(() => import("@/roles/driver"), "DriverShell"),
         children: [
           { index: true, Component: page(() => import("@/roles/driver"), "RunPage") },

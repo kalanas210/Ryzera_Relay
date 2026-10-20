@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# A compressed pg_dump of the Relay database; keeps the newest 14.
+# Dumps the Relay database to a gzip file and keeps the newest 14.
 set -eu
 OUT=/opt/relay-backups
 STAMP="$(date +%Y-%m-%d-%H%M)"

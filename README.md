@@ -356,6 +356,8 @@ copies of the day. See [infra/README.md](infra/README.md).
 
 - [docs/architecture.md](docs/architecture.md): the architecture diagram, the decisions and their costs
 - [docs/data-model.md](docs/data-model.md): every table and relationship, generated from the models
+- [docs/diagrams/](docs/diagrams/README.md): the system, planning engine, database, request path, deployment and delivery
+  day as draw.io files with PNG exports
 - [docs/ai-disclosure.md](docs/ai-disclosure.md): the AI tool disclosure for the Hackathon
 - [docs/build-plan.md](docs/build-plan.md): the build plan, stack and scope as accepted on 30 September; where the
   build differs, this README and the architecture page describe the build

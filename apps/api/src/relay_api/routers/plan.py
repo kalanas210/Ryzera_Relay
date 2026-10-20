@@ -33,8 +33,8 @@ def _plan(scope: Scope, plan_id: uuid.UUID) -> Plan:
     return plan
 
 
+# A rule that refuses the change comes back to the dispatcher as a 409 with the reason.
 def _guard(fn: Callable[[], T]) -> T:
-    """Run a planning change; a rule it refuses on is the dispatcher's 409, with the reason."""
     try:
         return fn()
     except planning.PlanError as exc:
@@ -57,8 +57,8 @@ class ProposeIn(BaseModel):
 
 @router.post("/propose", response_model=BoardOut)
 def propose(body: ProposeIn, scope: ScopeDep, _user: Dispatcher) -> BoardOut:
-    """Ask Relay for a plan. The story day's first proposals come from the engine cache in a moment; a new fleet or
-    a new set of orders makes the engine search again, which takes up to a minute."""
+    """Ask Relay for a plan. The story day's first proposals come from the engine cache in a moment.
+    A new fleet or new orders make the engine search again, which takes up to a minute."""
     plan = planning.get_plan(scope.db, body.depot, body.run_date or current_run(scope.db, scope.now))
     _guard(lambda: planning.propose_plan(scope.db, scope.now, plan, forced=plan.summary.get("overridden", [])))
     scope.db.commit()
@@ -70,9 +70,9 @@ class MoveIn(BaseModel):
     order_refs: list[str] = Field(
         default_factory=list, max_length=12, description="Several orders together: every order of a dragged stop"
     )
+    # No vehicle and trip means off every trip, into Not placed.
     vehicle_id: str | None = None
     trip_no: int | None = Field(default=None, ge=1, le=2)
-    """No vehicle and trip: off every trip, into Not placed."""
 
     @property
     def refs(self) -> list[str]:
@@ -103,7 +103,7 @@ def fit(
     _user: Dispatcher,
     order_ref: Annotated[list[str], Query(min_length=1, max_length=12)],
 ) -> list[FitOut]:
-    """While orders are dragged (one, or every order of a stop, as repeated order_ref): would they fit each trip."""
+    """Would the dragged orders fit each trip. Send one order_ref, or one per order of a stop."""
     return boards.fits(scope.db, _plan(scope, plan_id), order_ref)
 
 
@@ -117,8 +117,8 @@ def deferrals(plan_id: uuid.UUID, scope: ScopeDep, _user: Dispatcher) -> dict[st
 
 @router.get("/{plan_id}/override/preview")
 def override_preview(plan_id: uuid.UUID, order_ref: str, scope: ScopeDep, _user: Dispatcher) -> dict[str, Any]:
-    """What deferring a protected order anyway would change, asked when Defer anyway opens. The engine's answer
-    is kept, so the override that may follow takes no time."""
+    """What deferring a protected order anyway would change.
+    The engine's answer is kept, so the override is quick."""
     plan = _plan(scope, plan_id)
     data = _guard(lambda: drawers.override_preview(scope.db, plan, order_ref))
     scope.db.commit()
@@ -185,7 +185,6 @@ def _published_trip(scope: Scope, plan: Plan, vehicle_id: str, trip_no: int) -> 
 def reorder_preview(
     plan_id: uuid.UUID, vehicle_id: str, trip_no: int, body: ReorderIn, scope: ScopeDep, _user: Dispatcher
 ) -> changes.ReorderPreview:
-    """What a new stop order on a published trip costs, before anyone is told."""
     plan = _plan(scope, plan_id)
     trip = _published_trip(scope, plan, vehicle_id, trip_no)
     return _guard(lambda: changes.preview_reorder(scope.db, plan, trip, body.order_refs))
@@ -213,8 +212,8 @@ class VehicleStatusIn(BaseModel):
 def set_vehicle_status(
     vehicle_id: str, body: VehicleStatusIn, scope: ScopeDep, user: Dispatcher, depot: Depot = "Kandy"
 ) -> BoardOut:
-    """Send a vehicle to the workshop, back into service, or onto standby for a run of a draft plan. The plan keeps
-    its trips until it is proposed again; the board asks for that."""
+    """Send a vehicle to the workshop, back into service, or onto standby for a run of a draft plan.
+    The plan keeps its trips until it is proposed again, and the board asks for that."""
     vehicle = scope.db.get(Vehicle, vehicle_id)
     if vehicle is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such vehicle")

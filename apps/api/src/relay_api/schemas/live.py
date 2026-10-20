@@ -27,8 +27,8 @@ class ShortfallDetailOut(Schema):
     place: str
     flagged_at: datetime
     flagged_by: str | None
+    # The run the load is for. The day a carried-over order is marked from.
     run_date: date
-    """The run the load is for: the day a carried-over order is marked from."""
     departs: datetime
     trip_stops: int
     driver: str | None
@@ -42,19 +42,16 @@ class ShortfallDetailOut(Schema):
     decided_by: str | None
     added_to_order_ref: str | None
     store_seen_at: datetime | None
-    """When the store opened its short-delivery notice."""
     completed_at: datetime | None
     loaded_cases: int
     planned_cases: int
-    """The whole load's cases, for the record once the load is complete."""
     accepted_at: datetime | None
     accepted_by: str | None
+    # Spare cases of this type at the hub for the run, when Relay knows the hub's stock of it.
     hub_spare: int | None
-    """Spare cases of this type at the hub for the run, when Relay knows the hub's stock of it."""
+    # When the supplier's next drop of this case type reaches the hub.
     next_delivery_at: datetime | None
-    """When the supplier's next drop of this case type reaches the hub."""
     photo_id: uuid.UUID | None
-    """A photo of damaged cases from the dock."""
 
 
 class FeedItemOut(Schema):
@@ -67,12 +64,11 @@ class FeedItemOut(Schema):
     handled_at: datetime | None
     handled_by: str | None
     outcome: str
+    # A settled two-copy stop stays under Now until the dispatcher marks it reviewed.
     reviewed_at: datetime | None = None
-    """A settled two-copy stop stays under Now until the dispatcher marks it reviewed."""
     reviewed_by: str | None = None
     shortfall: ShortfallDetailOut | None
     ref: dict[str, Any] = Field(default_factory=dict)
-    """What the item is about (its trip, stop, conflict or backup), so the desk ties it to the right run."""
 
 
 class FeedOut(Schema):

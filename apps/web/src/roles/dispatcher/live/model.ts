@@ -1,16 +1,14 @@
-/** The desk's reading of the live runs, kept apart from the screens so it can be tested: which trips belong to one
- *  vehicle, which feed item is about which run, what needs the dispatcher first, and the words under each stop. */
+// Reads the live runs for the desk: trips per vehicle, feed items per run, what needs attention first.
 
 import { calledName } from "@/lib/names";
 import { formatTime, roundTo5 } from "@/lib/time";
 import type { Board, PlanStop } from "../plan/api";
 import type { FeedItem, RunMarker, RunRow } from "./api";
 
-/** The Fresh window every Fresh trip runs inside (relay_engine.standard). */
+// The Fresh window every Fresh trip runs inside (relay_engine.standard).
 export const FRESH_WINDOW = "3:30 to 8:00 AM";
 
-/** One vehicle on the desk: its Fresh trips in order, the one it is on now, and the one after. Its attention is the
- *  current trip's; a later trip's late risk keeps it in view without putting it first. */
+// Attention is the current trip's. A later trip's late risk keeps it in view, not first.
 export type VehicleRun = {
   vehicle_id: string;
   trips: RunRow[];
@@ -20,7 +18,6 @@ export type VehicleRun = {
   laterRisk: boolean;
 };
 
-/** Trips grouped by vehicle, in the order the panel sent them (needing attention first). */
 export function vehicleRuns(rows: RunRow[]): VehicleRun[] {
   const byVehicle = new Map<string, RunRow[]>();
   for (const row of rows) byVehicle.set(row.vehicle_id, [...(byVehicle.get(row.vehicle_id) ?? []), row]);
@@ -44,7 +41,6 @@ export function vehicleRuns(rows: RunRow[]): VehicleRun[] {
 
 const VEHICLE_ID = /VEH\d{3}/g;
 
-/** The runs a feed item is about: from its reference when the feed sends one, otherwise from what it names. */
 export function itemRows(item: FeedItem, rows: RunRow[]): RunRow[] {
   const byTrip = (id: string | null | undefined) => (id ? rows.find((r) => r.trip_id === id) : undefined);
   const found = [byTrip(item.ref?.trip_id), byTrip(item.ref?.backup_trip_id)].filter((r): r is RunRow => !!r);
@@ -64,7 +60,7 @@ export function itemRows(item: FeedItem, rows: RunRow[]): RunRow[] {
     const row = rows.find((r) => r.markers.some((m) => m.seq === seq && m.state === "conflict"));
     if (row) return [row];
   }
-  // the driver's run on the road, else the latest one they finished, never a trip still to leave
+  // The driver's run on the road, else the latest one they finished. Never a trip still to leave.
   const driven = rows
     .filter((r) => !r.is_backup && r.driver && text.includes(r.driver))
     .sort((a, b) => a.trip_no - b.trip_no);
@@ -78,14 +74,13 @@ export function itemRows(item: FeedItem, rows: RunRow[]): RunRow[] {
   return named.length ? [named.find((r) => r.departed_at && !r.finished_at) ?? named[0]!] : [];
 }
 
-/** Handled silences give way to the back-in-contact item. */
+// Handled silences give way to the back-in-contact item.
 export function shownInFeed(item: FeedItem): boolean {
   return !(item.kind === "silence" && item.handled_at && item.outcome.startsWith("Back in contact"));
 }
 
 export type Links = { open: Set<string>; today: Set<string> };
 
-/** Which vehicles the feed is talking about: in front of the dispatcher, and handled today. */
 export function feedLinks(items: FeedItem[], rows: RunRow[]): Links {
   const links: Links = { open: new Set(), today: new Set() };
   for (const item of items) {
@@ -97,9 +92,6 @@ export function feedLinks(items: FeedItem[], rows: RunRow[]): Links {
   return links;
 }
 
-/** Needs attention first: an open exception or a silent or two-copy run, then late risk, then a backup on the road,
- *  then a run with something handled today, then one whose later trip is at risk. Everything else folds into the
- *  group row. */
 export function rank(vehicle: VehicleRun, links: Links): number {
   if (vehicle.attention >= 2 || links.open.has(vehicle.vehicle_id)) return 0;
   if (vehicle.attention === 1) return 1;
@@ -109,8 +101,6 @@ export function rank(vehicle: VehicleRun, links: Links): number {
   return FOLDED;
 }
 
-/** Minutes between Relay's expected time and the close at the tightest stop still to come on the vehicle's current
- *  trip; a later trip's stops keep it in view, never first. Infinite when nothing is still to come. */
 export function slack(vehicle: VehicleRun): number {
   const gaps = vehicle.current.markers
     .filter((m) => (m.state === "next" || m.state === "pending") && m.estimate)
@@ -118,8 +108,6 @@ export function slack(vehicle: VehicleRun): number {
   return gaps.length ? Math.min(...gaps) : Number.POSITIVE_INFINITY;
 }
 
-/** The panel's order, needing attention first: by rank, then the run nearest to a store's close, so with nothing to
- *  act on the run with the least room comes first. Equal runs keep the order the panel sent. */
 export function inOrder(vehicles: VehicleRun[], links: Links): VehicleRun[] {
   const room = (a: VehicleRun, b: VehicleRun) => {
     const d = slack(a) - slack(b);
@@ -128,8 +116,7 @@ export function inOrder(vehicles: VehicleRun[], links: Links): VehicleRun[] {
   return [...vehicles].sort((a, b) => rank(a, links) - rank(b, links) || room(a, b));
 }
 
-/** A stop moved to a backup stays in front of the dispatcher while the backup's copy is live and the driver is
- *  still silent: either may reach the store first. */
+// Stays in front while the backup's copy is live and the driver silent. Either may arrive first.
 export function movedLive(item: FeedItem, rows: RunRow[]): boolean {
   if (item.kind !== "stop_moved") return false;
   const row = itemRows(item, rows).find((r) => !r.is_backup);
@@ -138,7 +125,7 @@ export function movedLive(item: FeedItem, rows: RunRow[]): boolean {
   return !!row?.out_of_contact && !!copy && copy.state !== "cancelled";
 }
 
-/** Once the stop has two copies, the move's facts live on in that item's timeline. */
+// Once the stop has two copies, the move's facts live on in that item's timeline.
 export function overtaken(item: FeedItem, items: FeedItem[]): boolean {
   const stopId = item.ref?.stop_id;
   return (
@@ -147,33 +134,27 @@ export function overtaken(item: FeedItem, items: FeedItem[]): boolean {
 }
 export const FOLDED = 9;
 
-/** The run the desk opens on: the newest item in front of the dispatcher, else the first in the panel's order.
- *  Something handled earlier never takes the selection from a run that needs more attention. */
 export function defaultSelection(vehicles: VehicleRun[], items: FeedItem[], links: Links, rows: RunRow[]) {
   const newestOpen = items.find((i) => inFront(i) && itemRows(i, rows).length);
   if (newestOpen) return itemRows(newestOpen, rows)[0]!.vehicle_id;
   return inOrder(vehicles, links).find((v) => rank(v, links) < FOLDED)?.vehicle_id ?? null;
 }
 
-/** A two-copy stop settled while the dispatcher was not looking stays under Now until they mark it reviewed. */
 export function awaitingReview(item: FeedItem): boolean {
   return item.kind === "conflict" && !!item.handled_at && !item.reviewed_at;
 }
 
-/** In front of the dispatcher: still open, or settled and not yet reviewed. */
 function inFront(item: FeedItem): boolean {
   return !item.handled_at || awaitingReview(item);
 }
 
-/** "5:11": track labels drop the AM; prose keeps it. */
+// Track labels drop the AM. Prose keeps it.
 export function shortClock(value: string | Date): string {
   return formatTime(value).replace(/\s?[AP]M$/, "");
 }
 
 export type Tone = "plain" | "muted" | "attention" | "problem";
 
-/** The status line under a stop on the track. Recorded facts say what happened and when; anything after the last
- *  record is an estimate, and while the phone is silent it says "around". */
 export function markerStatus(m: RunMarker, silent: boolean): { text: string; tone: Tone } {
   switch (m.state) {
     case "delivered":
@@ -188,7 +169,6 @@ export function markerStatus(m: RunMarker, silent: boolean): { text: string; ton
       return { text: m.recorded ? `Not delivered ${shortClock(m.recorded)}` : "Not delivered", tone: "problem" };
     case "moved":
       if (!m.moved_to) return { text: "Moved", tone: "attention" };
-      // settled in the backup's favour, the stop is no longer the driver's at all
       return m.handed_over
         ? { text: `With ${m.moved_to}`, tone: "muted" }
         : { text: `Also on ${m.moved_to}`, tone: "attention" };
@@ -200,7 +180,6 @@ export function markerStatus(m: RunMarker, silent: boolean): { text: string; ton
       if (!m.estimate) return { text: "", tone: "muted" };
       const at = shortClock(m.estimate);
       const tone: Tone = m.late_risk ? "problem" : "plain";
-      // An estimate that went by with no word stays where it was, and says so.
       if (m.passed) return { text: `${at} passed`, tone: m.late_risk ? "problem" : "muted" };
       if (silent) return { text: `around ${at}`, tone };
       return { text: m.state === "next" ? `Next, ${at}` : at, tone };
@@ -208,14 +187,12 @@ export function markerStatus(m: RunMarker, silent: boolean): { text: string; ton
   }
 }
 
-/** Above a two-copy stop's chip: what the driver's phone holds, or that the driver has said it is wrong. */
 export function heldWords(m: RunMarker, row: RunRow): string | null {
   if (m.state !== "conflict") return null;
   if (m.denied) return `${driverName(row)} says not delivered`;
   return m.held ? `Delivered ${shortClock(m.held)}` : null;
 }
 
-/** Recorded on the track: drawn solid, and the line into it is solid. */
 export function isRecorded(m: RunMarker): boolean {
   return (
     m.state === "delivered" ||
@@ -226,12 +203,10 @@ export function isRecorded(m: RunMarker): boolean {
   );
 }
 
-/** Still to come, with an estimate. */
 export function isEstimated(m: RunMarker): boolean {
   return (m.state === "next" || m.state === "pending" || m.state === "moved") && !!m.estimate;
 }
 
-/** The last thing Relay heard from the run: a delivery, an arrival or a store's receipt. */
 export function lastRecord(
   row: RunRow,
 ): { marker: RunMarker; kind: "delivered" | "arrived" | "receipt"; at: string } | null {
@@ -242,23 +217,19 @@ export function lastRecord(
   return null;
 }
 
-/** Where the silent run probably is, when Relay's estimate puts it between two stops. */
 export function onTheRoadTo(row: RunRow): string | null {
   return row.position.match(/^Probably on the road to (.+)\.$/)?.[1] ?? null;
 }
 
-/** "Fresh dry, Kegalle district" */
 export function runLine(row: RunRow): string {
   const load = row.brand === "Fresh" ? `Fresh ${row.temp === "chilled" ? "chilled" : "dry"}` : row.brand;
   return `${load}, ${row.district} district`;
 }
 
-/** The dispatcher's word for a vehicle: "Ambient truck", "Refrigerated van". */
 export function vehicleWords(type: string, temp: string): string {
   return `${temp === "reefer" ? "Refrigerated" : "Ambient"} ${type}`;
 }
 
-/** The silent-run caption: what was last recorded, and what has happened to the stops since. */
 export function silentCaption(row: RunRow): string {
   const last = lastRecord(row);
   const lines = [
@@ -274,8 +245,7 @@ export function silentCaption(row: RunRow): string {
   return lines.join(" ");
 }
 
-/** The row's caption. A later trip's late stops are said apart from this trip's windows, so the two never read as
- *  one contradiction ("every stop is inside its window" next to "expected after its close"). */
+// A later trip's late stops are said apart from this trip's windows, so they never contradict.
 export function rowCaption(vehicle: VehicleRun): string {
   const { current: row, later } = vehicle;
   if (row.out_of_contact) return silentCaption(row);
@@ -287,7 +257,6 @@ export function rowCaption(vehicle: VehicleRun): string {
   return `${own} Trip ${later.trip_no}: ${later.risk}`;
 }
 
-/** The first name a driver is called by, or the vehicle when nobody is on it. */
 export function driverName(row: RunRow): string {
   return calledName(row.driver) || row.vehicle_id;
 }
@@ -296,8 +265,7 @@ export type Station =
   | { kind: "stop"; marker: RunMarker }
   | { kind: "hub"; label: string; status: string; recorded: boolean };
 
-/** What the track draws for a vehicle: its stops, with the depot first on a backup, and the hub after the last stop
- *  once there is one to show. Relay never records a vehicle back at the hub, so that node is always an estimate. */
+// Relay never records a vehicle back at the hub, so the hub node is always an estimate.
 export function stations(vehicle: VehicleRun, depotLabel: string, now: string): Station[] {
   const row = vehicle.current;
   const out: Station[] = [];
@@ -310,10 +278,10 @@ export function stations(vehicle: VehicleRun, depotLabel: string, now: string): 
     });
   }
   for (const marker of row.markers) out.push({ kind: "stop", marker });
-  // A stop moved to a backup is still the driver's until someone settles it, so the hub is not next yet.
+  // A stop moved to a backup is still the driver's until it is settled, so the hub is not next yet.
   const allDone = row.markers.every((m) => isRecorded(m) || m.receipt_at);
   if (vehicle.later) {
-    // a planned time already gone by is not a promise: the second trip leaves once the first is back
+    // A planned time already gone by is not a promise. The second trip leaves once the first is back.
     const due = Date.parse(vehicle.later.planned_depart) <= Date.parse(now);
     out.push({
       kind: "hub",
@@ -322,7 +290,6 @@ export function stations(vehicle: VehicleRun, depotLabel: string, now: string): 
       recorded: false,
     });
   } else if (row.finished_at) {
-    // Finish trip is tapped at the last dock: the drive home is still ahead, at the time the driver's phone shows
     const back =
       row.expected_back && Date.parse(row.expected_back) > Date.parse(row.finished_at) ? row.expected_back : null;
     out.push({
@@ -339,7 +306,6 @@ export function stations(vehicle: VehicleRun, depotLabel: string, now: string): 
   return out;
 }
 
-/** The plan's record of each stop, for the order, the store's name, its access and its window. */
 export class Directory {
   constructor(private readonly board: Board | undefined) {}
 
@@ -347,7 +313,6 @@ export class Directory {
     return this.board?.lanes.find((l) => l.vehicle_id === vehicleId);
   }
 
-  /** Vehicles out of service today. */
   workshop() {
     return this.board?.lanes.filter((l) => l.status === "workshop") ?? [];
   }
@@ -367,7 +332,6 @@ export class Directory {
   }
 }
 
-/** Access words as the plan board says them. */
 export function accessWords(dockType: string | undefined): string | null {
   if (dockType === "rear_dock") return "Rear dock";
   if (dockType === "street") return "Curb";

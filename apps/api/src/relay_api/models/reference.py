@@ -80,7 +80,7 @@ class ServiceAllowance(Base):
 
 
 class TrafficSpeed(Base):
-    """Typical congestion by district and hour; 100 is free flow."""
+    """Typical congestion by district and hour. 100 is free flow."""
 
     __tablename__ = "traffic_speed"
 
@@ -91,7 +91,7 @@ class TrafficSpeed(Base):
 
 
 class RoadCondition(Base):
-    """Date-specific disruption by district; 100 is a clear road."""
+    """Date-specific disruption by district. 100 is a clear road."""
 
     __tablename__ = "road_condition"
 
@@ -101,7 +101,7 @@ class RoadCondition(Base):
 
 
 class CaseType(Base):
-    """Standard case types a store orders in, so the planner gets real weight and volume."""
+    """The standard case types a store orders in, with their real weight and volume."""
 
     __tablename__ = "case_type"
 
@@ -112,7 +112,7 @@ class CaseType(Base):
     kg: Mapped[float] = mapped_column(Numeric(7, 2, asdecimal=False))
     m3: Mapped[float] = mapped_column(Numeric(7, 4, asdecimal=False))
     load_rank: Mapped[int] = mapped_column(SmallInteger, default=0)
-    """Heaviest first within a stop: lower loads first."""
+    """Lower loads first. Heaviest cases go first within a stop."""
 
 
 class UsualRun(Base):
@@ -131,8 +131,8 @@ class UsualRun(Base):
 
 
 class UsualStop(Base):
-    """The stores a vehicle's usual trip visits on a weekday, per run it makes (brand, temperature, district),
-    learned from the route history. The proposal keeps vehicles on these runs first (Relay's rule 1)."""
+    """The stores a vehicle usually visits on a weekday, per run, learned from the route history.
+    Relay's rule 1 keeps vehicles on these runs."""
 
     __tablename__ = "usual_stop"
 
@@ -149,7 +149,7 @@ class UsualStop(Base):
 
 
 class OrderStream(Base):
-    """A store that orders on this weekday, with this temperature, in nearly every week of the history.
+    """A store that orders on this weekday and temperature in nearly every week of the history.
     The order queue uses it to list the stores that have not ordered yet."""
 
     __tablename__ = "order_stream"
@@ -161,7 +161,7 @@ class OrderStream(Base):
 
 class ServiceHistory(Base):
     """Each store's last delivery before the story day, and whether its last order waited.
-    Relay's second rule protects a store whose last order waited."""
+    Relay's rule 2 protects a store whose last order waited."""
 
     __tablename__ = "service_history"
 
@@ -172,9 +172,9 @@ class ServiceHistory(Base):
 
 
 class HubStock(Base):
-    """What a hub's store holds of a case type for a run beyond the night's picks, and when the supplier's next
-    drop arrives. The dispatcher reads it when the dock flags cases missing: a spare, or a delivery before the
-    truck leaves, is worth holding the truck for."""
+    """Spare cases at the hub beyond the night's picks, and when the supplier's next drop arrives.
+    The dispatcher reads it when the dock flags missing cases. A spare, or a drop before the truck
+    leaves, may be worth holding the truck for."""
 
     __tablename__ = "hub_stock"
 
@@ -186,9 +186,8 @@ class HubStock(Base):
 
 
 class OutlookForecast(Base):
-    """A depot's demand forecast for the capacity outlook (DSP-05): when it was made, what an ordinary week is, and
-    how well the method did. The forecast (the Datathon's method) and the fewest-vehicles search need the order
-    history, which the app never holds, so the seed carries their answers. A depot without a row has no outlook."""
+    """A depot's demand forecast for the capacity outlook (DSP-05). The app never holds the order history,
+    so the seed carries the forecast and the fewest-vehicles answers. A depot without a row has no outlook."""
 
     __tablename__ = "outlook_forecast"
 
@@ -202,7 +201,7 @@ class OutlookForecast(Base):
     backtest_first_week: Mapped[int] = mapped_column(SmallInteger)
     backtest_last_week: Mapped[int] = mapped_column(SmallInteger)
     backtest_pct: Mapped[float] = mapped_column(Numeric(4, 1, asdecimal=False))
-    """The method's mean weekly miss on the depot's Fresh volume over the backtest weeks, in %."""
+    """The method's mean weekly miss on the depot's Fresh volume over the backtest weeks, in percent."""
     last_year_pct: Mapped[float] = mapped_column(Numeric(4, 1, asdecimal=False))
     """The same for "same week last year times growth"."""
     ordinary_week_m3: Mapped[float] = mapped_column(Numeric(7, 1, asdecimal=False))
@@ -212,7 +211,6 @@ class OutlookForecast(Base):
     record_week: Mapped[int] = mapped_column(SmallInteger)
     """The depot's highest chilled week on record."""
     tech_order_max_m3: Mapped[float] = mapped_column(Numeric(6, 1, asdecimal=False))
-    """The largest single Tech order in the depot's history."""
 
 
 class OutlookWeek(Base):
@@ -230,8 +228,8 @@ class OutlookWeek(Base):
 
 
 class OutlookDay(Base):
-    """One open day at a depot: its forecast chilled orders, the fewest refrigerated vehicles that carry them all on
-    Relay's clock (exact search under the plan's rules), and the refrigerated vehicles out of service that day."""
+    """One open day at a depot. Its forecast chilled orders, the fewest refrigerated vehicles that carry them
+    all on Relay's clock (an exact search under the plan's rules), and the vehicles out of service."""
 
     __tablename__ = "outlook_day"
 
@@ -244,7 +242,7 @@ class OutlookDay(Base):
     in_workshop: Mapped[list[Any]] = mapped_column(default=list)
     """Vehicle IDs."""
     served_one_fewer: Mapped[int | None] = mapped_column(SmallInteger)
-    """Chilled orders that one refrigerated vehicle fewer than needed can serve, on the days the search counted it."""
+    """Chilled orders that one vehicle fewer than needed can serve, on the days the search counted it."""
 
 
 class OutletDwell(Base):

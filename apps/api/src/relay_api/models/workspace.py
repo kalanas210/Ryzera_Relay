@@ -11,8 +11,8 @@ from relay_api.models.base import Base, WorkspaceScoped, new_id
 
 
 class Workspace(Base):
-    """One copy of the delivery day with its own scenario clock. MAIN is the shared copy; judges can start
-    private ones and reset them."""
+    """One copy of the delivery day with its own scenario clock. MAIN is the shared copy.
+    Judges can start private ones and reset them."""
 
     __tablename__ = "workspace"
 
@@ -25,19 +25,19 @@ class Workspace(Base):
     clock_anchor_real: Mapped[datetime]
     clock_anchor_sim: Mapped[datetime]
     clock_rate: Mapped[float] = mapped_column(default=1.0)
-    """Scenario seconds per real second: 1 runs in real time, 0 holds the clock still."""
+    """Scenario seconds per real second. 1 is real time, 0 holds the clock still."""
     state: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
+    # New each time the copy is made or reset. A phone uses it to spot data
+    # kept from an earlier start of the day.
     @property
     def edition(self) -> str:
-        """Which start of this copy it is: new each time the copy is made or reset, so a phone can tell that what it
-        kept belongs to an earlier start of the day."""
         return str(self.state.get("edition") or self.id)
 
 
 class ScheduledEvent(WorkspaceScoped, Base):
-    """Something the world simulator does when the scenario clock reaches `due_at`: a store places an
-    order, a driver reports a delay. Applied once, in order."""
+    """Something the world simulator does when the scenario clock reaches due_at, like a store placing
+    an order. Applied once, in order."""
 
     __tablename__ = "scheduled_event"
 

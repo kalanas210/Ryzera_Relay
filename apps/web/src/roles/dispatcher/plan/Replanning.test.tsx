@@ -16,7 +16,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Lets the timers run on and the health answer arrive. */
 async function wait(ms: number) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
@@ -30,7 +29,6 @@ describe("Replanning", () => {
       .mockResolvedValueOnce({ status: "ok", warming: true } as never)
       .mockResolvedValueOnce({ status: "ok", warming: false } as never);
     render(<Replanning active />);
-    // a quick answer never asks
     expect(screen.getByRole("status")).toHaveTextContent(CHECKING);
     expect(get).not.toHaveBeenCalled();
 
@@ -41,7 +39,6 @@ describe("Replanning", () => {
     await wait(WARMING_ASK_AGAIN_MS);
     expect(get).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("status")).toHaveTextContent(CHECKING);
-    // the warm-up is over, so nothing asks again
     await wait(WARMING_ASK_AGAIN_MS * 2);
     expect(get).toHaveBeenCalledTimes(2);
   });

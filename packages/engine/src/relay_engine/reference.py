@@ -1,8 +1,4 @@
-"""Build a Network straight from the organizers' reference CSV files.
-
-The API builds its Network from the database instead; this loader serves tests, scripts and
-the Datathon, and uses only the standard library.
-"""
+"""Builds a Network from the organizers' reference CSV files. The API uses the database instead."""
 
 from __future__ import annotations
 
@@ -30,7 +26,7 @@ def _rows(path: Path) -> list[dict[str, str]]:
 
 
 def parse_mall_window(text: str) -> tuple[int, int] | None:
-    """'09:00-11:00' becomes (540, 660); a blank cell means the outlet is not in a mall."""
+    # A blank cell means the outlet is not in a mall.
     if not text:
         return None
     start, end = text.split("-")

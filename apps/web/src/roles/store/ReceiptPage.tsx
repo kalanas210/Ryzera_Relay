@@ -45,14 +45,12 @@ import {
 import { ConfirmationPanel, DetailRow, NotPlanned, ProofCard } from "./parts";
 import { cases, clock, flaggedLabel, issueSentAt, placedAt, sendIssues, shortLines, windowOf } from "./words";
 
-/** One line of the receipt: what was loaded for the store, and what the driver's proof says was handed over. */
 type Line = {
   code: string;
   name: string;
   qty: number;
-  /** "30 loaded" before the driver's proof, "30 delivered" after. */
+  // "30 loaded" before the driver's proof, "30 delivered" after.
   qtyLabel: string;
-  /** "6 short. You were told at 2:52 AM. Coming Thursday." */
   note: string | null;
 };
 
@@ -60,15 +58,15 @@ type Staged = { flags: Record<string, Issue>; clientRef: string };
 
 const KEY = (orderRef: string) => `relay.store.receipt.${orderRef}`;
 
-/** The store's flags stay on the phone until they reach Relay, across a reload too; the same client_ref goes with every
- *  try, so a retry never makes a second receipt. */
+// Flags stay on the phone until Relay has them, even after a reload.
+// The same client_ref goes with every try, so a retry never makes a second receipt.
 function useStaged(orderRef: string) {
   const [staged, setStaged] = useState<Staged>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(KEY(orderRef)) ?? "null") as Staged | null;
       if (saved?.clientRef) return saved;
     } catch {
-      // nothing saved, or storage is blocked: start clean
+      // Nothing saved, or storage is blocked. Start clean.
     }
     return { flags: {}, clientRef: crypto.randomUUID() };
   });
@@ -77,23 +75,22 @@ function useStaged(orderRef: string) {
     try {
       localStorage.setItem(KEY(orderRef), JSON.stringify(next));
     } catch {
-      // the flags still live on this screen
+      // The flags still live on this screen.
     }
   };
-  // once Relay has the receipt, nothing is left to keep
   const clear = () => {
     setStaged({ flags: {}, clientRef: crypto.randomUUID() });
     try {
       localStorage.removeItem(KEY(orderRef));
     } catch {
-      // nothing was kept
+      // Nothing was kept.
     }
   };
   return { staged, save, clear };
 }
 
-/** STM-05 Confirm receipt: check the goods against what was loaded for the store, flag a wrong line, and confirm.
- *  Afterwards the same page is the store's receipt, with the driver's proof once it arrives. */
+// STM-05 Confirm receipt. Check the goods against what was loaded, flag a wrong line, confirm.
+// Afterwards the same page is the store's receipt, with the driver's proof once it arrives.
 export function ReceiptPage() {
   const { orderRef = "" } = useParams();
   const tracker = useTracker(orderRef);
@@ -106,7 +103,7 @@ export function ReceiptPage() {
   const report = useReportIssues(orderRef);
   const { staged, save, clear } = useStaged(orderRef);
   const [flagging, setFlagging] = useState<Line | null>(null);
-  // sent from this screen just now: the confirmation shows until the page is left, then it is the receipt
+  // Just sent from here. The confirmation shows until the page is left, then it is the receipt.
   const [sent, setSent] = useState(false);
   const back = () => ((window.history.state as { idx?: number } | null)?.idx ? navigate(-1) : navigate("/store"));
 
@@ -125,11 +122,10 @@ export function ReceiptPage() {
   const kindChip = <StatusChip kind={t.kind === "chilled" ? "chilled" : "dry"} />;
   const toCome = <StillToCome order={order} tracker={t} home={data} notices={notices.data ?? []} />;
 
-  // a problem can still be reported until 4:00 PM on the delivery day, after confirming too
+  // A problem can be reported until 4:00 PM on the delivery day, even after confirming.
   const issuesOpen = Boolean(t.issues_until && now.getTime() < Date.parse(t.issues_until));
   const until = t.issues_until ? clock(t.issues_until) : "";
 
-  // just sent from this screen: the server has it, so now it may say so
   if (sent && t.receipt) {
     const r = t.receipt;
     return (
@@ -185,7 +181,7 @@ export function ReceiptPage() {
     );
   }
 
-  // the receipt, on any later visit: until 4:00 PM a line can still be flagged and sent on its own
+  // The receipt on a later visit. Until 4:00 PM a line can still be flagged and sent on its own.
   if (t.receipt) {
     const r = t.receipt;
     const issues = Object.fromEntries(r.issues.map((i) => [i.case_type, i]));
@@ -301,7 +297,8 @@ export function ReceiptPage() {
   const offline = confirm.error instanceof ApiError && confirm.error.offline;
   const departed = t.status !== "scheduled";
   const send = () => {
-    save(staged); // the client_ref outlives a reload, so a retry after one still finds the first try
+    // The client_ref outlives a reload, so a retry after one still matches the first try.
+    save(staged);
     confirm.mutate(
       { client_ref: staged.clientRef, issues: Object.values(flags) },
       {
@@ -406,7 +403,6 @@ export function ReceiptPage() {
   );
 }
 
-/** The driver's proof agrees with what was loaded, line for line. */
 function matches(t: Tracker): boolean {
   if (!t.proof) return false;
   const delivered = Object.fromEntries(t.proof.lines.map((l) => [l.case_type, l.qty]));
@@ -445,7 +441,6 @@ function LinesCard({
   helper: string;
   flags: Record<string, Pick<Issue, "kind" | "qty" | "note">>;
   onFlag?: (line: Line) => void;
-  /** Lines already reported to the dispatcher: shown, no longer changed here. */
   locked?: Record<string, unknown>;
 }) {
   return (
@@ -505,7 +500,6 @@ function LinesCard({
   );
 }
 
-/** What is still to come: an order moved to a later run, and cases decided short that ride on a later order. */
 function StillToCome({
   order,
   tracker,
@@ -564,7 +558,7 @@ const CHOICES: { kind: IssueKind; label: string; icon: LucideIcon }[] = [
   { kind: "not_cold", label: "Not cold on arrival", icon: Thermometer },
 ];
 
-/** Flag one line: what is wrong and how many. Staged on the phone; nothing is sent until the receipt is. */
+// Flags are staged on the phone. Nothing is sent until the receipt is.
 function FlagSheet({
   line,
   chilled,

@@ -1,20 +1,5 @@
-"""
-Shared model for the Relay scenario checks (Team Ryzera, Designathon).
-
-Everything here is computed from the competition CSVs in data/raw/data and the
-organizers' data/raw/check_allocation.py. Nothing is read from anywhere else.
-validate_scenario.py imports this module; so can any notebook that needs the
-same numbers.
-
-Contents
-  load data ........ CSVs, calendar, route history, order history
-  forecast ......... the team's method C (ordinary week x festival lift x payday lift x growth)
-                     and method A (same week last year x growth), for the backtest
-  order book ....... order streams per weekday, order numbers, forecast order sizes
-  trip time ........ the published standard (imported from check_allocation.py),
-                     the free-flow clock, and Relay's expected clock
-  exact search ..... a small MILP over one or two trips per refrigerated vehicle
-"""
+"""Shared model for the Relay scenario checks. validate_scenario.py imports it.
+Built only from the competition CSVs in data/raw/data and the organizers' check_allocation.py."""
 import importlib.util
 import itertools
 from pathlib import Path
@@ -29,7 +14,6 @@ DATA = REPO / "data" / "raw" / "data"
 GEN = DATA / "General Data"
 CHECKER_PATH = REPO / "data" / "raw" / "check_allocation.py"
 
-# ------------------------------------------------------------------ the organizers' standard
 _spec = importlib.util.spec_from_file_location("check_allocation", CHECKER_PATH)
 CHECKER = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(CHECKER)
@@ -37,7 +21,6 @@ TRIP_BUDGET_PREDAWN = CHECKER.TRIP_BUDGET_PREDAWN      # 270
 TRIP_BUDGET_DAYTIME = CHECKER.TRIP_BUDGET_DAYTIME      # 480
 MAX_TRIPS = CHECKER.MAX_TRIPS_PER_VEHICLE              # 2
 
-# ------------------------------------------------------------------ data
 OUT = pd.read_csv(GEN / "outlets.csv").set_index("outlet_id")
 VEH = pd.read_csv(GEN / "vehicles.csv").set_index("vehicle_id")
 CAL = pd.read_csv(GEN / "calendar.csv").set_index("date")
@@ -60,7 +43,7 @@ DEL["g"] = np.where(DEL.brand == "Fresh", "Fresh_" + DEL.temp_requirement.map({"
 GROUPS = ["Fresh_dry", "Fresh_chilled", "Style", "Tech"]
 DOWS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
-# each ramp day belongs to the next festival
+# Each ramp day belongs to the next festival.
 _c = CAL.reset_index()[["date", "festival", "festival_ramp"]].copy()
 _c["d"] = pd.to_datetime(_c.date)
 _f = _c[_c.festival.notna()][["d", "festival"]].rename(columns={"festival": "next_fest"})
@@ -70,7 +53,6 @@ DEL["fest_group"] = DEL.order_date.map(CAL.fest_group)
 DEL["yr"] = DEL.order_date.str[:4]
 
 
-# ------------------------------------------------------------------ small helpers
 def hm(s):
     h, m = str(s).split(":")
     return int(h) * 60 + int(m)
@@ -97,7 +79,6 @@ def num(x, d=1):
     return f"{x:,.{d}f}"
 
 
-# ------------------------------------------------------------------ forecast (team method C and method A)
 def _lift_tables(oh):
     ordy = oh[(oh.festival_ramp == 0) & (oh.is_payday == 0)]
     bm = ordy.groupby(["outlet_id", "temp_requirement", "yr", "dow"]).order_volume_m3.mean().rename("bm")
@@ -133,8 +114,9 @@ def _lift(L, fam, fest, ramp, pay):
     return f
 
 
+# The team's method C. Weekday base times festival lift, payday lift and growth.
+# Daily m3 per depot and group.
 def method_c(origin_wk, target_wks, base_weeks=13, tech_weeks=52):
-    """daily forecast m3 per depot and group: ordinary weekday base x festival lift x payday lift x growth"""
     oh = DEL[DEL.wk <= origin_wk]
     ch = CAL[CAL.wk <= origin_wk].reset_index()
     L = _lift_tables(oh)
@@ -167,8 +149,8 @@ def method_c(origin_wk, target_wks, base_weeks=13, tech_weeks=52):
     return pd.DataFrame(rows, columns=["depot", "g", "wk", "date", "dow", "base", "lift", "growth", "pred"])
 
 
+# Same ISO week last year times the growth of the last 13 weeks over the same weeks a year earlier.
 def method_a(origin_wk, target_wks):
-    """same ISO week last year x growth of the last 13 weeks against the same 13 weeks a year earlier"""
     oh = DEL[DEL.wk <= origin_wk]
     w = oh.groupby(["depot", "g", "wk"]).order_volume_m3.sum().unstack("wk").fillna(0)
     last13 = sorted(CAL[CAL.wk <= origin_wk].wk.unique())[-13:]
@@ -176,8 +158,8 @@ def method_a(origin_wk, target_wks):
     return pd.DataFrame({t: w[t - 100] * gr for t in target_wks})
 
 
+# Mean absolute weekly error of Kandy Fresh volume in percent, as (method C, method A).
 def backtest_kandy_fresh(origin_wk=202513, target_wks=tuple(range(202514, 202524))):
-    """mean absolute weekly error of Kandy Fresh (dry plus chilled) volume, in %: (method C, method A)"""
     tw = list(target_wks)
     act = DEL[DEL.wk.isin(tw) & (DEL.depot == "Kandy") & (DEL.brand == "Fresh")].groupby("wk").order_volume_m3.sum()
     c = method_c(origin_wk, tw)
@@ -195,11 +177,11 @@ def mult(day, group, depot="Kandy"):
     return float(r.lift * r.growth)
 
 
-# ------------------------------------------------------------------ order streams and order numbers
 _nd = DEL.groupby("dow_name").order_date.nunique()
 SHARE = DEL.groupby(["outlet_id", "brand", "temp_requirement", "dow_name"]).size().unstack(fill_value=0).div(_nd)
 
 
+# A stream is fixed when it orders on more than 90% of that weekday's days in the data.
 def fixed_streams(dow):
     s = SHARE[dow]
     return sorted((o, t) for (o, b, t), v in s.items() if v > 0.9)
@@ -211,7 +193,6 @@ def tech_candidates(dow):
 
 
 def expected_orders(dow):
-    """orders on an operating day of this weekday: fixed streams plus the expected number of Tech orders"""
     s = SHARE[dow]
     return int((s > 0.9).sum()) + int(round(s[(s > 0.2) & (s < 0.9)].sum()))
 
@@ -224,16 +205,15 @@ LAST_ID = int(DEL.delivery_id.str.slice(3).astype(int).max())
 LAST_ID_DATE = DEL.loc[DEL.delivery_id.str.slice(3).astype(int).idxmax(), "order_date"]
 
 
+# Order numbers run on from the last order in the data, one block per operating day.
 def first_id(day):
-    """first order number of a delivery day after the data ends: numbers run on from the last order in the data,
-    one block per operating day, each block sized by expected_orders for its weekday"""
     days = CAL[(CAL.index > LAST_ID_DATE) & (CAL.index < day) & (CAL.is_operating == 1)]
     return LAST_ID + sum(expected_orders(d) for d in days.dow_name) + 1
 
 
+# That outlet's mean on the same weekday on ordinary days (no ramp, no payday) in 2026 weeks 1 to 13,
+# times the method C lift and growth for that day and group.
 def forecast_size(outlet, temp, day):
-    """forecast order: that outlet's mean on the same weekday on ordinary days (no ramp, no payday) in 2026 weeks 1
-    to 13, times the method C multiplier (lift x growth) for that day and group"""
     dow = CAL.loc[day, "dow_name"]
     k = DEL[(DEL.outlet_id == outlet) & (DEL.temp_requirement == temp) & (DEL.dow_name == dow) & (DEL.wk >= 202601)
             & (DEL.wk <= 202613) & (DEL.festival_ramp == 0) & (DEL.is_payday == 0)]
@@ -251,18 +231,16 @@ DEL["kpu"] = DEL.order_weight_kg / DEL.order_units
 DEL["vpu"] = DEL.order_volume_m3 / DEL.order_units
 PER_UNIT = DEL.groupby("brand").agg(k0=("kpu", "min"), k1=("kpu", "max"), v0=("vpu", "min"), v1=("vpu", "max"))
 
-# ------------------------------------------------------------------ trip time
 EARLIEST = hm("02:00")     # earliest planned depot departure in the Kandy route history
 RELOAD = 10                # minutes at the dock between trips
 
 
 def std_minutes(district, brand, docks):
-    """the published trip-time standard, from check_allocation.py"""
     return int(round(CHECKER.trip_time(district, brand, list(docks), DTRAVEL, ALLOW)))
 
 
+# Planned clock at free flow, as the route history plans it.
 def simulate_ff(seq, dep, brand):
-    """planned clock at free flow (as the route history plans): (outlet, arrive, start, leave) rows and back at the hub"""
     d = DT.loc[OUT.loc[seq[0], "district"]]
     t = dep
     rows = []
@@ -292,15 +270,15 @@ RATIO_KEG = _k.groupby([_k.seq > 0, "h"]).r.quantile([.1, .5, .9]).unstack()
 LEGS_HIST = _l
 
 
+# A store's usual unloading time. Fresh uses the monsoon median, anything else the allowance.
 def dwell(o, brand="Fresh"):
-    """each store's usual unloading time: median in monsoon months (Fresh), else the allowance"""
     if brand == "Fresh" and o in DWELL.index:
         return float(DWELL.loc[o, 0.5])
     return float(ALLOW[(brand, OUT.loc[o, "dock_type"])])
 
 
+# Relay's expected clock. Free flow scaled by the speed and road indexes, plus usual unloading.
 def simulate_model(seq, dep, brand, date):
-    """Relay's expected clock: free flow x 100/speed index x 100/road index per leg, plus each store's usual unloading time"""
     dist = OUT.loc[seq[0], "district"]
     d = DT.loc[dist]
     t = dep
@@ -316,10 +294,10 @@ def simulate_model(seq, dep, brand, date):
     return rows, back
 
 
-# ------------------------------------------------------------------ exact search over refrigerated vehicle days
+# Earliest free-flow return to the hub over every stop order that keeps each arrival in its window.
+# Exact over subsets, because every pair of stores in a district is the same inter-stop time apart.
+# None if no order works.
 def earliest_back(stops, ready, brand="Fresh"):
-    """earliest free-flow return to the hub over every stop order that keeps each arrival inside its window
-    (exact over subsets; every pair of stores in a district is the same inter-stop time apart). None if no order works."""
     d = DT.loc[OUT.loc[stops[0], "district"]]
     n = len(stops)
     op = [hm(OUT.loc[o, "window_open_time"]) for o in stops]
@@ -350,8 +328,8 @@ def earliest_back(stops, ready, brand="Fresh"):
     return None if not ends else min(ends) + d.depot_to_district_freeflow_min
 
 
+# Leaving later only makes it worse, so this is a binary search.
 def latest_departure(stops, lo=EARLIEST, hi=hm("08:00")):
-    """latest departure from the hub that still reaches every stop inside its window (feasibility only gets worse later)"""
     if earliest_back(stops, lo) is None:
         return None
     while lo < hi:
@@ -363,9 +341,8 @@ def latest_departure(stops, lo=EARLIEST, hi=hm("08:00")):
     return lo
 
 
+# Every trip one vehicle could run: a non-empty set of orders in one district.
 def trip_options(ords):
-    """every trip one vehicle could run: a non-empty set of orders in one district, with its load, published standard
-    minutes, earliest free-flow return (leaving at 2:00 AM) and latest departure"""
     keys = list(ords)
     groups = {}
     for i, k in enumerate(keys):
@@ -382,12 +359,12 @@ def trip_options(ords):
     return keys, options
 
 
+# Exact search. clock=False applies only the organizers' rules: capacity, van only, one district,
+# 270 minutes, two trips. clock=True also needs every arrival inside its window at free flow,
+# first trips leaving from 2:00 AM (or ready[v]), and a second trip leaving `reload` minutes
+# after the first is back.
 def solve(ords, vehicles, clock=True, reload=RELOAD, objective="max_served", forbid=(), force=(), ready=None,
           budget=TRIP_BUDGET_PREDAWN, options=None, usual=None, max_trips=None):
-    """exact search. objective 'max_served' returns (orders served, plan); 'min_vehicles' returns (vehicles used, plan).
-    clock=False applies only the organizers' rules (capacity, van only, one district, 270 minutes, two trips).
-    clock=True also needs every planned arrival inside its window at free flow, first trips leaving from 2:00 AM
-    (or ready[v]), and a second trip leaving at least `reload` minutes after the first is back at the hub."""
     keys, opts = options if options is not None else trip_options(ords)
     ready = ready or {}
     max_trips = max_trips or {}
@@ -413,7 +390,6 @@ def solve(ords, vehicles, clock=True, reload=RELOAD, objective="max_served", for
     rows = []
     A = lil_matrix((I + 5 * len(vehicles), n))
     lo, hi = [], []
-    # each order at most (or exactly) once
     for k in range(n):
         for i in opts[var[k][2]]["S"]:
             A[i, k] = 1
@@ -437,7 +413,8 @@ def solve(ords, vehicles, clock=True, reload=RELOAD, objective="max_served", for
             A[r + 2, k] = o["sm"]                                         # 270 minute budget
             if clock:
                 if t == 1:
-                    # first trip leaves no earlier than ready: back no earlier than earliest_back from ready
+                    # A first trip leaves no earlier than ready, so it is back no earlier than
+                    # earliest_back from ready.
                     eb = earliest_back([keys[j][0] for j in o["S"]], r0) if r0 != EARLIEST else o["eb"]
                     A[r + 3, k] = (eb if eb is not None else M) + reload
                 else:
@@ -449,7 +426,6 @@ def solve(ords, vehicles, clock=True, reload=RELOAD, objective="max_served", for
     if objective == "max_served":
         c = np.array([-len(opts[i]["S"]) for (_, _, i) in var], dtype=float)
     elif objective == "max_kept":
-        # most vehicles whose usual run (a set of orders) is one of their trips
         c = np.array([-1.0 if usual and set(keys[j] for j in opts[i]["S"]) == set(usual.get(v, ())) else 0.0
                       for (v, _, i) in var])
     else:
@@ -463,15 +439,12 @@ def solve(ords, vehicles, clock=True, reload=RELOAD, objective="max_served", for
     return val, plan
 
 
-# ------------------------------------------------------------------ fuel
 def trip_litres(v, district, n):
-    """one trip with n stops, counting the drive back to the hub at district_travel.csv distances"""
     d = DT.loc[district]
     return (2 * d.depot_to_district_km + (n - 1) * d.inter_stop_km) / VEH.loc[v, "km_per_l"]
 
 
 def typical_weekday_litres():
-    """each Kandy vehicle's average litres per weekday in 2026 weeks 1 to 13 (route legs plus the drive back)"""
     leg = pd.concat([LEGS_TR, LEGS_TE]).merge(CAL[["iso_year", "iso_week", "dow_name"]], left_on="date", right_index=True)
     leg = leg[(leg.iso_year == 2026) & (leg.iso_week <= 13) & (leg.depot == "Kandy")]
     rt = leg.groupby(["date", "dow_name", "vehicle_id", "route_id", "district"]).distance_km.sum().reset_index()
@@ -482,16 +455,15 @@ def typical_weekday_litres():
     return vd.groupby(level=1).mean().T
 
 
+# VEH039 usually runs Kandy chilled on Tuesdays. The van-only stores ride VEH057 instead.
 def tue_v39_kandy_stops():
-    """VEH039 usually runs Kandy district chilled on Tuesdays; its stores are the Tuesday Kandy chilled orders a truck
-    can reach (the van-only ones ride VEH057)"""
     return sum(1 for o, t in fixed_streams("Tue") if t == "chilled" and OUT.loc[o, "district"] == "Kandy"
                and OUT.loc[o, "parking_constraint"] != "van_only")
 
 
+# Monday and Tuesday are each vehicle's 2026 weekday average, with VEH039's runs moved as the story
+# says. Wednesday is the plan.
 def fuel_week(trips, mon_extra, tue_extra, out, vehicles=None):
-    """litres Monday + Tuesday (each vehicle's 2026 weekday average, with VEH039's runs moved as the story says)
-    + Wednesday's plan, against the weekly quota; also Fresh and daytime standard minutes on Wednesday"""
     typ = typical_weekday_litres()
     vs = vehicles or sorted(set(v for v, _ in trips) | set(out) | {"VEH060"})
     res = {}
@@ -510,9 +482,7 @@ def fuel_week(trips, mon_extra, tue_extra, out, vehicles=None):
     return res
 
 
-# ------------------------------------------------------------------ numbers for the story boards
 def story_numbers():
-    """history statistics quoted on the story boards, each with its exact scope"""
     s = {}
     d = DEL
     s["orders_first"], s["orders_last"] = d.order_date.min(), d.order_date.max()
@@ -595,16 +565,16 @@ def story_numbers():
     return s
 
 
+# A clock time in whole minutes. A median of 4:27 and 30 seconds reads 4:27.
 def _fmt(x):
-    """a clock time, whole minutes (a median of 4:27 and 30 seconds reads 4:27)"""
     x = int(x)
     return f"{x // 60:02d}:{x % 60:02d}"
 
 
+# Kandy Wednesdays in the route history with only five refrigerated vehicles. Counts how many served
+# all 23 chilled orders, and how early the Matale or Kegalle truck's second trip left against the
+# first trip's return.
 def five_reefer_wednesdays():
-    """Kandy Wednesdays in the route history (train and test legs) that ran only five refrigerated vehicles: how many
-    served all 23 chilled orders, how many planned refrigerated arrivals fell after the window on those days, and how
-    far before its first trip's free-flow return the Matale or Kegalle truck's second trip was planned to leave"""
     lg = pd.concat([LEGS_TR, LEGS_TE])
     k = lg[(lg.depot == "Kandy") & (lg.vehicle_temp == "reefer")]
     n = k.groupby("date").vehicle_id.nunique()
@@ -631,9 +601,8 @@ def five_reefer_wednesdays():
             "five_reefer_days_with_early_truck": len(early)}
 
 
+# Earliest planned Matale departure, and the median for Matale trips that start a vehicle's day.
 def matale_first_departures():
-    """Matale Fresh departures from the Kandy hub (train and test legs): the earliest planned departure of any Matale
-    trip, and the median planned departure of Matale trips that are the vehicle's first trip of the day"""
     x = pd.concat([LEGS_TR, LEGS_TE])
     x = x[(x.depot == "Kandy") & (x.brand == "Fresh") & (x.seq == 0)].copy()
     x["dep"] = _mm(x.planned_depart_time)

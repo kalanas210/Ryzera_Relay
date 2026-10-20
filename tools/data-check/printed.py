@@ -1,8 +1,5 @@
-"""
-Numbers the scenario text prints, rebuilt from values validate_scenario.py has already checked against the data.
-Each string must appear word for word in docs/design/05-scenario-data.md, so a table row or sentence that
-drifts from the data fails the validator.
-"""
+"""Numbers the scenario text prints, rebuilt from values validate_scenario.py already checked.
+Each string must appear word for word in docs/design/05-scenario-data.md, or the validator fails."""
 import pandas as pd
 
 from relay_model import hm, fmt, ampm, num, OUT, VEH
@@ -72,7 +69,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
           ("monday kegalle", f"Kegalle ({num(MO['kegalle_kg'])} kg)"), ("monday van", f"OUT116 and OUT118 ({num(MO['van_kg'])} kg)"),
           ("monday 119", f"OUT119 ({num(MO['out119_kg'])} kg) waited for Tuesday"),
           ("tuesday", f"all {F['tuesday']['served']} Tuesday chilled orders were served")]
-    # Kasun's table and the 9:12 PM change
     acc = {"rear_dock": "Rear dock", "street": "Curb"}
     for r in KT:
         x = r["outlet_id"]
@@ -81,7 +77,7 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
                                             f"{t12(r['planned_before_912'])} / {t12(r['expected_before_912'])} | {t12(r['planned'])} | {t12(r['expected'])} | "
                                             f"{t12(r['arrived'])} to {t12(r['left'])} |"))
     by = {r["outlet_id"]: r for r in KT}
-    # the dispatcher sees the swap's cost to the minute (store and driver screens round to 5 minutes)
+    # The dispatcher sees the swap's cost to the minute. Store and driver screens round to 5 minutes.
     seq_b = [r["outlet_id"] for r in sorted(KT, key=lambda r: int(r["stop_before_912"]))]
     seq_a = [r["outlet_id"] for r in KT]
     e116 = [[a_ for x_, a_, _, _ in M.simulate_model(s_, hm(EV["planned_departure"]), "Fresh", "2026-04-08")[0] if x_ == "OUT116"][0] for s_ in (seq_b, seq_a)]
@@ -95,7 +91,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
                             f"so he arrived on Relay's time"),
           ("behind plan frame", f"with \"Expected around {t12(KT[0]['expected'])}\" beside it"),
           ("behind history", f"{F['story']['keg_first_after_planned_pct']}% of first Kegalle stops in the route history arrived after their planned time, a median {F['story']['keg_first_behind_median']} minutes behind (10th to 90th percentile {F['story']['keg_first_behind_p10']} to {F['story']['keg_first_behind_p90']})")]
-    # estimates
     nm = {"OUT117": "Hemmathagama", "OUT116": "Aranayake"}
     for r in A["estimates"]:
         est = f"around {ampm(hm(r['estimate']))}" if r["passed"] == "0" else f"estimate passed ({ampm(hm(r['estimate']))})"
@@ -108,7 +103,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
           ("DEG-03 keep", f"at {t12(EV['backup_kept'])} Nuwan taps Keep backup"),
           ("DEG-04 range", f"\"Likely between {t12(e605['low'])} and {ampm(hm(e605['high']))}.\""),
           ("DEG-04 estimate", f"\"Arriving around {ampm(hm(e605['estimate']))}\"")]
-    # backup and standby
     B = F["backup"]
     bo = o[("OUT116", "ambient")]
     L += [("backup eta", f"expected at Aranayake around {ampm(hm(B['eta']))}, after its 7:30 close"),
@@ -117,7 +111,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
           ("backup ending", f"He turns back {B['out_min']} minutes out and reaches the hub around {ampm(hm(B['home']))}"),
           ("backup cost", f"The cancelled trip used about {B['litres']} L."),
           ("VEH058 idle", f"it ran on only {F['story']['veh058_wednesdays_run']} of {F['story']['kandy_wednesdays']} Wednesdays in the data")]
-    # queue and board
     Q = F["queue"]
     a, b = Q["at_312"], Q["at_400"]
     L += [("queue 3:12", f"{a['total']} orders received for Wednesday ({a['dry']} Fresh dry, {a['chilled']} Fresh chilled, {a['style']} Style, {a['tech']} Tech; Peliyagoda {a['peliyagoda']}, Kandy hub {a['kandy']})"),
@@ -131,7 +124,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
                           f"{t2['std']} standard minutes, {t1['std'] + t2['std']} of 270 with trip 1; back {t12(t2['back'])}"),
           ("drag warning", f"the trip would carry {num(t2['kg'] + dc['kg'])} kg (limit 1,040 kg) and {num(t2['m3'] + dc['m3'], 3)} m³ (limit 7.0 m³), and its third stop would arrive at {t12(three)}"),
           ("banner", f"\"Kandy hub: {len(orders)} orders, {len(orders) - 1} on {len(trips)} trips, 1 waits\"")]
-    # publish check
     late = [(v, tn, x, a_) for (v, tn), e in EXPT.items() for x, a_, _, _ in e["rows"] if a_ > hm(OUT.loc[x, "window_close_time"])]
     for v, tn, x, a_ in late:
         p = [pa for xx, pa, _, _ in trips[(v, tn)]["ff"] if xx == x][0]
@@ -150,7 +142,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
                          f"({PM_['VEH042']['trip2_late_now']} at {t12(fmt(trips[('VEH042', 1)]['dep']))})"),
           ("matale history", f"the history's earliest Matale departures are {ampm(hm(F['story']['matale_first_dep_min_dry']))} dry and {ampm(hm(F['story']['matale_first_dep_min_chilled']))} chilled "
                              f"(medians {t12(F['story']['matale_first_dep_median_dry'])} and {t12(F['story']['matale_first_dep_median_chilled'])})")]
-    # plan and fuel tables
     for (v, tn), t in sorted(trips.items()):
         x = VEH.loc[v]
         load = t["brand"] + (" chilled" if t["temp"] == "chilled" else (" dry" if t["brand"] == "Fresh" else ""))
@@ -167,7 +158,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
     L += [("reefer truck shares", f"the refrigerated trucks carry {min(shares):.1f}% to {max(shares):.1f}% of their weight capacity"),
           ("van shares", f"(VEH057 at {vans[0]:.1f}% and {vans[1]:.1f}% of 1,040 kg)"),
           ("fullest fuel", f"The fullest vehicle is {top['vehicle_id']} at {float(top['week_l']) / int(top['quota_l']) * 100:.1f}% of its weekly quota")]
-    # outlook
     W = sorted(int(r["iso_week"]) for r in A["outlook"])
     R = {int(r["iso_week"]): r for r in A["outlook"]}
     FO = F["outlook"]
@@ -191,7 +181,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
           ("key figure", f"\"The heaviest Wednesday ahead: {num(FO['headline_kg'])} kg chilled (Vesak ramp, payday week)\""),
           ("five serve", f"\"{FO['five_serve_wednesdays']} of 23\" / \"chilled orders five refrigerated vehicles can serve on a Wednesday\""),
           ("five serve text", f"five refrigerated vehicles serve only {FO['five_serve_wednesdays']} of 23 on each of them")]
-    # totals and order rows
     P = F["plan"]
     L += [("totals", f"Fresh dry {P['fresh_dry'][0]} orders, {P['fresh_dry'][1]:,} cases, {num(P['fresh_dry'][2])} kg, {num(P['fresh_dry'][3], 3)} m³; "
                      f"Fresh chilled {P['fresh_chilled'][0]} orders, {P['fresh_chilled'][1]:,} cases, {num(P['fresh_chilled'][2])} kg, {num(P['fresh_chilled'][3], 3)} m³"),
@@ -203,7 +192,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
     for s, lab in [(("OUT120", "ambient"), "Style"), (("OUT115", "ambient"), "Tech"), (("OUT095", "ambient"), "Tech")]:
         x = o[s]
         L.append((f"order row {s}", f"{x['id']} {s[0]} {lab} {x['units']}, {num(x['kg'])}, {num(x['m3'], 3)}"))
-    # loading, morning, legs
     LD = {r["time"]: int(r["loaded_cases"]) for r in A["loading"]}
     sec = [(v, trips[(v, 2)]) for v in ["VEH059", "VEH057", "VEH042"]]
     L.append(("LDR-01 second trips", "three second trips, picked before each vehicle is back: " + ", ".join(
@@ -246,7 +234,6 @@ def strings(orders, trips, EXPT, F, KT, EV, A, NAME, M):
                               f"{t12(M.r5(home))} (at publish it expected {t12(M.r5(eb))})")]
     L += [("lift 38", "Fresh orders are about 38% larger than on an ordinary Wednesday"),
           ("VEH045 93", "VEH045 ran a Kandy Fresh trip as well as its Kegalle trip on 93 of 115 Wednesdays")]
-    # story list
     S = F["story"]
     L += [("story deferrals", f"the Kandy hub deferred {S['Kandy_deferred_orders']} orders on {S['Kandy_deferral_days']} days ({S['Kandy_deferred_chilled']} chilled, {S['Kandy_deferred_dry']} dry) out of {S['Kandy_orders']:,} orders; "
                               f"Peliyagoda deferred {S['Peliyagoda_deferred_orders']:,} on {S['Peliyagoda_deferral_days']} days, all chilled, out of {S['Peliyagoda_orders']:,}"),

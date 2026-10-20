@@ -24,8 +24,7 @@ import { useDriverText } from "./words";
 
 const weight = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-/** DRV-01 Today's run: the handover to accept, then the next stop and every stop of the trip. Works from the run kept
- *  on the phone when there is no signal, with one notice saying so (DEG-01). */
+// DRV-01 Today's run. With no signal it works from the kept run and shows one notice (DEG-01).
 export function RunPage() {
   const { run, loaded, now, offline } = useDriver();
   const { t } = useDriverText();
@@ -61,7 +60,6 @@ export function RunPage() {
   return <Run run={run} trip={trip} now={now} />;
 }
 
-/** The hub's plan for the run is still a draft: which day, and who publishes it. In the demo, how to get there. */
 function NotPublished({ run }: { run: DriverRun }) {
   const { t, weekday } = useDriverText();
   const demo = useDemoState().data;
@@ -78,7 +76,6 @@ function NotPublished({ run }: { run: DriverRun }) {
   );
 }
 
-/** Once the load is accepted the run takes the screen's place: it starts at the top, with the next stop in view. */
 function useTopWhenAccepted(load: DriverTrip["load"] | null) {
   const before = useRef(load);
   useEffect(() => {
@@ -87,7 +84,7 @@ function useTopWhenAccepted(load: DriverTrip["load"] | null) {
   }, [load]);
 }
 
-/** DEG-01: the run list only, never a task screen. No button, no red. */
+// DEG-01. Only on the run list, never on a task screen. No button, no red.
 function OfflineNotice() {
   const { offline, offlineSince } = useDriver();
   const { t, clock } = useDriverText();
@@ -103,7 +100,6 @@ function OfflineNotice() {
   );
 }
 
-/** Trip strip: the date, the trip, how far along it is, and when the load was accepted and the truck left. */
 function TripStrip({ run, trip, next }: { run: DriverRun; trip: DriverTrip; next: DriverStop | null }) {
   const { t, clock, date, tripLine, hub } = useDriverText();
   const h = hub(trip);
@@ -127,7 +123,7 @@ function TripStrip({ run, trip, next }: { run: DriverRun; trip: DriverTrip; next
         {accepted && trip.handover.accepted_at ? (
           <>{t("trip.accepted", { time: clock(trip.handover.accepted_at) })} · </>
         ) : null}
-        {/* a line of its own when it does not fit after the load, wrapped inside when wider than the screen (Tamil) */}
+        {/* Own line if it does not fit. Wraps inside when wider than the screen, as in Tamil. */}
         <span className="inline-block max-w-full">{leave}</span>
       </p>
     </div>
@@ -225,7 +221,6 @@ function Run({ run, trip, now }: { run: DriverRun; trip: DriverTrip; now: Date }
   );
 }
 
-/** Messages the office sent this driver are marked read once they are on the screen. */
 function ReadNotices({ run }: { run: DriverRun }) {
   const { offline } = useDriver();
   const client = useQueryClient();
@@ -242,14 +237,13 @@ function ReadNotices({ run }: { run: DriverRun }) {
           ),
         )
         .catch(() => {
-          // read again on the next visit
+          // It is marked read on the next visit.
         });
     }
   }, [key, offline, client]);
   return null;
 }
 
-/** Location off: said once on this phone, so the driver knows a stop without a location still counts. */
 function LocationNotice() {
   const off = useLocationOff();
   const { t } = useDriverText();
@@ -269,11 +263,10 @@ function LocationNotice() {
   );
 }
 
-/** A record Relay would not take never vanishes: the driver is told, with Relay's reason. */
 function Rejected({ run, trip }: { run: DriverRun; trip: DriverTrip }) {
   const { items } = useDriver();
   const { t } = useDriverText();
-  // only this trip's: a record names its trip, a photo its stop or the report it belongs to
+  // Only this trip's. A record names its trip, a photo names its stop or its report.
   const mine = (i: (typeof items)[number]) =>
     i.record
       ? i.record.trip_id === trip.trip_id
@@ -294,8 +287,7 @@ function Rejected({ run, trip }: { run: DriverRun; trip: DriverTrip }) {
   );
 }
 
-/** DRV-01 / Accept load: the handover reached the phone. The same numbers as the loader's LDR-04, then Accept load,
- *  or tell the loader what does not match. */
+// DRV-01 Accept load. Shows the same numbers as the loader's LDR-04.
 function AcceptLoad({ run, trip }: { run: DriverRun; trip: DriverTrip }) {
   const { t, clock, weekday, caseItem } = useDriverText();
   const { save, items } = useDriver();
@@ -386,7 +378,6 @@ function AcceptLoad({ run, trip }: { run: DriverRun; trip: DriverTrip }) {
   );
 }
 
-/** Handover table, the driver's side: planned and loaded per stop in unloading order, a short stop marked on its row. */
 function HandoverTable({ trip }: { trip: DriverTrip }) {
   const { t } = useDriverText();
   const h = trip.handover;
@@ -445,7 +436,6 @@ function HandoverTable({ trip }: { trip: DriverTrip }) {
   );
 }
 
-/** "Something doesn't match": a note to the loader, saved on the phone first. Accept load stays where it was. */
 function MismatchSheet({
   open,
   onClose,

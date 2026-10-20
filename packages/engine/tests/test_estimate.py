@@ -1,6 +1,4 @@
-"""The estimate while Kasun is out of contact, on the story's own numbers (05-scenario-data, "Estimates while Kasun
-is silent"): after the 5:30 AM arrival at Mawanella, Hemmathagama around 6:35 and Aranayake around 7:15, with likely
-ranges that widen with the silence, and Dilani's 6:42 receipt bringing Aranayake forward to around 7:05."""
+"""Estimates while Kasun is silent, on the story's own numbers (05-scenario-data)."""
 
 import pytest
 

@@ -1,9 +1,5 @@
-"""The dock: tonight's loads at a hub (LDR-01), one load in the order it goes on the truck (LDR-02), a shortfall
-flagged for the dispatcher and the answer (LDR-03), and the handover the driver accepts (LDR-04).
-
-Publishing writes the load lines: one per case type per stop, the last stop first and the heaviest case type
-first within a stop. Every count on these screens is a sum over those lines, so the dock, the dispatcher and the
-driver read the same numbers.
+"""The dock: tonight's loads at a hub (LDR-01, LDR-02), shortfall flags (LDR-03) and the handover (LDR-04).
+Load lines are one per case type per stop, the last stop first and the heaviest case type first within a stop.
 """
 
 from __future__ import annotations
@@ -71,20 +67,20 @@ from relay_api.services.ordering import current_run, next_operating_day, order_r
 
 DEPOT_LABEL = {"Kandy": "Kandy hub", "Peliyagoda": "Peliyagoda"}
 DONE = (LoadLineStatus.CHECKED, LoadLineStatus.DECIDED)
+# Lines with cases still to go on. A flagged line waits for the dispatcher instead.
 OPEN = (LoadLineStatus.TO_LOAD, LoadLineStatus.IN_PROGRESS)
-"""Lines with cases still to go on. A flagged line waits for the dispatcher instead."""
 FLAGGED = (LoadLineStatus.FLAG_WAITING, LoadLineStatus.DECIDED)
+# Store notices sent between 10:00 PM and 5:00 AM arrive silently and ring at 5:00 AM.
 QUIET_FROM, QUIET_UNTIL = 22, 5
 MAX_PHOTO_BYTES = 1_500_000
 PHOTO_TYPES = ("image/jpeg", "image/webp", "image/png")
 
 
 class DockError(Exception):
-    """A request the dock can't take, in words for the loader."""
+    """The dock can't take this request. The message is for the loader."""
 
 
 def quiet_until(now: datetime) -> datetime:
-    """Store notices sent between 10:00 PM and 5:00 AM arrive silently and ring at 5:00 AM."""
     local = now.astimezone(COLOMBO)
     if QUIET_UNTIL <= local.hour < QUIET_FROM:
         return now
@@ -92,17 +88,13 @@ def quiet_until(now: datetime) -> datetime:
     return datetime(day.year, day.month, day.day, QUIET_UNTIL, tzinfo=COLOMBO)
 
 
-# ------------------------------------------------------------------------------------------------ reading
 @dataclass
 class Load:
-    """One trip's load: its lines, flags and handover, with the counts every dock screen shows."""
-
     trip: Trip
     lines: list[LoadLine] = field(default_factory=list)
+    # by stop id, the order number
     refs: dict[uuid.UUID, str] = field(default_factory=dict)
-    """Each stop's order number."""
     shortfalls: dict[uuid.UUID, Shortfall] = field(default_factory=dict)
-    """By load line."""
     handover: Handover | None = None
 
     @property
@@ -143,8 +135,6 @@ class Load:
 
 
 class Lookup:
-    """Names and reference rows the dock screens need, read once per request."""
-
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -177,7 +167,6 @@ class Lookup:
         return next((u for u in self.users.values() if u.role is Role.DRIVER and u.vehicle_id == trip.vehicle_id), None)
 
     def dispatcher(self) -> AppUser | None:
-        """The dispatcher on call tonight: flags reach their phone."""
         people = [u for u in self.users.values() if u.role is Role.DISPATCHER]
         return min(people, key=lambda u: (not u.judge_account, u.display_name), default=None)
 
@@ -191,9 +180,8 @@ def published_plan(db: Session, depot: str, run_date: date) -> Plan | None:
     )
 
 
+# fresh=True rereads rows, so a caller that just locked the trips sees what others committed.
 def loads_for(db: Session, trips: Sequence[Trip], *, fresh: bool = False) -> dict[uuid.UUID, Load]:
-    """The loads of these trips. `fresh` reads lines, flags and handovers again even when the session holds them
-    already: a caller that has just locked the trips sees what others committed before the lock."""
     ids = [t.id for t in trips]
     loads = {t.id: Load(t) for t in trips}
     order_ids = [s.order_id for t in trips for s in t.stops]
@@ -222,10 +210,9 @@ def loads_for(db: Session, trips: Sequence[Trip], *, fresh: bool = False) -> dic
     return loads
 
 
+# Holds the trip row until the request commits. The world simulator skips a held load, so it never
+# writes over a person. FOR NO KEY UPDATE leaves rows that only point at the trip free.
 def lock_trip(db: Session, trip_id: uuid.UUID) -> Trip:
-    """Hold a load's trip row until the request commits, and read it again under the lock. The world simulator
-    locks the loads it plays the same way and passes over one that is held, so a person's action and the
-    simulator's tick never write over each other. FOR NO KEY UPDATE leaves rows that only point at the trip free."""
     trip = db.scalar(
         select(Trip).where(Trip.id == trip_id).with_for_update(key_share=True).execution_options(populate_existing=True)
     )
@@ -247,8 +234,8 @@ def changes_after_publish(db: Session, plan: Plan) -> dict[uuid.UUID, list[PlanC
     return out
 
 
+# LDR-01. Fresh loads at the hub for tonight's run, grouped as loading, ready, to load and left.
 def tonight(db: Session, now: datetime, depot: str) -> TonightOut:
-    """LDR-01: every Fresh load at the hub for the run on tonight, grouped the way the dock works through them."""
     look = Lookup(db)
     run_date = current_run(db, now)
     plan = published_plan(db, depot, run_date)
@@ -285,7 +272,7 @@ def tonight(db: Session, now: datetime, depot: str) -> TonightOut:
     loads = loads_for(db, fresh)
     changes = changes_after_publish(db, plan)
     first_back = {t.vehicle_id: t.planned_back for t in fresh if t.trip_no == 1}
-    # one row per departure time: the loads that left in the same minute for the same district share it
+    # one row per departure time, so loads that left the same minute for the same district share it
     departed: dict[tuple[datetime, str], list[str]] = defaultdict(list)
     for trip in sorted(fresh, key=lambda t: (t.planned_depart, t.vehicle_id)):
         load = loads[trip.id]
@@ -373,7 +360,6 @@ def _workshop(db: Session, look: Lookup, depot: str, run_date: date) -> list[Wor
 
 
 def dock_notice(look: Lookup, load: Load, change: PlanChange) -> DockNoticeOut | None:
-    """The banner the dock reads when the plan changed after the loading lists went out."""
     moves = change.detail.get("moves", [])
     by = look.name(change.created_by) or "the dispatcher"
     head = f"Plan changed {words.clock(change.created_at)} by {by}."
@@ -428,15 +414,15 @@ def _stop_done(load: Load, order_ref: str) -> bool:
     return bool(lines) and all(line.status in DONE for line in lines)
 
 
+# LDR-02 and LDR-04. Stop groups come in the order they go on the truck, the last stop first.
 def trip_load(db: Session, trip: Trip) -> TripLoadOut:
-    """LDR-02 and LDR-04: one load, stop groups in the order they go on (the last stop first)."""
     look = Lookup(db)
     plan = db.get(Plan, trip.plan_id)
     assert plan is not None
     load = loads_for(db, [trip])[trip.id]
     changes = changes_after_publish(db, plan).get(trip.id, [])
-    # A stop's label names the place it held until its latest move: "Was stop 3 until 2:53 AM", even when an
-    # earlier change had moved it there from somewhere else.
+    # A stop's label names the place it held until its latest move ("Was stop 3 until 2:53 AM"),
+    # even when an earlier change had moved it there.
     moved: dict[str, tuple[int, datetime]] = {}
     for change in changes:
         for move in change.detail.get("moves", []):
@@ -445,8 +431,8 @@ def trip_load(db: Session, trip: Trip) -> TripLoadOut:
     groups = []
     in_order = sorted(trip.stops, key=lambda s: -s.seq)
     lines_of = {stop.id: [line for line in load.lines if line.stop_id == stop.id] for stop in in_order}
-    # Loading now is one stop: the first, in loading order, with cases still to go on. A stop whose only open line
-    # waits for the dispatcher is not it, so the dock moves on while the flag waits.
+    # Loading now is the first stop, in loading order, with cases still to go on.
+    # A stop whose only open line waits for the dispatcher is skipped, so the dock moves on.
     loading_now = next((s.id for s in in_order if any(line.status in OPEN for line in lines_of[s.id])), None)
     for stop in in_order:
         order_ref = load.refs[stop.id]
@@ -499,7 +485,7 @@ def trip_load(db: Session, trip: Trip) -> TripLoadOut:
         short=load.short,
         lines_total=len(load.lines),
         lines_done=load.lines_done,
-        # a flagged line keeps its mark but waits on the dispatcher, so only the lines a loader can confirm count
+        # a flagged line waits on the dispatcher, so only lines a loader can confirm count
         lines_to_check=sum(1 for line in load.lines if line.changed_by_plan and line.status not in FLAGGED),
         flags_waiting=load.flags_waiting,
         groups=groups,
@@ -577,14 +563,12 @@ def _handover(look: Lookup, trip: Trip, load: Load) -> HandoverOut:
     )
 
 
-# ------------------------------------------------------------------------------------------------ loading
 def _reread(db: Session, line: LoadLine) -> None:
     db.scalar(select(LoadLine).where(LoadLine.id == line.id).execution_options(populate_existing=True))
 
 
+# Rereads the line under the lock, so an action builds on what others committed meanwhile.
 def _open_trip(db: Session, line: LoadLine) -> Trip:
-    """The line's trip, locked, with the line read again under the lock, so an action changes what the simulator
-    or another tablet committed meanwhile rather than what this request read before it waited."""
     trip = lock_trip(db, line.trip_id)
     _reread(db, line)
     if trip.departed_at:
@@ -595,9 +579,9 @@ def _open_trip(db: Session, line: LoadLine) -> Trip:
     return trip
 
 
+# A person's work claims the load, so the world simulator leaves it alone.
+# The story autopilot's work (scripted) does not.
 def claim(trip: Trip, user: AppUser | None, now: datetime, *, scripted: bool = False) -> None:
-    """Someone is working on this load. A person's work claims it, so the world simulator leaves it alone; the
-    story autopilot's work (`scripted`) does not."""
     if user is not None:
         trip.loader_id = user.id
         if trip.claimed_at is None and not scripted:
@@ -611,8 +595,6 @@ def claim(trip: Trip, user: AppUser | None, now: datetime, *, scripted: bool = F
 def set_loaded(
     db: Session, now: datetime, user: AppUser | None, line: LoadLine, loaded: int, *, scripted: bool = False
 ) -> Trip:
-    """Check a line (all its cases on), uncheck it, or count part of it on. Either way the loader has looked at
-    it again, so a mark left by a plan change goes."""
     trip = _open_trip(db, line)
     if line.status in FLAGGED:
         raise DockError("This line is flagged. Open it to see where it stands.")
@@ -632,6 +614,7 @@ def set_loaded(
     return trip
 
 
+# Loading goes on while the dispatcher decides.
 def flag(
     db: Session,
     now: datetime,
@@ -642,7 +625,6 @@ def flag(
     *,
     scripted: bool = False,
 ) -> Shortfall:
-    """A line is missing cases, or some are damaged. Loading goes on while the dispatcher decides."""
     trip = _open_trip(db, line)
     if line.status in FLAGGED:
         raise DockError("This line is already flagged.")
@@ -700,7 +682,6 @@ def flag(
 
 
 def cancel_flag(db: Session, now: datetime, user: AppUser | None, line: LoadLine) -> None:
-    """The cases turned up before the dispatcher answered."""
     trip = _open_trip(db, line)
     shortfall = db.scalar(
         select(Shortfall).where(Shortfall.load_line_id == line.id).execution_options(populate_existing=True)
@@ -722,11 +703,10 @@ def cancel_flag(db: Session, now: datetime, user: AppUser | None, line: LoadLine
     claim(trip, user, now)
 
 
+# Sent after the flag so the flag never waits on the photo. A second photo replaces the first.
 def attach_photo(
     db: Session, now: datetime, user: AppUser | None, line: LoadLine, data: bytes, content_type: str
 ) -> Shortfall:
-    """A photo of the damaged cases, sent after the flag so the flag never waits on it. The dispatcher sees what the
-    dock saw; a second photo replaces the first."""
     trip = _open_trip(db, line)
     shortfall = db.scalar(
         select(Shortfall).where(Shortfall.load_line_id == line.id).execution_options(populate_existing=True)
@@ -771,15 +751,14 @@ def _feed_items(db: Session, shortfall: Shortfall) -> list[FeedItem]:
     ]
 
 
+# The store is told either way. At night the notice waits quietly until 5:00 AM.
 def decide(
     db: Session, now: datetime, user: AppUser | None, shortfall: Shortfall, decision: ShortfallDecision
 ) -> Shortfall:
-    """The dispatcher's answer: send the rest now, and either add the missing cases to the store's next order or
-    leave them out. The store is told either way; at night the notice waits quietly until 5:00 AM."""
     line = db.get(LoadLine, shortfall.load_line_id)
     assert line is not None
     trip = lock_trip(db, line.trip_id)
-    # read again under the lock: the dock may have withdrawn the flag, or another phone answered it, meanwhile
+    # reread under the lock, since the dock may have withdrawn the flag or another phone answered it
     if (
         db.scalar(select(Shortfall).where(Shortfall.id == shortfall.id).execution_options(populate_existing=True))
         is None
@@ -874,7 +853,6 @@ def decide(
 
 
 def next_order(db: Session, order: Order, after: date) -> Order | None:
-    """The store's next order of the same kind after a run, if it has placed one."""
     return db.scalar(
         select(Order)
         .where(
@@ -890,7 +868,6 @@ def next_order(db: Session, order: Order, after: date) -> Order | None:
 
 
 def carry_over(db: Session, now: datetime, order: Order, case_type: str, qty: int, after: date) -> Order:
-    """Add cases that went short to the store's next order of the same kind, or open one for the next run."""
     look = Lookup(db)
     nxt = next_order(db, order, after)
     if nxt is None:
@@ -934,9 +911,7 @@ def carry_over(db: Session, now: datetime, order: Order, case_type: str, qty: in
     return nxt
 
 
-# ------------------------------------------------------------------------------------------------ handover
 def complete(db: Session, now: datetime, user: AppUser | None, trip: Trip, *, scripted: bool = False) -> Handover:
-    """Load complete: every line is on or decided. The handover goes to the driver's phone to accept."""
     lock_trip(db, trip.id)
     if trip.departed_at:
         raise DockError(f"{trip.vehicle_id} has left the hub.")
@@ -987,7 +962,6 @@ def complete(db: Session, now: datetime, user: AppUser | None, trip: Trip, *, sc
 
 
 def accept(db: Session, now: datetime, driver: AppUser, trip: Trip, on: str) -> Handover:
-    """The driver accepts the load: on their phone, or on the dock tablet with their own PIN."""
     lock_trip(db, trip.id)
     handover = db.scalar(select(Handover).where(Handover.trip_id == trip.id).execution_options(populate_existing=True))
     if handover is None or handover.completed_at is None:

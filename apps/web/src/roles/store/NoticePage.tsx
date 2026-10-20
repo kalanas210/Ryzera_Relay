@@ -24,8 +24,7 @@ import { around, cases, clock, placedAt, windowOf } from "./words";
 
 const ACKNOWLEDGED = new Set(["order_deferred", "short_delivery"]);
 
-/** STM-03 Delivery update: a deferral or a short delivery in full, and "Got it" so the dispatcher knows it was
- *  seen. Other notices open here too, as their title and body. */
+// STM-03 Delivery update. A deferral or a short delivery in full, with Got it for the dispatcher.
 export function NoticePage() {
   const { noticeId } = useParams();
   const notices = useStoreNotices();
@@ -36,7 +35,7 @@ export function NoticePage() {
   const data = home.data;
   const orderRef = typeof notice?.data.order_ref === "string" ? notice.data.order_ref : undefined;
   const order = data?.orders.find((o) => o.order_ref === orderRef);
-  // a deferral names the order still coming that day; a short delivery the order itself
+  // For a deferral, the other order still coming that day.
   const sibling =
     notice?.kind === "order_deferred" && order && data
       ? data.orders.find(
@@ -44,14 +43,13 @@ export function NoticePage() {
         )
       : undefined;
   const tracker = useTracker(notice?.kind === "short_delivery" ? orderRef : sibling?.order_ref);
-  // opened is read: the dispatcher's record can say when; Got it stays the store's own "I've seen this"
   const read = useReadNotice();
   const unread = notice && !notice.read_at ? notice.id : null;
   const markRead = read.mutate;
   useEffect(() => {
     if (unread) markRead(unread);
   }, [unread, markRead]);
-  // back to whatever opened it, or to My orders when it was opened straight from a notification
+  // Back to where it came from, or to My orders when opened straight from a notification.
   const back = () => ((window.history.state as { idx?: number } | null)?.idx ? navigate(-1) : navigate("/store"));
   const header = <BackHeader title="Delivery update" back={back} />;
 
@@ -109,7 +107,7 @@ export function NoticePage() {
   );
 }
 
-/** Got it, and once Relay has it, "Seen 6:41 PM". Never "Seen" before the server answers. */
+// Never says Seen before the server has answered.
 function GotIt({ notice }: { notice: Notice }) {
   const ack = useAcknowledge();
   const navigate = useNavigate();

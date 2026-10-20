@@ -27,8 +27,8 @@ class Base(DeclarativeBase):
     }
 
 
+# Plain text instead of a database enum, so a new value needs no migration.
 def str_enum(kind: type[enum.StrEnum], length: int = 24) -> Enum:
-    """Store a StrEnum as plain text, so adding a value never needs a database enum migration."""
     return Enum(kind, native_enum=False, length=length, values_callable=lambda e: [m.value for m in e])
 
 

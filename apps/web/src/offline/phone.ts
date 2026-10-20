@@ -1,7 +1,6 @@
-/** What the driver's phone keeps besides its outbox: the last run Relay sent (the phone works from it with no
- *  signal), the proof drafts (still filled in if Android unloads the page while the camera is open), the phone's own
- *  id and when it last reached Relay. One small key and value store in IndexedDB; if the browser will not open it
- *  (a private window, say) every read comes back empty and the screens still work from memory. */
+// The last run Relay sent (the phone works from it with no signal), the proof drafts (kept if Android
+// unloads the page while the camera is open), the phone's own id and when it last reached Relay.
+// If the browser will not open the store (a private window), reads come back empty and screens use memory.
 import Dexie, { type EntityTable } from "dexie";
 
 type Item = { key: string; value: unknown; saved_at: number };
@@ -36,7 +35,7 @@ export class PhoneStore {
     try {
       await this.db.items.put({ key, value, saved_at: Date.now() });
     } catch {
-      // nothing kept: the screen still has it in memory
+      // not kept, the screen still has it in memory
     }
   }
 
@@ -44,20 +43,19 @@ export class PhoneStore {
     try {
       await this.db.items.delete(key);
     } catch {
-      // already gone, or never kept
+      // already gone
     }
   }
 
-  /** Every key the test accepts, such as all the proof drafts. */
   async removeWhere(test: (key: string) => boolean): Promise<void> {
     try {
       await this.db.items.filter((item) => test(item.key)).delete();
     } catch {
-      // nothing kept to let go of
+      // nothing kept
     }
   }
 
-  /** This phone's id, made once and kept, so the office can tell one device from another. */
+  // made once and kept, so the office can tell one phone from another
   deviceId(): Promise<string> {
     if (!this.device) {
       this.device = this.get<string>("device").then(async (kept) => {

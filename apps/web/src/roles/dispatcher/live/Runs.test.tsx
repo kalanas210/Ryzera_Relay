@@ -31,7 +31,7 @@ function marker(seq: number, place: string, over: Partial<RunMarker> = {}): RunM
   };
 }
 
-/** Kasun at 7:22: Finish trip tapped at Aranayake's dock at 7:17. */
+// Kasun at 7:22. Finish trip was tapped at Aranayake's dock at 7:17.
 const kasun: RunRow = {
   trip_id: "trip-045",
   vehicle_id: "VEH045",
@@ -126,7 +126,6 @@ describe("the runs panel", () => {
     const onSelect = show([kasun]);
     const pick = screen.getByRole("button", { name: "VEH045, Kasun Bandara" });
     expect(pick).toHaveAttribute("aria-pressed", "true");
-    // the list of stops and its markers are never inside a button
     expect(screen.getByRole("list", { name: "VEH045 stops" }).closest("button")).toBeNull();
     fireEvent.click(pick);
     expect(onSelect).toHaveBeenCalledWith("VEH045");

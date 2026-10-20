@@ -20,11 +20,10 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
 
     demo_mode: bool = True
-    """Shows the demo bar: the scenario clock, private copies of the day and reset."""
 
     seed_dir: Path = _REPO_ROOT / "seed" / "data"
+    # Loaders sign in with a PIN instead.
     seed_password: str = "relay2026"
-    """Password of every seeded account. Loaders sign in with a PIN from the people file instead."""
 
     timezone: str = "Asia/Colombo"
 

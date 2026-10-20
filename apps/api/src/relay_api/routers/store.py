@@ -48,7 +48,7 @@ from relay_api.workspaces import ScopeDep
 
 router = APIRouter(prefix="/api/store", tags=["store manager"])
 
-# The order a store counts its cases in (STM-02), which is not the heaviest-first loading order.
+# The order a store counts its cases in (STM-02). Not the heaviest-first loading order.
 ORDER_FORM = ["rice_dhal", "packet_foods", "tea_biscuit", "dairy", "produce", "meat_fish"]
 StoreUser = Annotated[AppUser, Depends(require(Role.STORE_MANAGER))]
 
@@ -118,8 +118,8 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
             .order_by(Order.requested_date, Order.order_ref)
         )
     )
-    # Until midday on a delivery day, "this morning's run" is the one a store is following; a store that had a
-    # delivery this morning keeps it in view until 4:00 PM, while it can still report a problem with it.
+    # Until midday on a delivery day, this morning's run is the one a store follows. A store that had a
+    # delivery this morning keeps it in view until 4:00 PM, while it can still report a problem.
     runs_today = next_operating_day(db, today - timedelta(days=1)) == today
     delivered_today = any(o.run_date == today for o in orders)
     keep_today = local.hour < 12 or (local.hour < tracker.ISSUES_UNTIL.hour and delivered_today)
@@ -150,8 +150,8 @@ def home(scope: ScopeDep, user: StoreUser) -> StoreHome:
     )
 
 
+# Each line must be a case type of the store's own brand and, for a Fresh store, the order's temperature.
 def _lines(types: dict[str, CaseType], outlet: Outlet, temp: str, lines: list[LineIn]) -> list[LineInput]:
-    """The store's lines, each a case type of its own brand and, for a Fresh store, of the order's temperature."""
     for line in lines:
         case = types.get(line.case_type)
         if case is None or case.brand != outlet.brand or (outlet.brand == "Fresh" and case.temp != temp):
@@ -165,8 +165,8 @@ def _lines(types: dict[str, CaseType], outlet: Outlet, temp: str, lines: list[Li
 
 @router.post("/orders", response_model=StoreOrderOut, status_code=status.HTTP_201_CREATED)
 def create_order(body: PlaceOrder, scope: ScopeDep, user: StoreUser) -> StoreOrderOut:
-    """STM-02. The order goes on the run the store's form showed, unless it reaches Relay after that run's cutoff:
-    then it goes on the run taking orders now, and the store is told so in the same answer."""
+    """STM-02. The order goes on the run the store's form showed. If it reaches Relay after that run's
+    cutoff, it goes on the run taking orders now, and the store is told so in the same answer."""
     db, now = scope.db, scope.now
     outlet = _outlet(scope, user)
     types = {c.code: c for c in db.scalars(select(CaseType))}
@@ -230,8 +230,7 @@ def _my_notice(scope: ScopeDep, user: AppUser, notice_id: uuid.UUID) -> Notifica
 
 @router.post("/notices/{notice_id}/read", response_model=NoticeOut)
 def read_notice(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notification:
-    """The store opened the notice: the dispatcher's records can say when it was read. Got it is still the store's
-    own word that it has seen it."""
+    """The store opened the notice. Got it is still the store's own word that it has seen it."""
     notice = _my_notice(scope, user, notice_id)
     notice.read_at = notice.read_at or scope.now
     scope.db.commit()
@@ -246,23 +245,22 @@ def acknowledge(notice_id: uuid.UUID, scope: ScopeDep, user: StoreUser) -> Notif
     deferral_id = notice.data.get("deferral_id")
     deferral = scope.db.get(Deferral, uuid.UUID(str(deferral_id))) if deferral_id else None
     if deferral is not None and deferral.acknowledged_at is None:
-        deferral.acknowledged_at = scope.now  # the dispatcher's "Seen 6:41 PM"
+        deferral.acknowledged_at = scope.now
     scope.db.commit()
     return notice
 
 
-# ------------------------------------------------------------------------------------------------ on the way
 @router.get("/orders/{order_ref}/tracker")
 def track(order_ref: str, scope: ScopeDep, user: StoreUser) -> dict[str, object]:
-    """STM-04: where the delivery is and when it is expected, from the driver's own records. While the driver's
-    phone is silent, a likely range; once the estimate has passed, the store can confirm receipt itself."""
+    """STM-04. Where the delivery is and when it is expected, from the driver's own records.
+    While the phone is silent it shows a likely range. After the estimate the store can confirm receipt."""
     return tracker.tracker(scope.db, scope.now, _my_order(scope, user, order_ref)).as_dict()
 
 
 @router.post("/orders/{order_ref}/receipt")
 def confirm(order_ref: str, body: ReceiptIn, scope: ScopeDep, user: StoreUser) -> dict[str, object]:
-    """STM-05: everything arrived, or what did not. It counts as the delivery for Relay's estimates even before the
-    driver's proof arrives."""
+    """STM-05. Everything arrived, or what did not. It counts as the delivery for Relay's estimates even before
+    the driver's proof arrives."""
     order = _my_order(scope, user, order_ref)
     try:
         tracker.confirm_receipt(
@@ -276,7 +274,7 @@ def confirm(order_ref: str, body: ReceiptIn, scope: ScopeDep, user: StoreUser) -
 
 @router.post("/orders/{order_ref}/issues")
 def report_issues(order_ref: str, body: IssuesIn, scope: ScopeDep, user: StoreUser) -> dict[str, object]:
-    """STM-05 after confirming: a problem found later with the goods, until 4:00 PM on the delivery day."""
+    """STM-05 after confirming. A problem found later with the goods, until 4:00 PM on the delivery day."""
     order = _my_order(scope, user, order_ref)
     try:
         tracker.report_issues(scope.db, scope.now, user, order, [i.model_dump() for i in body.issues], body.client_ref)

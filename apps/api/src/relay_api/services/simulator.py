@@ -1,17 +1,4 @@
-"""Keeping a copy of the day up to its scenario clock.
-
-Four things move with the clock, applied in time order so a jump of hours lands on a consistent day:
-- scheduled events: the stores that order later in the afternoon, and what Kasun's phone saved with no signal,
-  sent when the signal returns; each run through the same service a person's device uses;
-- the world simulator (`world.advance`): the loaders and drivers nobody is playing, at the dock and on the road;
-- what Relay notices on its own (`watch`): a running trip's phone gone quiet, a question nobody answers;
-- the story autopilot (`story`): the judge characters' own steps. A jump plays every step it skipped past; as the
-  clock simply runs, only the steps of characters nobody is playing, as their times come. Kasun's phone checks in as
-  the clock runs (`story.phone`) while the autopilot carries it.
-
-Everything is idempotent. The workspace row is locked while a copy catches up, so the background tick and a jump
-never apply the same step twice; the tick simply skips a copy that is busy.
-"""
+"""Keeps a copy of the day up to its scenario clock, applying everything in time order."""
 
 from __future__ import annotations
 
@@ -34,7 +21,6 @@ from relay_api.workspaces import playing
 log = logging.getLogger("relay.simulator")
 
 REACHED = "reached"
-"""Key in Workspace.state: the scenario time the copy was last caught up to, where its world stands."""
 
 
 def _place_order(db: Session, event: ScheduledEvent) -> None:
@@ -82,14 +68,9 @@ def catch_up(
     *,
     jumped_from: datetime | None = None,
 ) -> list[str]:
-    """Bring a copy of the day up to `until` (default: its scenario time now). With `jumped_from`, also play
-    the story steps the jump skipped; without it, the steps of characters nobody is playing that have come due.
-    Returns the labels of the steps played.
-
-    `until` can be a story moment's time as a function of the day (`story.moment_time`): the handover follows the
-    truck the story publishes on the way, so it is worked out again after every step played, a step later than it
-    is never played, and the clock lands on it, never before a step already played."""
+    # `until` can be a function, because the handover follows the truck the story publishes.
     scope_to_workspace(db, workspace.id)
+    # The row lock keeps the tick and a jump from applying the same step twice.
     locked = db.scalar(
         select(Workspace)
         .where(Workspace.id == workspace.id)
@@ -97,7 +78,7 @@ def catch_up(
         .execution_options(populate_existing=True)
     )
     if locked is None:
-        return []  # a jump is catching this copy up; the next tick will find it current
+        return []
     fixed = until if isinstance(until, datetime) else sim_now(locked)
     reached = jumped_from
 
@@ -143,10 +124,8 @@ def catch_up(
 
 
 def _on_time(db: Session, workspace: Workspace, now: datetime) -> list[str]:
-    """The clock ran on by itself: each character nobody is playing takes the steps that have come due. A step that
-    came due since the copy was last caught up is taken at its own time; one that waited (for a judge who has gone,
-    or for a load to be completed) is taken now. One that cannot be taken yet is not settled, and is tried again on
-    a later tick."""
+    # The clock ran on by itself. Characters nobody is playing take the steps that have come due.
+    # A step that waited runs now, and one that cannot run yet is tried again on a later tick.
     people = story.cast(db)
     if people is None:
         return []
@@ -178,8 +157,6 @@ def _on_time(db: Session, workspace: Workspace, now: datetime) -> list[str]:
 
 
 def _move(db: Session, workspace: Workspace, now: datetime) -> None:
-    """Everything that moves by itself, up to `now`: the scheduled events, the world, Kasun's phone, and what Relay
-    notices once they have moved."""
     _apply_events(db, now)
     world.advance(db, now)
     story.phone(db, workspace, now)

@@ -1,13 +1,4 @@
-"""The exact search: choose trips for vehicles from the enumerated options, as a small integer program.
-
-Variables are (vehicle, trip 1 or 2, option). Each order rides at most once. A vehicle runs a second trip
-only after a first, within its Fresh and daytime budgets, and the second trip must be able to leave at
-least 10 minutes after the first is back (Relay's clock). Fuel stays within what is left of the week's
-quota. Capacity, van-only access and temperature decide which options a vehicle may take at all.
-
-It answers two questions in turn: how many orders can travel at most (what is unavoidable), and, keeping
-that many, which allocation best follows Relay's rules (what is Relay's choice).
-"""
+"""The exact search: picks trips for vehicles as a small integer program."""
 
 from __future__ import annotations
 
@@ -47,25 +38,22 @@ class Solution:
 
 @dataclass
 class Problem:
-    """One depot's vehicles and the options they could run, ready to solve many ways."""
-
     network: Network
     options: Sequence[Option]
     vehicles: Sequence[VehicleDay]
     usual: Mapping[str, Sequence[UsualTrip]] = field(default_factory=dict)
+    # joint allows usual runs, runs whose usual vehicles are out, and spares anywhere.
+    # usual allows exactly each vehicle's usual runs, the stores it usually serves that ordered today.
+    # open allows any vehicle anywhere, for leftovers.
     scope: str = "joint"
-    """joint: usual runs, runs whose usual vehicles are out, and spares anywhere. usual: each vehicle's usual runs
-    exactly (the stores it usually serves that ordered today). open: any vehicle anywhere (for leftovers)."""
+    # vehicles that already have a first trip, with the time they are back, so only a second can be added
     booked: Mapping[str, float] = field(default_factory=dict)
-    """Vehicles that already run a first trip: the time they are back, so only a second trip can be added."""
+    # for booked vehicles, Fresh minutes, daytime minutes and litres their first trip already uses
     booked_usage: Mapping[str, tuple[int, int, float]] = field(default_factory=dict)
     booked_preferred: Mapping[str, float] = field(default_factory=dict)
-    """For booked vehicles: when their first trip is back if it keeps Relay's usual departure."""
+    # With earliest the first trip leaves as soon as ready, so scarce refrigerated vehicles do more.
+    # With preferred it keeps Relay's usual departure, so a second trip only fits after that.
     first_back: str = "earliest"
-    """How a second trip is timed against the first. earliest: the first trip may leave as soon as the vehicle is
-    ready, which squeezes the most out of scarce refrigerated vehicles. preferred: the first trip keeps Relay's
-    usual departure, so a second trip is only planned when it fits after that."""
-    """For booked vehicles: Fresh minutes, daytime minutes and litres their first trip already uses."""
     slots: list[Slot] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -84,7 +72,6 @@ class Problem:
             self.slots = [s for s in self.slots if self.usual_bonus(s) > 0]
 
     def _districts_for(self, vehicle_id: str) -> set[tuple[Brand, Temp, str]] | None:
-        """Where the proposal may send a vehicle. None means anywhere."""
         if self.scope == "open":
             return None
         mine = {(u.brand, u.temp, u.district) for u in self.usual.get(vehicle_id, ())}
@@ -117,8 +104,7 @@ class Problem:
             yield Slot(day.vehicle_id, 2, option)
 
     def usual_bonus(self, slot: Slot) -> float:
-        """How strongly this trip keeps the vehicle on its usual run: the share of weekdays it makes that run, when
-        the trip carries the stores it usually serves on it, as many of them as ordered today, and no others."""
+        # Share of weekdays this run is made, if the trip has exactly the usual stores ordered today.
         opt = slot.option
         today = self._present.get((opt.brand, opt.temp, opt.district), set())
         best = 0.0
@@ -131,12 +117,11 @@ class Problem:
         return best
 
     def pulled(self, slot: Slot) -> bool:
-        """A second trip on a vehicle that already runs a first one, which only fits if that first trip leaves
-        earlier than Relay would send it."""
         if slot.vehicle_id not in self.booked_preferred:
             return False
         return (slot.option.latest_depart or 0) < self.booked_preferred[slot.vehicle_id] + RELOAD_MINUTES
 
+    # Variables are (vehicle, trip 1 or 2, option) and each order rides at most once.
     def solve(
         self,
         *,
@@ -215,8 +200,8 @@ class Problem:
             usual = np.array([self.usual_bonus(s) for s in slots], dtype=float)
             weight = np.array([s.option.weight_kg for s in slots], dtype=float)
             pulled = np.array([1.0 if self.pulled(s) else 0.0 for s in slots])
-            # Relay's rules in order: don't pull a driver out early for a second trip another vehicle can run, keep
-            # vehicles on their usual runs, move the most goods, then use fewer trips.
+            # Relay's rules in order. Don't pull a driver out early for a second trip another can run,
+            # keep vehicles on their usual runs, move the most goods, then use fewer trips.
             c = pulled * 2e7 - (usual * 1e7 + weight * 10.0) + 1.0
         result = milp(
             c,
@@ -234,12 +219,11 @@ class Problem:
 
 
 def eligible(vehicle: Vehicle, option: Option) -> bool:
-    """Capacity, access and temperature: may this vehicle run this trip at all."""
     if option.weight_kg > vehicle.weight_cap_kg + 1e-6 or option.volume_m3 > vehicle.volume_cap_m3 + 1e-9:
         return False
     if option.van_only and vehicle.type is not VehicleType.VAN:
         return False
     if option.temp is Temp.CHILLED:
         return vehicle.refrigerated
-    # Refrigerated vehicles stay free for chilled goods: Fresh dry, Style and Tech go on ambient vehicles.
+    # Refrigerated vehicles stay free for chilled. Fresh dry, Style and Tech go on ambient vehicles.
     return not vehicle.refrigerated

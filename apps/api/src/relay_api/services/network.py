@@ -46,7 +46,6 @@ _network: Network | None = None
 
 
 def network(db: Session) -> Network:
-    """The shared network, loaded once per process: it never changes while Relay runs."""
     global _network
     if _network is None:
         with _lock:
@@ -105,8 +104,6 @@ _conditions: dict[date, Conditions] = {}
 
 
 def conditions(db: Session, day: date) -> Conditions:
-    """A day's traffic, road and unloading tables, read once per process: they are reference data and never change
-    while Relay runs, and every estimate and every simulated record reads them."""
     known = _conditions.get(day)
     if known is None:
         with _lock:
@@ -162,7 +159,6 @@ def engine_order(row: OrderRow) -> Order:
 
 
 def at_minutes(day: date, minutes: float) -> datetime:
-    """Minutes after midnight of the delivery day, as a Sri Lanka time."""
     return datetime.combine(day, time(0, 0), tzinfo=COLOMBO) + timedelta(minutes=round(minutes))
 
 

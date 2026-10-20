@@ -1,6 +1,3 @@
-"""Dilani's side of the morning through the API: the store sees a delivery time only once the plan is published,
-reads the planned and actual times of its own stop, and can still report a problem after confirming receipt."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -23,12 +20,12 @@ def tracker(copy: Copy) -> dict:
 
 def test_a_draft_plan_is_not_the_stores_to_see(new_copy: Callable[[], Copy]) -> None:
     copy = new_copy()
-    copy.jump("plan")  # Relay has proposed the Kandy plan; nobody has published it
+    copy.jump("plan")
     copy.sign_in("dilani", "store_manager")
     seen = tracker(copy)
     assert (seen["status"], seen["stop_seq"], seen["expected"]) == ("scheduled", None, None)
 
-    copy.jump("evening")  # published at 6:40 PM: now the store has its time
+    copy.jump("evening")  # published at 6:40 PM, so now the store has its time
     seen = tracker(copy)
     assert seen["stop_seq"] is not None
     assert seen["expected"] is not None
@@ -58,15 +55,12 @@ def test_a_problem_found_after_confirming_still_reaches_the_dispatcher(new_copy:
     ]
     assert hm(seen["receipt"]["reported_at"]) == "06:40"
 
-    # Try again with the same client_ref reports nothing twice
     again = copy.post(f"/api/store/orders/{DRY_ORDER}/issues", later, "store_manager")
     assert len(again["receipt"]["issues"]) == 1
     feed = copy.get("/api/dispatch/live/feed?depot=Kandy", "dispatcher")
     disputes = [i for i in feed["now"] if i["kind"] == "dispute"]
     assert len(disputes) == 1
     assert disputes[0]["ref"]["order_ref"] == DRY_ORDER
-    # in the store's own words and word order, with its note, as the dispatcher reads it under "From the store"
     assert disputes[0]["body"] == "1 damaged packet foods case. Crushed at the back."
 
-    # nothing to report without a receipt to add it to
     copy.post("/api/store/orders/ORD0098596/issues", later | {"client_ref": "no-receipt-yet"}, "store_manager", 409)

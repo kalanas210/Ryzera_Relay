@@ -9,20 +9,17 @@ type Props = {
   title: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
-  /** bottom: a phone sheet; drawer: the dispatcher's side drawer; dialog: a centered confirmation. */
   variant?: "bottom" | "drawer" | "dialog";
   width?: number;
   meta?: ReactNode;
-  /** A drawer without a scrim leaves the page behind it readable (DEG-03 / move stop 4). */
+  // Not modal means no scrim, so the page behind a drawer stays readable (DEG-03, move stop 4).
   modal?: boolean;
   dismissible?: boolean;
-  /** The close button's accessible name, in the reader's language. */
   closeLabel?: string;
 };
 
-/** Pointers held down on the page right now. A sheet that opens during a press (a press and hold, say) must not be
- *  light dismissed by the release of that same press: the browser saw no dialog when the press began, so it reads
- *  the release as a tap outside. */
+// Pointers held down right now. A sheet that opens during a press and hold must not close when that
+// press is released. The browser saw no dialog at the start, so it reads the release as a tap outside.
 const pressed = new Set<number>();
 if (typeof window !== "undefined") {
   const release = (event: PointerEvent) => pressed.delete(event.pointerId);
@@ -31,12 +28,10 @@ if (typeof window !== "undefined") {
   window.addEventListener("pointercancel", release, true);
 }
 
-// Esc still closes a sheet that is not armed yet; only a tap outside waits for a fresh press.
+// Esc still closes a sheet that is not armed yet. Only a tap outside waits for a fresh press.
 const closedBy = (dismissible: boolean, armed: boolean) => (dismissible ? (armed ? "any" : "closerequest") : "none");
 
-/** Sheets, drawers and dialogs, all on the native <dialog>: the browser traps focus, handles Esc and
- *  puts it in the top layer. Tapping the scrim closes it (closedby="any", with a fallback for Safari), once the
- *  press that opened it has ended. */
+// A tap on the scrim closes it (closedby="any", with a fallback for Safari) once the opening press has ended.
 export function Sheet({
   open,
   onClose,
@@ -52,10 +47,9 @@ export function Sheet({
 }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  // False from an open during a press until the next press starts.
   const armed = useRef(true);
 
-  // closedby is set here rather than as a prop, so React never puts "any" back in the middle of a press.
+  // closedby is set here, not as a prop, so React never puts "any" back in the middle of a press.
   useEffect(() => {
     ref.current?.setAttribute("closedby", closedBy(dismissible, armed.current));
   }, [dismissible]);

@@ -1,5 +1,5 @@
-"""Relay's proposal for the Kandy hub on Wednesday 8 April 2026, the Designathon story day: two refrigerated
-vehicles are in the workshop, so one chilled order has to wait, and Relay's rules choose which."""
+"""Relay's proposal for the Kandy hub on Wednesday 8 April 2026, the story day.
+Two refrigerated vehicles are in the workshop, so one chilled order has to wait."""
 
 import pytest
 from story_data import protected_orders, story_orders, story_vehicles, usual_runs

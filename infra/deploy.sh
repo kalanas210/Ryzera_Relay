@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Ship the committed HEAD to the server and rebuild there. Uncommitted work is never deployed.
+# Sends the committed HEAD to the server and rebuilds there. Uncommitted work is not deployed.
 #   infra/deploy.sh            # the "relay" host from ~/.ssh/config
 #   infra/deploy.sh other-host
 set -eu

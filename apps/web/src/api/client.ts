@@ -1,6 +1,5 @@
-/** The one way the web app talks to the API. Every request names the role it acts as, so four
- *  signed-in roles can share one browser, and carries X-Relay-Client, which the API requires on
- *  every change as a guard against cross-site requests. */
+// Every request names its role, so four signed-in roles can share one browser.
+// X-Relay-Client is required by the API on every change, to stop cross-site requests.
 
 export type Role = "dispatcher" | "loader" | "driver" | "store_manager";
 
@@ -28,7 +27,7 @@ type Options = {
 async function request<T>(method: string, path: string, { role, body, signal }: Options = {}): Promise<T> {
   const headers: Record<string, string> = { "X-Relay-Client": "web" };
   if (role) headers["X-Relay-Role"] = role;
-  // a form (a photo) goes as it is, and the browser writes its own Content-Type with the boundary
+  // A form (the photo) goes as it is. The browser sets Content-Type with the boundary.
   const form = body instanceof FormData;
   if (body !== undefined && !form) headers["Content-Type"] = "application/json";
   let response: Response;

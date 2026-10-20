@@ -1,8 +1,3 @@
-"""The engine cache when two askers race: on a fresh install the warm-up and a judge's first Propose can ask the
-engine the same question at once. The second waits for the first one's answer instead of searching beside it, a
-different question never waits, a failed search leaves the next asker free to search, and /api/health says while
-the warm-up is still running."""
-
 from __future__ import annotations
 
 import threading
@@ -23,7 +18,6 @@ WAIT = 10.0
 
 
 def question() -> RunInput:
-    """A question no earlier run has asked. Only its key matters here: the engine is stood in for."""
     return RunInput(
         network=cast(Network, None),
         depot="Kandy",
@@ -36,9 +30,6 @@ def question() -> RunInput:
 
 
 class Search:
-    """Stands in for the engine: counts its searches, and holds each one until `go` (or `meet`, when two must be
-    searching at the same time) lets it finish."""
-
     def __init__(self, *, meet: int = 0, fail_first: bool = False) -> None:
         self.calls = 0
         self.started = threading.Event()
@@ -60,7 +51,6 @@ class Search:
 
 @pytest.fixture
 def ask(database: None) -> Callable[[RunInput, dict[str, Any], str], threading.Thread]:
-    """Ask in a thread of its own, with a session of its own, as two requests (or the warm-up) do."""
     from relay_api.db import SessionLocal
     from relay_api.services.engine_cache import propose_cached
 
@@ -80,7 +70,7 @@ def ask(database: None) -> Callable[[RunInput, dict[str, Any], str], threading.T
 
 
 def waiting_on_a_search() -> bool:
-    """Whether some connection is waiting for a search's lock (and so is not searching itself)."""
+    # True when a connection waits for a search's lock, so it is not searching itself.
     from sqlalchemy import text
 
     from relay_api.db import SessionLocal
@@ -125,7 +115,7 @@ def test_a_second_ask_for_the_same_plan_waits_for_the_first_answer(
     assert search.calls == 1
     assert isinstance(out["warm-up"], engine_cache.Answer)
     assert out["judge"] == out["warm-up"]
-    with SessionLocal() as db:  # and from now on the answer is simply read
+    with SessionLocal() as db:
         assert engine_cache.propose_cached(db, run) == out["warm-up"]
     assert search.calls == 1
 
@@ -172,7 +162,7 @@ def test_health_says_while_the_warm_up_is_running(database: None) -> None:
     from relay_api.main import app
     from relay_api.services.engine_cache import warming
 
-    client = TestClient(app)  # no `with`: the background simulator stays off
+    client = TestClient(app)
     assert client.get("/api/health").json() == {"status": "ok", "warming": False}
     with warming(engine):
         assert client.get("/api/health").json() == {"status": "ok", "warming": True}

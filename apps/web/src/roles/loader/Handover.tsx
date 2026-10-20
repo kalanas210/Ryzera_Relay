@@ -29,18 +29,16 @@ import { StopTitle, useSettledTap } from "./parts";
 
 const PHONE_SILENT_MS = 60_000;
 
-// The unit is written once, after the planned figure: "Weight 2,470.8 of 2,530.8 kg planned".
 const weight = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const volume = new Intl.NumberFormat("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
-/** LDR-04 Handover: one record of what is short and why, and planned against loaded, confirmed by the loader and
- *  accepted by the driver before the truck leaves. */
+// LDR-04. The loader confirms planned against loaded, then the driver accepts and the truck leaves.
 export function HandoverPage() {
   const { tripId = "" } = useParams();
   const trip = useTripLoad(tripId);
   const { t } = useLoaderText();
   const load = trip.data;
-  // Once the driver has accepted there is nothing left to load, so Back goes to tonight's loads.
+  // After the driver accepts there is nothing left to load, so Back goes to tonight's loads.
   const accepted = Boolean(load?.handover.accepted_at);
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col">
@@ -72,8 +70,7 @@ function Handover({ load }: { load: TripLoad }) {
   const silent =
     done && !accepted && now && h.completed_at && now.getTime() - Date.parse(h.completed_at) >= PHONE_SILENT_MS;
   const flagged = load.groups.flatMap((g) => g.lines.filter((l) => l.shortfall).map((l) => ({ group: g, line: l })));
-  // The bottom bar's button sits where Go to handover was, and its next one takes the same place: each waits a
-  // moment before it takes a tap, so a double tap never marks the load complete or leaves the page unseen.
+  // Each bottom button waits a moment before it takes a tap, so a double tap never completes the load unseen.
   const primary = !done ? "complete" : silent && !accepted ? "acceptHere" : "back";
   const settled = useSettledTap(primary);
 
@@ -141,13 +138,9 @@ function Handover({ load }: { load: TripLoad }) {
             <h2 className="t-h2">{t("handover.plannedLoaded")}</h2>
             <p className="t-caption text-asphalt-500">{t("handover.inStopOrder", { driver: first })}</p>
           </div>
-          {/* One grid for the whole table, each row a subgrid, so every row shares the columns. Stop is as wide
-              as its longest place and never wider than the room left, Planned is 45, and Loaded takes the rest: 8
-              of space after Planned, a 36 wide number (room for 4 digits), then the check or the Short chip. At
-              390 wide that is the 130 the "6 short" chip needs beside the number; where a longer chip does not fit
-              (Tamil), it drops under the number before a place name would have to give way. The first line of every
-              cell is 32 high, the marker's height, and cells sit at the top of the row, so a stop, its Planned and
-              its Loaded figures always share a line, and the row's lines are centered in its 64. */}
+          {/* Each row is a subgrid, so the columns line up. Loaded gets the rest of the width. At 390
+              wide that leaves the 130 the "6 short" chip needs. A longer chip (Tamil) drops under the
+              number before a place name has to give way. */}
           <div className="grid grid-cols-[minmax(0,max-content)_45px_minmax(min-content,1fr)] overflow-hidden rounded-card border border-asphalt-200 bg-white">
             <div className="col-span-full grid h-10 grid-cols-subgrid items-center px-3 t-caption text-asphalt-500">
               <span>{t("handover.stop")}</span>
@@ -411,8 +404,7 @@ function Banner({
   );
 }
 
-/** The driver accepts on the dock tablet with their own PIN: the PIN sheet from LDR-01, with the driver as the only
- *  person. In a walkthrough the demo account's PIN is shown, as on the sign-in screen. */
+// The driver accepts on the dock tablet with their own PIN, on the LDR-01 PIN sheet with only the driver.
 function DriverPinSheet({
   open,
   onClose,
@@ -454,7 +446,6 @@ function DriverPinSheet({
           <PersonButton person={{ username: demo.username ?? driver, display_name: driver, initials }} selected />
         </div>
         <div className="flex flex-col items-center gap-3">
-          {/* In a walkthrough the demo PIN sits under the dots, and a wrong PIN takes its place, as on sign-in */}
           <PinPad
             value={pin}
             error={Boolean(error?.shown && error.wrongPin)}

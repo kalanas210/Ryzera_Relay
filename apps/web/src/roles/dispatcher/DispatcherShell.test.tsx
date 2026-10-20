@@ -6,7 +6,6 @@ import { type Depot, DeskHeader } from "./DispatcherShell";
 afterEach(cleanup);
 
 function header(onDepot: (d: Depot) => void, allowAll: boolean) {
-  // the clock stays empty: nothing here asks the API
   const client = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } });
   return render(
     <QueryClientProvider client={client}>

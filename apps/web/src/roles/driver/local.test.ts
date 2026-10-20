@@ -51,7 +51,6 @@ function stop(seq: number, place: string, extra: Partial<DriverStop> = {}): Driv
   };
 }
 
-/** Relay's one question about a stop with two copies, with the records it holds for it. */
 function asked(extra: Partial<Question> = {}): Question {
   return {
     id: "q1",
@@ -166,7 +165,7 @@ describe("the phone's own records over Relay's run", () => {
     const trip = overlay(base, items).trip;
     expect(trip?.load).toBe("accepted");
     expect(trip?.handover.accepted_at).toBe(at("03:17"));
-    // a first arrival with no Leave the hub tapped: the truck left at its planned time, as Relay takes it too
+    // With no Leave the hub tap, the truck left at its planned time, as Relay takes it.
     expect(trip?.departed_at).toBe(at("03:29"));
     expect(trip?.stops[0]).toMatchObject({ status: "delivered", completed_at: at("05:00"), receiver: "P. Silva" });
     expect(trip?.stops[0]?.has_photo).toBe(true);
@@ -188,23 +187,21 @@ describe("the phone's own records over Relay's run", () => {
     const items = localItems([], [sent(delivered, "conflict")], new Set());
     expect(overlay(run([moved], [question]), items).trip?.stops[0]?.status).toBe("delivered");
 
-    // "No, something is wrong" cancels nothing: the stop is still this truck's, waiting for the dispatcher's call
     const no = record("conflict_answer", "07:15", "s4", { conflict_id: "q1", answer: "no" });
     const answered = localItems([queued(no)], [sent(delivered, "conflict")], new Set());
     const waiting = overlay(run([moved], [question]), answered);
     expect(waiting.trip?.stops[0]).toMatchObject({ status: "delivered", completed_at: at("07:09") });
     expect(ownStops(waiting.trip as NonNullable<DriverRun["trip"]>)).toHaveLength(1);
     expect(waitingForCall(run([moved], [question]), answered, "s4")).toBe(true);
-    // the same once Relay has the answer, with nothing left on the phone
     const escalated = asked({ status: "escalated", answer: "no" });
     expect(answeredNo(run([moved], [escalated]), [])).toEqual([escalated]);
     expect(overlay(run([moved], [escalated]), []).trip?.stops[0]?.status).toBe("delivered");
 
-    // settled with the other vehicle's copy kept: the phone's own record is set aside
+    // The office kept the other vehicle's copy, so the phone's own record is set aside.
     const kept = asked({ status: "resolved", answer: "no", resolution: "dispatcher" });
     expect(overlay(run([moved], [kept]), answered).trip?.stops[0]?.status).toBe("moved");
     expect(waitingForCall(run([moved], [kept]), answered, "s4")).toBe(false);
-    // settled with the driver's delivery standing: Relay has it delivered
+    // The driver's delivery stands, so Relay has the stop delivered.
     const stands = stop(4, "Aranayake", { status: "delivered", completed_at: at("07:09"), version: 3 });
     expect(overlay(run([stands], [kept]), answered).trip?.stops[0]?.status).toBe("delivered");
   });
@@ -214,7 +211,6 @@ describe("the phone's own records over Relay's run", () => {
     const shown = overlay(run([moved], [asked()]), []).trip?.stops[0];
     expect(shown).toMatchObject({ status: "delivered", completed_at: at("07:09"), arrived_at: at("06:56") });
     expect(shown).toMatchObject({ receiver: "K. Herath", has_photo: true });
-    // a settled question leaves the stop as Relay has it
     const settled = overlay(run([moved], [asked({ status: "resolved", resolution: "driver" })]), []);
     expect(settled.trip?.stops[0]?.status).toBe("moved");
   });
@@ -228,7 +224,7 @@ describe("the phone's own records over Relay's run", () => {
   });
 
   it("says a stop reached Relay when the last of its records did, from this phone or a demo jump", () => {
-    // the phone sent its arrival at 5:37 once the demo switch was off; the delivery a jump played came in at 7:14
+    // The arrival went at 5:37 once the demo switch was off. A jump's delivery came in at 7:14.
     const arrived = record("arrived", "05:22", "s2");
     const items = localItems([], [sent(arrived, "applied", { saved_offline: true, at: at("05:37") })], new Set());
     const mawanella = stop(2, "Mawanella", { status: "delivered", sent_at: "2026-04-08T07:14:00+05:30" });
@@ -304,7 +300,6 @@ describe("the run's clock", () => {
     expect(expectedPassed(s, new Date(at("05:05")))).toBe(false);
     expect(expectedPassed(s, new Date(`${DAY}T05:05:59+05:30`))).toBe(false);
     expect(expectedPassed(s, new Date(at("05:06")))).toBe(true);
-    // an arrival or a delivery answers it: nothing is still expected
     expect(expectedPassed({ ...s, status: "arrived" }, new Date(at("05:20")))).toBe(false);
     expect(expectedPassed({ ...s, expected: null }, new Date(at("05:20")))).toBe(false);
   });

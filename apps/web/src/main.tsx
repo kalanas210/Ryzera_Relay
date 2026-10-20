@@ -5,8 +5,8 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router/dom";
 import { ApiError } from "./api/client";
 import { router } from "./app/router";
-// No "./i18n" here: only the driver's and the loader's screens import it, so their words in three languages, with
-// i18next, build into a chunk those two roles share, and the sign-in page, the desk and the store never download it.
+// No "./i18n" import here. Only the driver and loader screens use it, so the sign-in page,
+// the desk and the store never download its chunk.
 import "./styles/app.css";
 
 const queryClient = new QueryClient({
@@ -18,7 +18,7 @@ const queryClient = new QueryClient({
   },
 });
 
-// Cache the app shell for the field roles' phones; a new build takes over on the next load.
+// Caches the app shell for the field roles' phones. A new build takes over on the next load.
 registerSW({ immediate: true });
 
 const root = document.getElementById("root");

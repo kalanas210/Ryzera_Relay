@@ -34,13 +34,12 @@ def _find(db: Session, username: str) -> AppUser | None:
     return db.scalar(select(AppUser).where(AppUser.username == username.strip().lower()))
 
 
+# Key in Workspace.state. Holds each person's language in this copy of the day, by username.
 LOCALES = "locales"
-"""Key in Workspace.state: each person's language in this copy of the day, by username."""
 
 
+# A language choice stays in the copy it was made in. A reset brings back the seeded language.
 def _me(workspace: Workspace, user: AppUser) -> Me:
-    """The person as this copy of the day knows them. A language choice belongs to the copy it was made in, so one
-    judge's choice never reaches another judge's copy, and a reset brings back the seeded language."""
     locale = workspace.state.get(LOCALES, {}).get(user.username, user.locale)
     return Me.model_validate(user).model_copy(update={"locale": locale})
 
@@ -56,7 +55,7 @@ def login(body: PasswordLogin, response: Response, scope: ScopeDep) -> Me:
 
 @router.post("/pin", response_model=Me)
 def pin_login(body: PinLogin, response: Response, scope: ScopeDep) -> Me:
-    """The shared dock tablet: pick your name, enter your 4-digit PIN."""
+    """For the shared dock tablet. Pick your name, then enter your 4-digit PIN."""
     user = _find(scope.db, body.username)
     if user is None or user.role not in (Role.LOADER, Role.DRIVER) or not verify_secret(user.pin_hash, body.pin):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "That PIN did not match. Try again.")
@@ -80,8 +79,8 @@ class LocaleIn(BaseModel):
 
 @router.patch("/me", response_model=Me)
 def set_locale(body: LocaleIn, user: CurrentUser, scope: ScopeDep) -> Me:
-    """Each person's language comes back when they sign in again, on any device, in this copy of the day."""
-    # the workspace row is locked as the simulator locks it, so neither writes over the other's state
+    """The language comes back when the person signs in again, on any device, in this copy of the day."""
+    # Lock the workspace row the way the simulator does, so neither overwrites the other's state.
     workspace = scope.db.scalar(
         select(Workspace)
         .where(Workspace.id == scope.workspace.id)
@@ -121,7 +120,7 @@ def accounts(db: Db) -> list[Account]:
         }[u.role]
         uses_pin = u.role is Role.LOADER
         pin = pins.get(u.username)
-        # a driver signs in with a password but accepts a load on the dock tablet with a PIN, so both are shown
+        # A driver signs in with a password but accepts a load on the dock tablet with a PIN, so both show.
         if uses_pin:
             hint = f"PIN {pin or ''}"
         else:

@@ -50,8 +50,7 @@ const DELAYS = [10, 20, 30] as const;
 
 type Photo = { id: string; blob: Blob; taken_at: string; width: number; height: number };
 
-/** DRV-04 Report a problem: six reasons, then what the dispatcher needs for the one picked. Every report is stamped
- *  with the time and a location reading and saved on the phone first, like the stops. */
+// DRV-04 Report a problem. Each report is saved on the phone first, with the time and a location.
 export function ReportPage() {
   const { reason } = useParams();
   const [params] = useSearchParams();
@@ -90,7 +89,6 @@ function ReasonList({ run, trip, stop }: { run: DriverRun; trip: DriverTrip; sto
   const about = useAbout(trip, stop);
   const name = calledName(run.dispatcher);
   const query = stop ? `?stop=${stop.stop_id}` : "";
-  // back to the screen it came from; a report opened on its own goes back to the run
   const close = () => ((window.history.state as { idx?: number } | null)?.idx ? navigate(-1) : navigate("/driver"));
   return (
     <PhoneScreen header={<DriverHeader close={close} />}>
@@ -199,7 +197,7 @@ function ReasonForm({
     setBusy(true);
     const payload: Record<string, unknown> = { reason: r, note: note.trim() };
     if (r === "delayed") {
-      // "More than 30 min" has no number: it goes as more than 30, and the note says the rest
+      // "More than 30 min" has no number, so delay_min is null and more_than_min is 30.
       payload.delay_min = delay === "more" ? null : delay;
       if (delay === "more") payload.more_than_min = 30;
     }
@@ -220,13 +218,13 @@ function ReasonForm({
       },
       { locate: true },
     );
-    // a report's photo is for the dispatcher: it names the report, not the stop's proof
+    // The photo is for the dispatcher, so it names the report and not the stop's proof.
     if (photo) await savePhoto({ ...photo, stop_id: null, event_id: record.id });
     setSentId(record.id);
   };
 
   const back = `/driver/report${stop ? `?stop=${stop.stop_id}` : ""}`;
-  // a truck that cannot move needs a call first: the call becomes the screen's one primary
+  // A truck that cannot move needs a call first, so the call is the one primary button.
   const callFirst = r === "vehicle_problem" && canMove === "no" && Boolean(run.dispatcher_phone) && Boolean(name);
   return (
     <PhoneScreen
@@ -276,7 +274,6 @@ function ReasonForm({
               </ChoiceChip>
             </div>
           </fieldset>
-          {/* with no signal the report waits on the phone, so the dispatcher does not see it straight away */}
           <Notice tone="info">
             {offline ? t("report.delayInfoOffline", { name }) : t("report.delayInfo", { name })}
           </Notice>
@@ -363,7 +360,6 @@ function ReasonForm({
   );
 }
 
-/** DRV-04 / report sent: sent with the time and location, or saved on the phone until there is signal. */
 function ReportSent({ id }: { id: string }) {
   const { t } = useDriverText();
   const { items, offline, run } = useDriver();

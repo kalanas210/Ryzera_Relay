@@ -1,6 +1,4 @@
-"""The dispatcher's live view (DSP-04): the feed of things that need the dispatcher once the plan is out, each
-carrying what changed and who was told. On the phone it is the only thing shown, so a flag from the dock at 2:47 AM
-reaches the dispatcher on call at home with the decision it needs."""
+"""The dispatcher's live view (DSP-04), and the only thing shown on the dispatcher's phone."""
 
 from __future__ import annotations
 

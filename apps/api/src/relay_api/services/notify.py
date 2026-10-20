@@ -12,8 +12,8 @@ from relay_api.models import FeedItem, FeedKind, Notification
 from relay_api.services.words import clock
 
 CUTOFF_REMINDER = "cutoff_reminder"
+# A second Remind within this long of the first sends nothing new. The store already has it.
 REMIND_AGAIN_AFTER = timedelta(minutes=10)
-"""A second Remind within this long of the first sends nothing new: the store already has it."""
 
 
 def notify_store(
@@ -41,7 +41,6 @@ def notify_store(
 
 
 def last_reminders(db: Session, run_date: date, now: datetime) -> dict[str, datetime]:
-    """When each store was last reminded to order for this run, by outlet."""
     out: dict[str, datetime] = {}
     for notice in db.scalars(
         select(Notification).where(Notification.kind == CUTOFF_REMINDER, Notification.created_at <= now)
@@ -62,8 +61,7 @@ def remind_to_order(
     usual: str,
     last: datetime | None = None,
 ) -> datetime:
-    """The dispatcher's Remind: a notice in the store's Relay app with the cutoff. Returns when the store was
-    reminded, which is the earlier reminder when one went out a moment ago."""
+    # Returns when the store was reminded, which is the earlier time if one went out a moment ago.
     if last is not None and now - last < REMIND_AGAIN_AFTER:
         return last
     notify_store(

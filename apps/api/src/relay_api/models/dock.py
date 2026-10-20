@@ -14,8 +14,8 @@ class LoadLineStatus(enum.StrEnum):
     TO_LOAD = "to_load"
     IN_PROGRESS = "in_progress"
     CHECKED = "checked"
+    # Flagged short or damaged. Loading goes on while the dispatcher decides.
     FLAG_WAITING = "flag_waiting"
-    """Flagged short or damaged; loading goes on while the dispatcher decides."""
     DECIDED = "decided"
 
 
@@ -43,10 +43,10 @@ class ShortfallKind(enum.StrEnum):
 
 
 class ShortfallDecision(enum.StrEnum):
+    # Leave without the cases and add them to the store's next order.
     SEND_SHORT = "send_short"
-    """Leave without the cases and add them to the store's next order."""
+    # Leave without the cases. The store is told and nothing is added.
     NO_REPLACEMENT = "no_replacement"
-    """Leave without the cases; the store is told and nothing is added."""
 
 
 class Shortfall(WorkspaceScoped, Base):
@@ -80,6 +80,6 @@ class Handover(WorkspaceScoped, Base):
     accepted_at: Mapped[datetime | None]
     accepted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     accepted_on: Mapped[str | None] = mapped_column(String(8))
-    """'phone' or 'tablet' (the driver's own PIN on the dock tablet)."""
+    """'phone' or 'tablet'. On the tablet the driver types their own PIN."""
     difference: Mapped[str] = mapped_column(Text, default="")
-    """What the driver said does not match, when the driver reported a difference instead of accepting."""
+    """What the driver says does not match, when they report a difference instead of accepting."""

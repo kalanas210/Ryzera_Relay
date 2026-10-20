@@ -1,5 +1,5 @@
-"""What the store manager's phone reads and sends: My orders (STM-01), an order and a change to it (STM-02), the
-store's notices (STM-03) and its receipt (STM-05)."""
+"""What the store manager's phone reads and sends. My orders (STM-01), an order and its change (STM-02),
+notices (STM-03) and the receipt (STM-05)."""
 
 from __future__ import annotations
 
@@ -65,8 +65,8 @@ class StoreOrderOut(Schema):
     status: str
     placed_at: datetime
     locked: bool
+    # When orders for its requested day close. The store can change the order until then.
     locks_at: datetime
-    """When orders for its requested day close: the store can change it until then."""
     lines: list[LineOut]
     deferral: DeferralOut | None
 
@@ -74,12 +74,11 @@ class StoreOrderOut(Schema):
 class StoreHome(Schema):
     outlet: OutletOut
     now: datetime
+    # The run a new order joins right now. The cutoff is when its orders close.
     ordering_for: date
-    """The run a new order joins right now."""
     cutoff: datetime
-    """When orders for `ordering_for` close."""
+    # The run whose orders closed at 4:00 PM today, while new orders go on the one after it.
     closed_for: date | None = None
-    """The run whose orders closed at 4:00 PM today, while new orders go on the one after it."""
     closed_at: datetime | None = None
     next_run: date
     orders: list[StoreOrderOut]
@@ -95,16 +94,16 @@ class LineIn(BaseModel):
 class PlaceOrder(BaseModel):
     temp: Literal["ambient", "chilled"]
     lines: list[LineIn] = Field(min_length=1, max_length=12)
+    # Made on the store's device, so pressing Try again never sends a second order.
     client_ref: str = Field(min_length=8, max_length=64)
-    """Generated on the store's device, so pressing Try again never sends a second order."""
+    # The run the store's form showed. Relay's receive time still decides. A send that reaches it after that
+    # run's cutoff goes on the next run, and the store is told so.
     for_date: date | None = None
-    """The run the store's form showed. Relay's receive time still decides: a send that reaches it after that run's
-    cutoff goes on the next run, and the store is told so."""
 
 
 class ChangeOrder(BaseModel):
+    # The store's own counts. Cases carried onto the order from a short delivery stay on top of them.
     lines: list[LineIn] = Field(min_length=1, max_length=12)
-    """The store's own counts. Cases Waypoint carried onto the order from a short delivery stay on top of them."""
 
 
 class NoticeOut(Schema):
@@ -132,5 +131,4 @@ class ReceiptIn(BaseModel):
 
 class IssuesIn(BaseModel):
     client_ref: str = Field(min_length=8, max_length=64)
-    """Made on the store's phone, so Try again never reports the same problem twice."""
     issues: list[IssueIn] = Field(min_length=1, max_length=20)

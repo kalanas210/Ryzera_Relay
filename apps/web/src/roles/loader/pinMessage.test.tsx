@@ -18,7 +18,6 @@ describe("the line under the PIN dots", () => {
   it("keeps the room of every message it may show, whichever one shows", () => {
     render(<PinMessage note={note} error={null} />);
     expect(shown(note)).toBe(true);
-    // laid out unseen, so a wrong PIN arriving never moves the keys below
     expect(shown(wrong)).toBe(false);
     expect(shown("No connection. Check the Wi-Fi and try again.")).toBe(false);
   });

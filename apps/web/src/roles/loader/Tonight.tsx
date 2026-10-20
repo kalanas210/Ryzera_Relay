@@ -34,7 +34,7 @@ function readDismissed(): string[] {
   }
 }
 
-/** LDR-01 Tonight's loads: what has to leave this dock tonight, and when. */
+// LDR-01. What has to leave this dock tonight, and when.
 export function TonightPage() {
   const { t } = useLoaderText();
   const tonight = useTonight();
@@ -48,7 +48,7 @@ export function TonightPage() {
     try {
       localStorage.setItem(DISMISSED_KEY, JSON.stringify(next.slice(-50)));
     } catch {
-      // the banner comes back next time; nothing is lost
+      // The banner comes back next time. Nothing is lost.
     }
   };
 
@@ -60,7 +60,6 @@ export function TonightPage() {
       </div>
       <main className="flex flex-col gap-3 px-4 pt-3 pb-8">
         {!data ? null : !data.published_at ? (
-          // why there is nothing to load yet, and what brings the loads: the dispatcher publishing the day's plan
           <section className="flex flex-col gap-1 rounded-card border border-asphalt-200 bg-white px-4 py-4">
             <h2 className="t-h2">{t("tonight.notPublishedTitle")}</h2>
             <p className="t-body text-asphalt-700">
@@ -119,8 +118,6 @@ function TonightBody({
       {data.left.length ? (
         <section className="flex flex-col gap-3">
           <h2 className="t-label text-asphalt-500">{t("tonight.groups.left")}</h2>
-          {/* One grid, so every row's place starts after the widest time: a 10:05 never pushes its district a digit
-              further than a 2:00. The time column is 64 wide at the least. */}
           <div className="grid grid-cols-[minmax(4rem,max-content)_minmax(0,1fr)] gap-x-3 gap-y-3 rounded-card border border-asphalt-200 bg-white p-4">
             {data.left.map((row) => (
               <Fragment key={`${row.district}-${row.at}`}>
@@ -248,7 +245,7 @@ function VehicleLoadCard({ card, highlighted }: { card: LoadCard; highlighted: b
   ]
     .filter(Boolean)
     .join(" · ");
-  // The Plan changed modifier is the border and the chip together; both go once the load is complete.
+  // The border and the Plan changed chip come together, and both go once the load is complete.
   const planChanged = highlighted || (Boolean(card.plan_changed_at) && card.state !== "ready");
 
   return (
@@ -262,7 +259,7 @@ function VehicleLoadCard({ card, highlighted }: { card: LoadCard; highlighted: b
     >
       <div className="flex w-full items-center gap-2">
         <VehicleIcon size={24} strokeWidth={1.75} aria-hidden className="shrink-0 text-asphalt-900" />
-        {/* the Chilled chip drops under the vehicle before the departure time would be pushed off the card */}
+        {/* The Chilled chip drops under the vehicle before the departure time is pushed off the card. */}
         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="latin t-h2 text-asphalt-900">{card.vehicle_id}</span>
           {card.temp === "chilled" ? (

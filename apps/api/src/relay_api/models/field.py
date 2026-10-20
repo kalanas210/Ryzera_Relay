@@ -1,4 +1,4 @@
-"""What drivers record on the road. Every record carries the id the phone gave it, so a resend is harmless."""
+"""What drivers record on the road. The phone makes each record's id, so sending it twice is harmless."""
 
 from __future__ import annotations
 
@@ -23,16 +23,15 @@ class FieldEventKind(enum.StrEnum):
     TRIP_FINISHED = "trip_finished"
     CHECKIN = "checkin"
     LOAD_DIFFERENCE = "load_difference"
-    """The driver says the load does not match the handover."""
+    # The driver's answer to the one question about a stop with two copies.
     CONFLICT_ANSWER = "conflict_answer"
-    """The driver's answer to the one question about a stop with two copies."""
 
 
 class FieldEventOutcome(enum.StrEnum):
     APPLIED = "applied"
     DUPLICATE = "duplicate"
+    # Recorded, but it clashes with a change the office made while the phone was silent.
     CONFLICT = "conflict"
-    """Recorded, but it clashes with a change the office made while the phone was silent."""
     REJECTED = "rejected"
 
 
@@ -40,14 +39,14 @@ class FieldEvent(WorkspaceScoped, Base):
     __tablename__ = "field_event"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
-    """Generated on the phone when the record is made."""
+    """Made on the phone when the record is created."""
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), index=True)
     device_id: Mapped[str] = mapped_column(String(64))
     kind: Mapped[FieldEventKind] = mapped_column(str_enum(FieldEventKind))
     trip_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("trip.id", ondelete="CASCADE"), index=True)
     stop_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("stop.id", ondelete="CASCADE"), index=True)
     occurred_at: Mapped[datetime]
-    """When it happened, by the phone's scenario clock. Kept as recorded, even if it arrives an hour later."""
+    """When it happened on the phone's scenario clock. Kept as recorded, even if it arrives late."""
     received_at: Mapped[datetime]
     base_version: Mapped[int | None]
     """The stop version the phone last saw."""
@@ -57,7 +56,7 @@ class FieldEvent(WorkspaceScoped, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
     outcome: Mapped[FieldEventOutcome] = mapped_column(str_enum(FieldEventOutcome))
     applied_at: Mapped[datetime | None]
-    """When it took effect: on arrival, or when the question it raised was settled."""
+    """When it took effect. That is on arrival, or when the question it raised was settled."""
     reject_reason: Mapped[str] = mapped_column(Text, default="")
 
 
@@ -74,11 +73,11 @@ class Photo(WorkspaceScoped, Base):
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     stop_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("stop.id", ondelete="CASCADE"), index=True)
     event_id: Mapped[uuid.UUID | None]
-    """The delivery record it belongs to; the photo is sent after it."""
+    """The delivery record it belongs to. The photo is sent after the record."""
 
 
 class Proof(WorkspaceScoped, Base):
-    """Proof of delivery for one stop: what was dropped, who received it, a photo or a signature."""
+    """Proof of delivery for one stop. What was dropped, who received it, plus a photo or a signature."""
 
     __tablename__ = "proof"
 
@@ -122,13 +121,13 @@ class ProblemReport(WorkspaceScoped, Base):
 
 class ConflictStatus(enum.StrEnum):
     WAITING_FOR_DRIVER = "waiting_for_driver"
+    # The driver said no, or nobody answered in 10 minutes. The dispatcher decides.
     ESCALATED = "escalated"
-    """The driver said no, or nobody answered in 10 minutes: the dispatcher decides."""
     RESOLVED = "resolved"
 
 
 class Conflict(WorkspaceScoped, Base):
-    """A driver's offline record that clashes with an office change, and the one question that settles it."""
+    """A driver's offline record that clashes with an office change. One question settles it."""
 
     __tablename__ = "conflict"
 
@@ -142,16 +141,15 @@ class Conflict(WorkspaceScoped, Base):
     opened_at: Mapped[datetime]
     answered_at: Mapped[datetime | None]
     resolution: Mapped[str] = mapped_column(Text, default="")
-    """Who settled it: the driver, or the dispatcher cancelling the backup's copy."""
+    """Who settled it. Either the driver, or the dispatcher cancelling the backup's copy."""
     event_id: Mapped[uuid.UUID | None]
-    """The record that clashed."""
     resolved_at: Mapped[datetime | None]
     resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     escalated_at: Mapped[datetime | None]
 
 
 class DeviceContact(WorkspaceScoped, Base):
-    """The last time each driver's phone reached Relay, and what it said was still waiting to send."""
+    """The last time each driver's phone reached Relay, and how many records it still had to send."""
 
     __tablename__ = "device_contact"
 
@@ -162,5 +160,5 @@ class DeviceContact(WorkspaceScoped, Base):
     pending_records: Mapped[int] = mapped_column(default=0)
     device_id: Mapped[str | None] = mapped_column(String(64))
     gap_from: Mapped[datetime | None]
-    """The last silence on a running trip, for "Offline 5:41 to 7:14"."""
+    """The last silence on a running trip, shown as Offline 5:41 to 7:14."""
     gap_to: Mapped[datetime | None]

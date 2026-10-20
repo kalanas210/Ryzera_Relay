@@ -1,11 +1,4 @@
-"""Every trip one vehicle could run: a set of orders of one brand and temperature, in one district, that fits
-some vehicle, the time budget and every store window at free flow.
-
-For a district with up to EXHAUSTIVE orders the search walks every subset, and stops extending a set as soon
-as it breaks a limit, because adding a stop never makes a trip lighter, shorter or earlier. Larger districts
-get every set of up to SMALL_SET orders plus every run of consecutive orders in two natural stop orders,
-which is where good trips come from.
-"""
+"""Every trip one vehicle could run: it fits a vehicle, the time budget and every store window."""
 
 from __future__ import annotations
 
@@ -34,8 +27,8 @@ SMALL_SET = 4
 @dataclass(frozen=True, slots=True)
 class Option:
     orders: tuple[str, ...]
+    # in earliest-close order
     outlets: tuple[str, ...]
-    """In earliest-close order."""
     brand: Brand
     temp: Temp
     district: str
@@ -43,15 +36,10 @@ class Option:
     volume_m3: float
     van_only: bool
     minutes: int
-    """The published standard for this trip."""
     earliest_back: float
-    """Back at the depot at free flow when leaving as soon as the vehicle is ready, by the better simple stop order."""
     preferred_depart: int
-    """When Relay would send it as a first trip (see clock.choose_departure)."""
     preferred_back: float
-    """Back at the depot at free flow after leaving at preferred_depart."""
     latest_depart: int | None
-    """The latest departure that still keeps every window, for use as a second trip."""
     km: float
 
     @property
@@ -63,6 +51,8 @@ def group_key(network: Network, order: Order) -> tuple[Brand, Temp, str]:
     return order.brand, order.temp, network.outlets[order.outlet_id].district
 
 
+# Districts with up to EXHAUSTIVE orders walk every subset. A set stops growing once it breaks a limit,
+# because adding a stop never makes a trip lighter, shorter or earlier.
 def enumerate_options(
     network: Network,
     orders: Sequence[Order],
@@ -112,7 +102,6 @@ class _Builder:
         self.found: dict[tuple[str, ...], Option] = {}
 
     def make(self, members: Sequence[Order]) -> Option | None:
-        """The option for exactly these orders, or None when they break a limit."""
         network = self.network
         weight = sum(o.weight_kg for o in members)
         volume = sum(o.volume_m3 for o in members)

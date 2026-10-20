@@ -22,18 +22,14 @@ export function useOnline(): boolean {
 
 type Props = {
   synced: string;
-  /** Shown while a save is on its way. */
   sending: string;
-  /** Shown offline with nothing waiting to send. */
   offline: string;
-  /** Records saved on this device that have not reached Relay yet. */
+  // records saved on this device that have not reached Relay yet
   waiting?: number;
-  /** "3 lines to send", for the waiting count. */
   toSend?: (count: number) => string;
 };
 
-/** Status only, never a button: all synced, sending, or offline with what is still to send. Every count it shows is
- *  a real one; with nothing waiting, offline reads as plain "Offline". */
+// Status only, never a button. Every count it shows is a real one, so with nothing waiting it reads plain "Offline".
 export function SyncPill({ synced, sending, offline, waiting = 0, toSend }: Props) {
   const online = useOnline();
   const busy = useIsMutating() > 0;
@@ -48,7 +44,7 @@ export function SyncPill({ synced, sending, offline, waiting = 0, toSend }: Prop
         "inline-flex h-8 max-w-[140px] shrink-0 items-center gap-1 rounded-chip px-2 t-label",
         state === "synced"
           ? "bg-done-soft text-done"
-          : // offline and sending follow the Waiting rule: asphalt-700 on waiting-soft, with an edge
+          : // offline and sending follow the Waiting rule
             "border border-asphalt-300 bg-waiting-soft text-asphalt-700",
       )}
     >

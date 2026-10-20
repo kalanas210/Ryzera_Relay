@@ -24,7 +24,7 @@ import { cx } from "@/lib/cx";
 
 export type Tone = "chilled" | "done" | "attention" | "problem" | "waiting" | "neutral" | "muted" | "petrol";
 
-/** One set of status words for every role (specs/components.md, Status words). */
+// One set of status words for every role (specs/components.md, Status words).
 export const CHIPS = {
   chilled: { tone: "chilled", icon: Snowflake, label: "Chilled" },
   dry: { tone: "muted", icon: Package, label: "Dry" },
@@ -67,7 +67,7 @@ const TONE: Record<Tone, string> = {
   done: "bg-done-soft text-done",
   attention: "bg-attention-soft text-attention",
   problem: "bg-problem-soft text-problem",
-  // The Waiting rule: text and icons asphalt-700 on the soft fill, with an asphalt-300 border.
+  // The Waiting rule: asphalt-700 text and icon on the soft fill, with an asphalt-300 border.
   waiting: "bg-waiting-soft text-asphalt-700 border border-asphalt-300",
   neutral: "bg-asphalt-100 text-asphalt-900",
   muted: "bg-asphalt-100 text-asphalt-700",

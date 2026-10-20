@@ -23,7 +23,6 @@ import { useDriver } from "./sync";
 import type { DriverRun, DriverStop, DriverTrip } from "./types";
 import { useDriverText } from "./words";
 
-/** The trip a stop belongs to: today's current trip, or a later one. */
 export function findStop(run: DriverRun | null, stopId: string): { trip: DriverTrip; stop: DriverStop } | null {
   for (const trip of [run?.trip, ...(run?.later ?? [])]) {
     const stop = trip?.stops.find((s) => s.stop_id === stopId);
@@ -32,8 +31,7 @@ export function findStop(run: DriverRun | null, stopId: string): { trip: DriverT
   return null;
 }
 
-/** DRV-02 Stop: at the outlet. The window, the way in and what comes off the truck, then Arrived (the time saves at
- *  once, the location follows in the background) and Record delivery. */
+// DRV-02 Stop. Arrived saves the time at once, and the location follows in the background.
 export function StopPage() {
   const { stopId = "" } = useParams();
   const { run, now, loaded, items, save } = useDriver();
@@ -50,7 +48,7 @@ export function StopPage() {
   const w = windowState(run.run_date, stop.window_open, stop.window_close, now);
 
   const arrive = async () => {
-    // a first arrival with no "Leave the hub" tapped: Relay takes the planned departure as when the truck left
+    // If Leave the hub was never tapped, Relay takes the planned departure as when the truck left.
     await save(
       { kind: "arrived", trip_id: trip.trip_id, stop_id: stop.stop_id, base_version: stop.version },
       { locate: true },
@@ -120,7 +118,6 @@ export function StopPage() {
   );
 }
 
-/** The outlet block: marker, place, store and, before Arrived, both named times. */
 function OutletBlock({ stop, next, now }: { stop: DriverStop; next: DriverStop | null; now: Date }) {
   const { t, storeName, clock, expectedAt } = useDriverText();
   const state = stop.status === "arrived" ? "next" : markerState(stop, next);
@@ -147,8 +144,7 @@ function OutletBlock({ stop, next, now }: { stop: DriverStop; next: DriverStop |
   );
 }
 
-/** What has happened at the stop: the arrival strip (in neutral words: the green is for the saved arrival, not the
- *  comparison), the delivery, or the office's change. */
+// The arrival strip uses neutral words. Green is for the saved arrival, not the comparison with plan.
 function StopState({ run, stop, local }: { run: DriverRun; stop: DriverStop; local: StopLocal }) {
   const { t, clock, around, duration, place } = useDriverText();
   if (stop.status === "moved" && stop.moved_to) {
@@ -215,7 +211,6 @@ function StopState({ run, stop, local }: { run: DriverRun; stop: DriverStop; loc
   return null;
 }
 
-/** Notice / done as the arrival strip: title, the expected time, the location line, and the waiting mark. */
 function Strip({
   title,
   lines,
@@ -248,7 +243,6 @@ function Strip({
   );
 }
 
-/** Window panel: the receiving window, how it stands now, and where to unload. */
 function WindowPanel({ run, stop, now, toCome }: { run: DriverRun; stop: DriverStop; now: Date; toCome: boolean }) {
   const { t, windowOf, access } = useDriverText();
   const Access = accessIcon(stop);
@@ -270,7 +264,6 @@ function WindowPanel({ run, stop, now, toCome }: { run: DriverRun; stop: DriverS
   );
 }
 
-/** Drop off: the order and each line as it came off the truck, with a short line explained under it. */
 function DropOff({ trip, stop }: { trip: DriverTrip; stop: DriverStop }) {
   const { t, cases, caseLine, weekday } = useDriverText();
   return (

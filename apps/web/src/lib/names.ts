@@ -1,5 +1,4 @@
-/** The name people are called by, as the design writes it: "Kasun" for Kasun Bandara, "Rizwan" for Mohamed
- *  Rizwan (the Mohamed is a given first element, not what he is called). */
+// Mohamed is a given first name, not what he is called. Mohamed Rizwan is "Rizwan".
 const GIVEN_FIRST = new Set(["mohamed", "mohammed", "muhammad", "mohammad", "mohomed"]);
 
 export function calledName(full: string | null | undefined): string {

@@ -1,5 +1,5 @@
-"""Photos, for whoever may see them: a proof photo for the driver who took it, the store it was taken at and the
-dispatcher; a photo of damaged cases for the dock and the dispatcher."""
+"""Who may see a photo. A proof photo goes to the driver who took it, its store and the dispatcher.
+A photo of damaged cases goes to the dock and the dispatcher."""
 
 from __future__ import annotations
 

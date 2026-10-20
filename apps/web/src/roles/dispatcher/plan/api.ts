@@ -35,7 +35,7 @@ export type PlanTrip = {
   broken: number;
   stops: PlanStop[];
   note: string;
-  /** Packed or gone, so its stop order can no longer change: the cases went on in that order. */
+  // Packed or gone, so its stop order can no longer change.
   load_locked: boolean;
 };
 export type Lane = {
@@ -74,9 +74,7 @@ export type Waiting = {
     to_date: string;
     confirmed_at: string | null;
     store_notice: string;
-    /** When the store was sent the notice: the plan's publish. */
     notified_at: string | null;
-    /** When the store pressed Got it: "Seen 6:41 PM". */
     acknowledged_at: string | null;
   } | null;
 };
@@ -89,11 +87,8 @@ export type Board = {
     version: number;
     proposed_at: string | null;
     published_at: string | null;
-    /** The last hand move, while the board differs from Relay's proposal. */
     edited_at: string | null;
-    /** When the draft last became publishable: every rule kept and every waiting order given a reason. */
     ready_at: string | null;
-    /** A vehicle went to the workshop, back into service or onto standby after the proposal. */
     fleet_changed_at: string | null;
   };
   orders: number;
@@ -122,14 +117,11 @@ export type Fit = {
   trip_no: number;
   fits: boolean;
   hint: string;
-  /** What the trip would carry with the dragged orders on it. */
   weight_kg: number;
   volume_m3: number;
   weight_cap_kg: number;
   volume_cap_m3: number;
-  /** Where the first dragged order would ride, once Relay puts the stops in order. */
   stop: number;
-  /** The trip the dragged orders are on now. */
   current: boolean;
 };
 export type Check = {
@@ -162,15 +154,14 @@ export function useBoard(depot: DepotName) {
   });
 }
 
-/** Proposing and "Defer anyway" both send the engine searching, from the plan bar or the drawer; the plan bar
- *  shows the wait for either. */
+// Proposing and "Defer anyway" both send the engine searching. The plan bar shows the wait for either.
 export const replanKey = (depot: DepotName) => ["plan-replan", depot] as const;
 
 function useBoardMutation<I>(depot: DepotName, fn: (input: I) => Promise<Board>, mutationKey?: readonly unknown[]) {
   const client = useQueryClient();
   return useMutation({
     mutationKey,
-    // a poll still on its way would land after the change and put the old board back for 15 seconds
+    // A poll still on its way would land after the change and put the old board back for 15 seconds.
     onMutate: () => client.cancelQueries({ queryKey: ["plan", depot] }),
     mutationFn: fn,
     onSuccess: (board) => {
@@ -189,7 +180,7 @@ export function usePropose(depot: DepotName) {
   );
 }
 
-/** Where a move sends its orders: a trip, or with no vehicle, off every trip into Not placed. */
+// With no vehicle, the orders come off every trip and go to Not placed.
 export type MoveInput = { order_refs: string[]; vehicle_id?: string; trip_no?: number };
 
 export function useMove(depot: DepotName, planId: string | undefined) {
@@ -215,7 +206,6 @@ export function useOverride(depot: DepotName, planId: string | undefined) {
   );
 }
 
-/** Send a vehicle to the workshop, back into service, or onto standby for the plan's run. */
 export function useVehicleStatus(depot: DepotName, runDate: string | undefined) {
   return useBoardMutation(depot, (input: { vehicle_id: string; status: Lane["status"]; note?: string }) =>
     api.patch<Board>(
@@ -226,7 +216,6 @@ export function useVehicleStatus(depot: DepotName, runDate: string | undefined) 
   );
 }
 
-/** For every trip and empty slot: would these orders fit (one Not placed card, or every order of a stop). */
 export function fetchFits(planId: string, orderRefs: string[], signal?: AbortSignal) {
   const query = orderRefs.map((ref) => `order_ref=${encodeURIComponent(ref)}`).join("&");
   return api.get<Fit[]>(`/api/dispatch/plan/${planId}/fit?${query}`, { role, signal });
@@ -240,7 +229,6 @@ export function useCheck(planId: string | undefined, enabled: boolean) {
   });
 }
 
-// ---------------------------------------------------------------------------------------------- the drawer
 export type DrawerGroup = {
   temp_class: string;
   orders: number;
@@ -256,36 +244,31 @@ export type DrawerGroup = {
   waits: number;
   waits_kg: number;
   waits_m3: number;
-  /** How many of the waiting orders wait by the dispatcher's override, in place of Relay's choice. */
   by_override: number;
   pool: {
     count: number;
     by_district: Record<string, string[]>;
     keeping: string[];
-    /** "Rule 3 picks OUT105, OUT110 and OUT111." */
     summary: string;
   };
-  /** Rule 3 gives one line per waiting order when more than one waits. */
   rules: { n: number; title: string; reason: string; lines: string[] }[];
-  /** The plan the published standard alone would pass, when it carries every order, and where the clock breaks it. */
+  // The plan the published standard alone would pass, if it carries every order, and where the clock
+  // breaks it.
   paper: { orders: number; rows: { vehicle_id: string; takes: string; minutes: string }[]; fails: string[] } | null;
   picked_by_rule: number | null;
   result: string;
 };
-/** The one check of the next run, made with every waiting order of the plan together. */
 export type NextRunCheck = {
   fits: boolean;
   day: string;
   vehicle_id?: string;
   vehicle_kind?: string;
-  /** The vehicle is in the workshop on the run that defers the order. */
   back_from_workshop?: boolean;
   trip_no?: number;
   district?: string;
   usual?: boolean;
-  /** When unloading starts: an early vehicle waits for the store to open. */
+  // When unloading starts. An early vehicle waits for the store to open.
   planned?: string;
-  /** Earlier than planned when the vehicle waits for the store to open. */
   arrives?: string | null;
   depart?: string;
   back?: string;
@@ -304,7 +287,6 @@ export type NextRunCheck = {
   needed?: number;
   fleet?: number;
   standby?: string[];
-  /** The waiting orders this check was made with; it is made again when they change. */
   checked_with?: string[];
 };
 export type DrawerWaiting = {
@@ -322,7 +304,6 @@ export type DrawerWaiting = {
   kind: string;
   rule: number | null;
   unavoidable: boolean;
-  /** Deferred by the dispatcher's override rather than by Relay. */
   overridden: boolean;
   last_delivered: string | null;
   sibling: { order_ref: string; temp: string; vehicle_id: string; expected: string } | null;
@@ -391,7 +372,6 @@ export function useConfirm(planId: string | undefined, depot: DepotName) {
   });
 }
 
-// ---------------------------------------------------------------------------------------------- after publishing
 export type StopShift = {
   order_ref: string;
   outlet_id: string;
@@ -417,7 +397,6 @@ function reorderPath(planId: string, vehicleId: string, tripNo: number) {
   return `/api/dispatch/plan/${planId}/trips/${vehicleId}/${tripNo}/reorder`;
 }
 
-/** What a new stop order on a published trip costs, asked before anyone is told. */
 export function useReorderPreview(planId: string, vehicleId: string, tripNo: number, orderRefs: string[] | null) {
   return useQuery({
     queryKey: ["reorder-preview", planId, vehicleId, tripNo, orderRefs?.join(",")],

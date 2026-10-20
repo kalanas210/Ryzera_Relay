@@ -1,9 +1,4 @@
-"""Placing an order, changing it, and the 4:00 PM cutoff.
-
-Orders for the next delivery day close at 4:00 PM. An order that arrives later is still confirmed
-at once, but it goes on the following run, and the store is told so in the same moment. Until the
-cutoff a store can change what it ordered; from then on the order is the dispatcher's to plan.
-"""
+"""Placing an order, changing it, and the 4:00 PM cutoff. A later order goes on the following run."""
 
 from __future__ import annotations
 
@@ -47,25 +42,21 @@ def next_operating_day(db: Session, after: date) -> date:
 
 
 def cutoff_for(run_date: date) -> datetime:
-    """4:00 PM on the day before the run."""
     day_before = run_date - timedelta(days=1)
     return datetime(day_before.year, day_before.month, day_before.day, CUTOFF_HOUR, tzinfo=COLOMBO)
 
 
 def closed_run(db: Session, now: datetime) -> date | None:
-    """The run whose orders closed at 4:00 PM today, while new orders go on the one after it; None before then."""
     first = next_operating_day(db, now.astimezone(COLOMBO).date())
     return first if now >= cutoff_for(first) else None
 
 
 def delivery_day_for(db: Session, now: datetime) -> date:
-    """The run a store is ordering for right now: tomorrow's until 4:00 PM, the one after that later on."""
     return next_operating_day(db, closed_run(db, now) or now.astimezone(COLOMBO).date())
 
 
 def current_run(db: Session, now: datetime) -> date:
-    """The run being planned or on the road: tomorrow's run until midday on its own day, when the office
-    moves on to the next one."""
+    # Tomorrow's run until midday on its own day, then the office moves on.
     return next_operating_day(db, (now.astimezone(COLOMBO) - timedelta(hours=12)).date())
 
 
@@ -76,8 +67,7 @@ class LineInput:
 
 
 def order_ref_for(db: Session, requested: date, outlet_id: str, temp: str) -> str:
-    """Use the number the order book reserves for this store's stream on that day, so the story's orders keep
-    their scenario ids; otherwise the next free number."""
+    # The order book reserves numbers for the story's orders, so they keep their scenario ids.
     taken = set(db.scalars(select(Order.order_ref)))
     for row in story_orders(get_settings().seed_dir):
         if (row["requested_date"], row["outlet_id"], row["temp"]) == (requested.isoformat(), outlet_id, temp):
@@ -114,7 +104,7 @@ def place_order(
     else:
         units, kg, m3 = size
 
-    # Relay's receive time decides the run: a late order joins the run taking orders now, never one already closed
+    # Relay's receive time decides the run. A late order never joins a closed run.
     late = now >= cutoff_for(requested_date)
     run_date = delivery_day_for(db, now) if late else requested_date
     order = Order(
@@ -178,7 +168,7 @@ def place_order(
             data={"order_ref": order.order_ref},
         )
     if placed_by is not None:
-        told.read_at = now  # the store read it on the confirmation screen, so it is no news to them
+        told.read_at = now
     return order
 
 
@@ -187,8 +177,7 @@ class OrderClosed(Exception):
 
 
 def change_order(db: Session, now: datetime, order: Order, lines: Sequence[LineInput], *, changed_by: AppUser) -> Order:
-    """The store's new counts, until the cutoff for the day it ordered for. Cases Waypoint carried onto the order
-    from an earlier short delivery are not the store's to remove: they stay on top of its own counts."""
+    # Cases carried over from an earlier short delivery stay on top of the store's own counts.
     if now >= cutoff_for(order.requested_date):
         raise OrderClosed(
             f"Orders for {_day(order.requested_date)} closed at 4:00 PM, so this order can't be changed now."

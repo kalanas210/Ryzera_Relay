@@ -30,7 +30,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      # the API tests create, migrate, seed and drop their own database on this server
+      # The API tests make and drop their own database on this server.
       RELAY_TEST_ADMIN_URL: postgresql://relay:relay@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
@@ -78,9 +78,8 @@ jobs:
   e2e:
     name: Judge walkthrough in a browser
     runs-on: ubuntu-latest
-    # The image build, the installs and the engine warm-up take about 5 minutes and the suite about 3. Playwright
-    # stops the run at 8 minutes (globalTimeout in e2e/playwright.config.ts), so even a hung API leaves time to
-    # upload the report and the logs.
+    # The build, installs and warm-up take about 5 minutes and the suite about 3. Playwright stops
+    # at 8 minutes (e2e/playwright.config.ts), so a hung API still leaves time to upload the logs.
     timeout-minutes: 15
     env:
       RELAY_PORT: "8080"
@@ -115,9 +114,8 @@ jobs:
         if: steps.chromium.outputs.cache-hit == 'true'
         run: pnpm --filter @relay/e2e exec playwright install-deps chromium
       - name: Wait for the engine cache warm-up
-        # relay-api serve answers health checks at once and warms the engine cache in a separate process, about a
-        # minute on a fresh database. Tests that start before it ends race it for the first plan proposals. A slow
-        # warm-up only makes the suite slower, so it warns rather than fails.
+        # The API is healthy at once but warms the engine cache in another process, about a minute.
+        # Early tests race it. A slow warm-up only slows the suite, so this warns and does not fail.
         run: |
           if timeout 180 sh -c 'until docker compose logs api | grep -qE "Engine cache warm for the story day|Warming the engine cache failed"; do sleep 5; done'; then
             docker compose logs --no-log-prefix api | grep -E "Engine cache warm for the story day|Warming the engine cache failed"

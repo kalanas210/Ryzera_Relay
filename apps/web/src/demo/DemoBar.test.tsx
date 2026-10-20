@@ -11,7 +11,7 @@ vi.mock("@/api/client", async (original) => ({
   api: { get: vi.fn(() => new Promise(() => {})), post: (...args: unknown[]) => post(...args) },
 }));
 
-// jsdom has <dialog> but not its methods; these do what the browser does to the open attribute.
+// jsdom has <dialog> but not its methods. These set the open attribute like a browser does.
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");

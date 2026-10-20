@@ -1,13 +1,4 @@
-"""Sign-in, sessions and role checks.
-
-A judge usually keeps several roles open side by side in one browser. Each role therefore has its
-own session cookie, and the web app names the role it is acting as in the X-Relay-Role header
-(a proof photo, loaded by an image tag that cannot send headers, uses ?as=). Signing in as the store
-manager in one tab leaves the dispatcher signed in in the next.
-
-Cookies are httpOnly and SameSite=Lax. Every state-changing request must also carry
-X-Relay-Client, a custom header that a cross-site form or image cannot send.
-"""
+"""Sign-in and role checks. Each role has its own cookie, so a judge can keep several roles open."""
 
 from __future__ import annotations
 
@@ -35,7 +26,9 @@ COOKIE_FOR_ROLE = {
     Role.STORE_MANAGER: "relay_stm",
 }
 
+# A cross-site form cannot send a custom header, so state-changing requests must carry this one.
 CLIENT_HEADER = "X-Relay-Client"
+# The web app names its role here. A proof photo in an image tag cannot, so it uses ?as=.
 ROLE_HEADER = "X-Relay-Role"
 
 
@@ -107,8 +100,6 @@ CurrentUser = Annotated[AppUser, Depends(current_user)]
 
 
 def require(*roles: Role) -> Callable[[AppUser], AppUser]:
-    """Dependency that lets only the given roles through."""
-
     def check(user: CurrentUser) -> AppUser:
         if user.role not in roles:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "This screen is for another role")

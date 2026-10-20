@@ -1,9 +1,7 @@
-/** Every string a loader reads on the dock tablet, in English, Sinhala and Tamil.
- *
- *  The LDR-02 strings come from the design's language table (specs/spec-loader.md, "Language strings"); the rest
- *  follow the same word choices. Both scripts need a check by a native reader before the build freezes, as the
- *  design asks. Case type names use everyday shop words; "missing" (not there) is kept apart from "short" (the
- *  dispatcher has decided). */
+// Every string a loader reads on the dock tablet, in English, Sinhala and Tamil.
+// The LDR-02 strings come from the design's language table (specs/spec-loader.md, "Language strings").
+// Both scripts need a native reader's check before the build freezes. Case names use everyday shop words.
+// "missing" (not there) is kept apart from "short" (the dispatcher has decided).
 
 type Strings<T> = { [K in keyof T]: T[K] extends string ? string : Strings<T[K]> };
 

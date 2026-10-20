@@ -13,7 +13,6 @@ from relay_api.schemas.dock import HandoverOut
 
 StopState = Literal["pending", "arrived", "delivered", "failed", "moved", "cancelled"]
 LoadPhase = Literal["not_started", "loading", "to_accept", "accepted"]
-"""Nobody has started loading yet, loading, the handover waiting for the driver, or accepted."""
 
 
 class DriverLineOut(Schema):
@@ -21,8 +20,8 @@ class DriverLineOut(Schema):
     name: str
     ordered: int
     loaded: int
+    # Cases the dispatcher decided to send short. They come on the store's next order.
     short: int
-    """Cases the dispatcher decided to send short; they come on the store's next order."""
     short_until: date | None
 
 
@@ -40,8 +39,8 @@ class DriverStopOut(Schema):
     window_open: str
     window_close: str
     planned: datetime
+    # The time Relay last sent. The phone rounds it to 5 minutes and never pushes it later while offline.
     expected: datetime | None
-    """The time Relay last sent: rounded to 5 minutes on the phone, never pushed later while offline."""
     arrived_at: datetime | None
     completed_at: datetime | None
     moved_to: str | None
@@ -49,8 +48,8 @@ class DriverStopOut(Schema):
     lines: list[DriverLineOut]
     receiver: str | None
     has_photo: bool
+    # When Relay got records the phone saved with no signal. Shown as Saved offline, sent 7:14 AM.
     sent_at: datetime | None = None
-    """When Relay had this stop's records, if the phone saved them with no signal: "Saved offline, sent 7:14 AM"."""
 
 
 class QuestionOut(Schema):
@@ -64,20 +63,18 @@ class QuestionOut(Schema):
     opened_at: datetime
     arrived_at: datetime | None
     delivered_at: datetime | None
-    """The phone's own records for the stop, as Relay has them: "Arrived 6:56 AM · Delivered 7:09 AM"."""
     cases: int
     receiver: str | None
     has_photo: bool
     signed: bool
     backup_vehicle: str | None
     backup_driver: str | None
-    """Who is driving the second copy: "Stop 4 was also given to Nimal"."""
     moved_at: datetime | None
     moved_by: str | None
     answered_at: datetime | None
     resolved_at: datetime | None
+    # "driver" when the driver said yes, "dispatcher" when the office cancelled the copy first.
     resolution: str
-    """How it was settled: "driver" (the driver said yes) or "dispatcher" (the office cancelled the copy first)."""
 
 
 class NoticeOut(Schema):
@@ -86,7 +83,6 @@ class NoticeOut(Schema):
     title: str
     body: str
     data: dict[str, Any] = Field(default_factory=dict)
-    """What the message is about, for the screen: the stop and the vehicle of a moved stop."""
     created_at: datetime
     read_at: datetime | None
 
@@ -124,16 +120,14 @@ class DriverRunOut(Schema):
     published: bool
     dispatcher: str | None
     dispatcher_phone: str | None = None
-    """The dispatcher on call, for "Call Nuwan at dispatch"."""
     trip: DriverTripOut | None
     later: list[DriverTripOut]
     questions: list[QuestionOut]
     notices: list[NoticeOut]
+    # The story's scripted loss of signal for this driver. The phone obeys it in demo mode.
     outage: dict[str, datetime] | None
-    """The story's scripted loss of signal for this driver, which the phone obeys in demo mode."""
+    # Inside that outage only. What the story's phone outbox holds, shown on this phone as saved offline.
     held: HeldOut | None = None
-    """Inside that outage only: what the story's phone outbox holds, so this phone shows the stops a demo jump played
-    for its driver as saved on the phone."""
 
 
 class HeldPhotoOut(Schema):
@@ -143,8 +137,8 @@ class HeldPhotoOut(Schema):
     taken_at: datetime
     width: int | None = None
     height: int | None = None
+    # A photo the story's autopilot took. The phone fetches it from /api/driver/held/photos/{id}.
     stand_in: bool = False
-    """A photo the story's autopilot took: the phone fetches it from /api/driver/held/photos/{id}."""
 
 
 class HeldOut(Schema):

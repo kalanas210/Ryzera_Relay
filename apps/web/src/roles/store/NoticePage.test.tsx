@@ -91,8 +91,7 @@ describe("Got it on a delivery update", () => {
     expect(await screen.findByText("Seen 2:55 AM. The dispatcher can see this.")).toBeInTheDocument();
     expect(post.mock.calls.map(([path]) => path)).toEqual(["/api/store/notices/n1/read", "/api/store/notices/n1/ack"]);
 
-    // Relay read the notice before Got it reached it, so this answer has no acknowledgement yet; the cache tells the
-    // screen on the next task, so the test waits one
+    // This late read answer has no ack time. The cache reaches the screen on the next task, so wait one.
     await act(async () => {
       answerRead({ ...notice, read_at: READ });
       await new Promise((resolve) => setTimeout(resolve, 20));

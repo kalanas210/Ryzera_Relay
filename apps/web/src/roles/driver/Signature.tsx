@@ -1,5 +1,4 @@
-/** DRV-03 / Signature: the receiver signs on the phone with a finger. The strokes are kept as SVG path data, small
- *  enough to travel inside the delivery record, and drawn in currentColor so whoever shows it picks the ink. */
+// DRV-03 signature. Strokes are kept as small SVG path data that travels inside the delivery record.
 import { Eraser, PenLine } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/design/Button";
@@ -11,7 +10,7 @@ export type Signature = { path: string; width: number; height: number };
 type Point = { x: number; y: number };
 
 const PAD_HEIGHT = 240;
-/** Points closer than this (in CSS pixels) add nothing a reader could see, so they are dropped. */
+// Points closer than this many CSS pixels add nothing a reader could see, so they are dropped.
 const MIN_STEP = 2;
 
 export function pathOf(strokes: Point[][]): string {
@@ -19,7 +18,7 @@ export function pathOf(strokes: Point[][]): string {
     .filter((s) => s.length)
     .map((s) => {
       const [first, ...rest] = s.map((p) => `${Math.round(p.x)} ${Math.round(p.y)}`);
-      // a tap is a dot: a stroke needs some length to be drawn with round caps
+      // A tap becomes a tiny line, since a zero length stroke does not draw with round caps.
       return rest.length ? `M${first}L${rest.join("L")}` : `M${first}l0.1 0`;
     })
     .join("");
@@ -33,7 +32,6 @@ export function svgOf(signature: Signature): string {
   );
 }
 
-/** A kept signature, drawn back at the width it was made. */
 export function SignatureView({ signature, label }: { signature: Signature; label: string }) {
   return (
     <svg
@@ -111,7 +109,6 @@ export function SignatureSheet({
   );
 }
 
-/** Signature pad, 240 high: pointer strokes on a canvas, with a baseline and "Sign here" to aim at. */
 function SignaturePad({
   label,
   hint,
@@ -148,7 +145,7 @@ function SignaturePad({
     }
   }, []);
 
-  // the canvas follows its box, which is only laid out once the sheet is open
+  // The box is only laid out once the sheet is open, so the canvas follows its size.
   useEffect(() => {
     const c = canvas.current;
     if (!c) return;
@@ -189,7 +186,7 @@ function SignaturePad({
           try {
             event.currentTarget.setPointerCapture(event.pointerId);
           } catch {
-            // a pointer the browser no longer tracks: the stroke still draws while it stays on the pad
+            // The browser may not track this pointer. The stroke still draws while it stays on the pad.
           }
           drawing.current = true;
           strokes.current.push([at(event)]);

@@ -24,18 +24,17 @@ export type Moment = { key: string; label: string; at: string; passed: boolean }
 
 export type DemoState = {
   demo_mode: boolean;
-  /** The copy of the day; `edition` is new each time the copy is made or reset. */
+  // edition is new each time the copy is made or reset
   workspace: { code: string; label: string; is_default: boolean; edition: string };
   now: string;
   rate: number;
   moments: Moment[];
   next: Moment | null;
-  /** Story steps the last jump played because nobody had taken them. */
+  // story steps the last jump played because nobody had taken them
   played: string[];
-  /** The story's scripted loss of signal by driver username, once the clock has reached it. */
   outages: Record<string, { from: string; to: string }>;
 };
 
-/** GET /api/health. `warming` is true while the API's warm-up is still asking the engine the story day's first
- * proposals; a Propose started meanwhile waits for that answer, up to half a minute. */
+// warming is true while the API asks the engine for the story day's first proposals.
+// A Propose started meanwhile waits for that, up to half a minute.
 export type Health = { status: "ok"; warming: boolean };

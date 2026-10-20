@@ -1,8 +1,4 @@
-"""Live runs on the dispatcher's desk (DSP-04, DEG-03, DEG-05): every run of the depot's published plan, stop by stop,
-built from the drivers' own records and the stores' receipts, never from tracking. Each row says when the phone last
-reached Relay, so a silent run is never read as trouble or as progress; while a phone is silent, the stops still to
-come show Relay's estimate and likely range from the one rule in services/estimates.py.
-"""
+"""Live runs on the dispatcher's desk (DSP-04, DEG-03, DEG-05), built from records, never tracking."""
 
 from __future__ import annotations
 
@@ -44,8 +40,8 @@ class Marker:
     seq: int
     outlet_id: str
     place: str
+    # delivered, arrived, failed, moved, conflict, cancelled, next, pending
     state: str
-    """delivered, arrived, failed, moved, conflict, cancelled, next, pending"""
     planned: datetime
     closes: datetime
     recorded: datetime | None = None
@@ -58,13 +54,10 @@ class Marker:
     moved_to: str | None = None
     backup_of: str | None = None
     held: datetime | None = None
-    """While the stop has two copies: when the driver's phone says it was delivered, held until it is settled."""
+    # two-copy stop: the driver answered no, so the delivery the phone holds was not made
     denied: bool = False
-    """While the stop has two copies: the driver answered no, so the delivery the phone holds was not made."""
     store_contact: str | None = None
-    """The store's manager, who reads the same estimate."""
     handed_over: bool = False
-    """A moved stop that is now the backup's alone: its two-copy question was settled by keeping the backup's copy."""
 
 
 @dataclass
@@ -81,22 +74,19 @@ class RunRow:
     status: str
     planned_depart: datetime
     departed_at: datetime | None
+    # when the driver tapped Finish trip, often at the last dock, so not the return to the hub
     finished_at: datetime | None
-    """When the driver tapped Finish trip, often at the last store's dock: never read as back at the hub."""
     expected_back: datetime | None
-    """When the hub expects the vehicle back, the same time the driver's phone shows. Relay never records the return."""
     last_contact_at: datetime | None
     out_of_contact: bool
     silent_minutes: int
     position: str
     caption: str
     risk: str
-    """Every stop still to come that is expected after its close, in words; empty when none is. The desk says a
-    later trip's risk with it."""
     delivered: int
     stops: int
+    # 0 nothing, 1 watch, 2 needs the dispatcher. It sorts the panel.
     attention: int
-    """0 nothing, 1 watch, 2 needs the dispatcher: sorts the panel."""
     markers: list[Marker] = field(default_factory=list)
 
 
@@ -183,9 +173,6 @@ def panel(db: Session, now: datetime, depot: str) -> Panel:
 
 @dataclass
 class Seen:
-    """What the panel reads once for every row: open two-copy questions, the backups' live copies and the moved
-    stops settled in the backup's favour, each by the stop they are about."""
-
     conflicts: dict[uuid.UUID, Conflict]
     copies: dict[uuid.UUID, Stop]
     handed: set[uuid.UUID]
@@ -228,7 +215,7 @@ def _row(
             next_marked = True
         copy = seen.copies.get(stop.id)
         manager = look.store_manager(stop.outlet_id)
-        # the desk shows Expected to the minute; while the phone is silent it says "around" with the store's time
+        # Expected to the minute, or "around" with the store's time while the phone is silent.
         shown = (e.estimate if estimate.out_of_contact else e.exact) if e else None
         marker = Marker(
             stop_id=str(stop.id),
@@ -300,7 +287,7 @@ def _row(
 
 
 def _expected_back(trip: Trip, estimate: RunEstimate) -> datetime | None:
-    """When the hub expects the vehicle back. A trip that turned back is no longer the run that time was made for."""
+    # A trip that turned back is no longer the run that time was made for.
     return None if trip.turned_back_at is not None else estimate.expected_back
 
 
@@ -320,7 +307,6 @@ def _caption(
     who = driver.split()[0] if driver else trip.vehicle_id
     hub = DEPOT_LABEL.get(plan.depot, plan.depot)
     if trip.finished_at is not None:
-        # Finish trip is tapped at the last dock: the way home is still Relay's estimate, never a record
         finished = f"Trip finished at {words.clock(trip.finished_at)}."
         back = _expected_back(trip, estimate)
         if back is not None and back > trip.finished_at:
@@ -342,11 +328,10 @@ def _caption(
             )
         return f"Stop {clash.seq}, {clash.place}, has two copies until it is settled."
     if not to_come:
-        # still unloading at the last stop is not on the way back yet
         here = next((m for m in markers if m.state == "arrived"), None)
         if here is not None and here.arrived is not None:
             return f"Reached {here.place}, the last stop, at {words.clock(here.arrived)}."
-        # Finish trip is tapped at the last dock, so until it is, nothing says the truck has left
+        # Until Finish trip is tapped at the last dock, nothing says the truck has left.
         handed = "".join(f" Stop {m.seq} is with {m.moved_to}." for m in markers if m.handed_over)
         return f"Every stop is done.{handed} {who} has not finished the trip yet."
     risky = [m for m in to_come if m.late_risk]
@@ -372,8 +357,6 @@ def _caption(
 
 
 def late_words(risky: list[Marker]) -> str:
-    """Every stop expected after its close, by name: "Aranayake is expected after its 7:30 AM close.", "Suduhumpola
-    and Ampitiya are expected after their 7:45 AM and 8:00 AM closes." Empty when none is."""
     if not risky:
         return ""
     if len(risky) == 1:

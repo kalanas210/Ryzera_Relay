@@ -18,7 +18,7 @@ afterEach(async () => {
 describe("the driver's words", () => {
   it("writes going to a place the way each language joins its ending to the name", async () => {
     let w = await textIn("ta");
-    // the degradation spec's own string: "... அதே ஆர்டரை அரநாயக்கவுக்கு கொண்டு செல்கிறார்."
+    // This is the wording from the degradation spec.
     const body = w.t("question.bodyDriver", {
       name: "Nuwan",
       n: 4,
@@ -28,7 +28,6 @@ describe("the driver's words", () => {
       placeTo: w.placeTo("Aranayake"),
     });
     expect(body).toContain("அதே ஆர்டரை அரநாயக்கவுக்கு கொண்டு செல்கிறார்.");
-    // a place Relay has no Tamil for keeps its Latin name, with the ending set apart
     expect(w.placeTo("Ambepussa")).toBe("Ambepussa க்கு");
 
     w = await textIn("si");
@@ -42,7 +41,6 @@ describe("the driver's words", () => {
     const stop = { status: "pending" as const, expected: at("05:04") };
     expect(w.expectedAt(stop, new Date(at("04:50")))).toBe("around 5:05 AM");
     expect(w.expectedAt(stop, new Date(at("05:20")))).toBe("around 5:05 AM, now passed");
-    // offline the phone still runs on its own clock, and an arrived stop is no longer expected
     expect(w.expectedAt({ ...stop, status: "arrived" }, new Date(at("05:20")))).toBe("around 5:05 AM");
   });
 });

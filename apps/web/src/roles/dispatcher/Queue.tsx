@@ -68,9 +68,7 @@ export type Queue = {
     depot: string;
     temps: string[];
     pattern: string;
-    /** The last Remind for this run. */
     reminded_at: string | null;
-    /** The store manager's number: Call shows only when the store's record has one. */
     phone: string | null;
   }[];
   fresh_outlets_expected: number;
@@ -111,7 +109,6 @@ export function useQueue() {
   });
 }
 
-/** Remind and Remind all: a notice in each store's Relay app with the cutoff. Answers with the stores reminded. */
 function useRemind() {
   const client = useQueryClient();
   return useMutation({
@@ -125,11 +122,10 @@ function useRemind() {
   });
 }
 
-/** Relay sends a store one reminder in any 10 minutes; Remind again in that time would send nothing new. */
+// Relay sends a store one reminder in any 10 minutes. Remind again sooner would send nothing new.
 const REMIND_AGAIN_MS = 10 * 60_000;
 
-// The spec's columns (Order 92, Outlet 176, Type 84, Cases 48, kg 64, m³ 60, Window 140), each with the 8 px gap
-// before it, 16 px at the card's edge and an 8 px spacer before Window, so neighbouring numbers never touch.
+// Spec widths (Order 92, Outlet 176, Type 84, Cases 48, kg 64, m3 60, Window 140) plus padding.
 const COL = {
   order: "w-[108px] pl-4",
   outlet: "w-[184px] pl-2",
@@ -141,7 +137,7 @@ const COL = {
   flags: "pl-2 pr-4",
 } as const;
 
-/** DSP-01 Order queue: every order for tomorrow as it arrives, with the facts that limit how it travels. */
+// DSP-01 Order queue. Every order for tomorrow as it arrives.
 export function QueuePage() {
   const { data, errorUpdateCount, refetch, isFetching } = useQueue();
   const [depot, setDepot] = useDepot();
@@ -154,8 +150,7 @@ export function QueuePage() {
     [data, depot],
   );
 
-  // once a load has failed, the error stays until the queue arrives: a query with no data goes back to pending each
-  // time it fetches again, so the error alone would flash away on every try
+  // Keep the error until the queue arrives. A query with no data is pending again on every retry.
   if (!data && errorUpdateCount > 0) {
     return (
       <>
@@ -438,7 +433,6 @@ function LateOrders({ late, weekday }: { late: Queue["late"]; weekday: string })
   );
 }
 
-/** The Not ordered panel: Remind, Remind all and Call before the cutoff. */
 export function NotOrdered({ data, depot, weekday, now }: { data: Queue; depot: Depot; weekday: string; now: Date }) {
   const list = data.not_ordered.filter((n) => depot === "All" || n.depot === depot);
   const remind = useRemind();

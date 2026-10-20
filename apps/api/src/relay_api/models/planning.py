@@ -25,11 +25,11 @@ class VehicleDayStatus(enum.StrEnum):
 class TripStatus(enum.StrEnum):
     PLANNED = "planned"
     LOADING = "loading"
+    # Handed over and accepted by the driver.
     LOADED = "loaded"
-    """Handed over and accepted by the driver."""
     DEPARTED = "departed"
+    # A backup turned back on the road, because its stop was delivered after all.
     RETURNING = "returning"
-    """A backup turned back on the road: its stop was delivered after all."""
     FINISHED = "finished"
     CANCELLED = "cancelled"
 
@@ -39,16 +39,15 @@ class StopStatus(enum.StrEnum):
     ARRIVED = "arrived"
     DELIVERED = "delivered"
     FAILED = "failed"
+    # Given to a backup vehicle while the driver was out of contact. Settled when the driver's records arrive.
     MOVED = "moved"
-    """Given to a backup vehicle while the driver was out of contact; settled when the driver's records arrive."""
     CANCELLED = "cancelled"
 
 
 class DeferralKind(enum.StrEnum):
     CAPACITY = "capacity"
-    """The fleet cannot carry it on this run."""
+    # Placed after 4:00 PM, so it goes on the next run.
     CUTOFF = "cutoff"
-    """Placed after 4:00 PM, so it goes on the next run."""
     MANUAL = "manual"
 
 
@@ -104,7 +103,6 @@ class Trip(WorkspaceScoped, Base):
     expected_back: Mapped[datetime | None]
     note: Mapped[str] = mapped_column(Text, default="")
     loader_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
-    """Who is loading it now, or loaded it."""
     loading_started_at: Mapped[datetime | None]
     claimed_at: Mapped[datetime | None]
     """When a person first worked on this load. From then on the world simulator leaves it alone."""
@@ -130,7 +128,7 @@ class Stop(WorkspaceScoped, Base):
     arrived_at: Mapped[datetime | None]
     completed_at: Mapped[datetime | None]
     version: Mapped[int] = mapped_column(default=1)
-    """Bumped on every change the office makes, so a record made offline can be checked against it."""
+    """Goes up on every office change, so a record made offline can be checked against it."""
     backup_of: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("stop.id"))
     reason: Mapped[str] = mapped_column(Text, default="")
 
@@ -147,11 +145,10 @@ class Deferral(WorkspaceScoped, Base):
     from_date: Mapped[date] = mapped_column(Date)
     to_date: Mapped[date] = mapped_column(Date)
     reason: Mapped[str] = mapped_column(Text, default="")
-    """The dispatcher's recorded reason."""
     store_notice: Mapped[str] = mapped_column(Text, default="")
     """The exact words the store reads."""
     explanation: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    """What the engine found: unavoidable or its choice, the rule, the pool, the cost, the next-run check."""
+    """What the engine found. Unavoidable or its choice, the rule, the pool, the cost, the next-run check."""
     created_at: Mapped[datetime]
     confirmed_at: Mapped[datetime | None]
     confirmed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
@@ -175,8 +172,8 @@ class PlanChange(WorkspaceScoped, Base):
 
 
 class EngineCache(Base):
-    """The engine's answer for one exact set of inputs (see relay_api.services.engine_cache). Shared by every copy
-    of the day, since the answer depends only on what the engine reads."""
+    """The engine's answer for one exact set of inputs, shared by every copy of the day.
+    See relay_api.services.engine_cache."""
 
     __tablename__ = "engine_cache"
 

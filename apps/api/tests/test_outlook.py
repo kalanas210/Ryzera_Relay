@@ -1,6 +1,4 @@
-"""The capacity outlook (DSP-05) through the API: at 6:45 PM on Tuesday, just after the Kandy plan is published, every
-figure on the drawn frame comes out of the seeded forecast, the live order book and the plan board's vehicles, and
-Peliyagoda says plainly that it has no forecast yet. Below those, the wording for forecasts the scenario never has."""
+"""The capacity outlook (DSP-05) through the API at 6:45 PM Tuesday, after the Kandy plan is out."""
 
 from __future__ import annotations
 
@@ -20,7 +18,7 @@ def _outlook(copy: Copy, depot: str = "Kandy") -> Any:
 
 
 def _plain(text: str) -> str:
-    """The page keeps a day and its month, or a number and its unit, together with no-break spaces."""
+    # The page joins a day and its month, or a number and its unit, with no-break spaces.
     return text.replace("\u00a0", " ")
 
 
@@ -66,7 +64,7 @@ def test_the_weeks_as_drawn(new_copy: Callable[[], Copy]) -> None:
     assert [d["tech"] for d in demand] == [22.4, 21.3, 22.4, 18.2, 22.4, 22.4]
     assert [d["all"] for d in demand] == [885.0, 437.1, 658.1, 620.7, 623.0, 623.6]
 
-    # one load per refrigerated vehicle in service per open day: VEH039 and VEH058 are out from Monday to Wednesday
+    # One load per refrigerated vehicle per open day. VEH039 and VEH058 are out Monday to Wednesday.
     assert [w["chilled_limit_m3"] for w in weeks] == [765.3, 584.0, 876.0, 730.0, 876.0, 876.0]
     assert [w["chilled_pct"] for w in weeks] == [34.9, 22.8, 22.8, 25.8, 21.5, 21.5]
 
@@ -91,7 +89,7 @@ def test_the_vehicles_needed_on_each_weeks_busiest_day(new_copy: Callable[[], Co
     assert [b["chilled_orders"] for b in busiest] == [23] * 6
     assert [b["headline"] for b in busiest] == [False, False, False, True, False, False]
 
-    # 8 April is the run being planned: its row is the order book, with the order the plan lets wait
+    # 8 April is the run being planned, so its row is the order book, with the order the plan lets wait.
     assert (busiest[0]["from_order_book"], busiest[0]["waits"]) == (True, 1)
     assert not any(b["from_order_book"] for b in busiest[1:])
 
@@ -165,14 +163,13 @@ def test_the_run_row_agrees_with_the_queue_and_the_drawer(new_copy: Callable[[],
         chilled["total_kg"],
         chilled["waits"],
     )
-    # the queue lists what rides on Wednesday; the order that waits now rides on Thursday
     assert len(in_queue) + len(waiting) == run["chilled_orders"] == 23
     assert (run["available"], run["in_workshop"]) == (fleet["reefers_free"], fleet["in_workshop"])
 
 
 def test_the_run_row_follows_the_plan_board_when_a_vehicle_comes_back(new_copy: Callable[[], Copy]) -> None:
     copy = new_copy()
-    copy.jump("plan")  # 4:35 PM: the Kandy plan is still a draft, so its fleet can change
+    copy.jump("plan")  # 4:35 PM, the Kandy plan is still a draft, so its fleet can change
     copy.sign_in("nuwan", "dispatcher")
     back = copy.client.patch(
         "/api/dispatch/plan/vehicles/VEH058?depot=Kandy",
@@ -188,10 +185,9 @@ def test_the_run_row_follows_the_plan_board_when_a_vehicle_comes_back(new_copy: 
     assert (run["needed"], run["available"], run["state"], run["in_workshop"]) == (6, 6, "limit", ["VEH039"])
     assert run["segments"] == {"filled": 6, "short": 0, "standby": 0, "workshop": 1}
     assert (run["available"], run["in_workshop"]) == (fleet["reefers_free"], fleet["in_workshop"])
-    # Monday and Tuesday keep both out; Wednesday loses only VEH039 (29.9 m³) from the 146.0 m³ fleet
+    # Monday and Tuesday keep both out. Wednesday loses only VEH039, 29.9 m3 of the 146.0 m3 fleet.
     assert week["chilled_limit_m3"] == round(2 * (146.0 - 29.9 - 7.0) + (146.0 - 29.9) + 3 * 146.0, 1) == 772.3
     assert week["chilled_pct"] == 34.6
-    # with a vehicle back, 8 April no longer proves that two out make a chilled order wait
     assert _plain(outlook["notes"][1]).endswith(
         "One out on a Wednesday means no standby; two out means a chilled order waits."
     )
@@ -220,10 +216,6 @@ def test_peliyagoda_has_no_outlook_yet(new_copy: Callable[[], Copy]) -> None:
     assert outlook["forecast_updated"] is None
     assert outlook["empty"].startswith("No forecast is set up for Peliyagoda yet")
     assert copy.client.get("/api/dispatch/outlook?depot=All", headers={"X-Relay-Role": "dispatcher"}).status_code == 422
-
-
-# ------------------------------------------------------------------------------------------------ other forecasts
-# The drawn moment runs one path through the wording. These build the sentences for days the scenario never has.
 
 
 def _day(iso: str, needed: int, available: int = 7, kg: float = 6000.0, served: int | None = None) -> OutlookDayOut:

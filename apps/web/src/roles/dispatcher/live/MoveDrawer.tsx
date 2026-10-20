@@ -15,9 +15,7 @@ export type MoveTarget = { row: RunRow; marker: RunMarker };
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
-/** DEG-03 move drawer: send one stop of a running trip with another vehicle. Relay checks every vehicle against the
- *  plan's rules and says what the move costs before anything is sent; the reason is kept on the record. The drawer
- *  has no scrim, so the silent run stays readable behind it. */
+// DEG-03 move drawer. No scrim, so the silent run stays readable behind it.
 export function MoveDrawer({
   target,
   depot,
@@ -42,7 +40,6 @@ export function MoveDrawer({
   const reasonId = useId();
   const reset = move.reset;
 
-  // A new stop starts a new move.
   useEffect(() => {
     if (stopId === null) return;
     setChoice(null);
@@ -295,17 +292,15 @@ export function MoveDrawer({
   );
 }
 
-/** "86 cases": what is on the truck for the stop, as the dock loaded it. */
 function loadCases(options: MoveOption[], planned: number | undefined): string | null {
   const loaded = Number(options[0]?.checks.find((c) => /^\d+ cases?,/.test(c))?.match(/^(\d+)/)?.[1]);
   const cases = loaded || planned;
   return cases ? `${cases} ${cases === 1 ? "case" : "cases"}` : null;
 }
 
-/** What the vehicle is doing today, in the dispatcher's words: "standby, free until 8:00 AM on Wednesday". */
 function statusWords(option: MoveOption, dir: Directory): string {
   const lane = dir.lane(option.vehicle_id);
-  // "standby, free until 8:00 AM": the day is today's, so the picker row keeps to one line
+  // Drop the weekday so the picker row keeps to one line.
   if (option.status === "standby")
     return lane?.note ? lowerFirst(lane.note).replace(/ on [A-Z][a-z]+day$/, "") : "standby";
   if (lane && !lane.trips.length) return "free, not on today's plan";
@@ -340,7 +335,6 @@ function Rule({ tone, children }: { tone: "pass" | "info" | "problem"; children:
   );
 }
 
-/** Checks for the chosen vehicle: the window first, then the hard rules it passes, its room, and the new pick. */
 function Checks({
   option,
   row,

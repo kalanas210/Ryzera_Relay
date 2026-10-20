@@ -18,7 +18,7 @@ const pill = (waiting?: number) => (
   />
 );
 
-/** A save that never answers, so the pill stays in its sending state. */
+// a save that never answers, so the pill stays in its sending state
 function Saving() {
   const save = useMutation({ mutationFn: () => new Promise<void>(() => {}), networkMode: "always" });
   const { mutate } = save;

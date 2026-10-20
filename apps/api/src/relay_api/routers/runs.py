@@ -1,6 +1,4 @@
-"""Live runs on the dispatcher's desk (DSP-04 desktop, DEG-03, DEG-05): the runs panel, moving a stop to a backup
-while its driver is silent, keeping or cancelling that backup, settling a two-copy stop and marking it reviewed, and
-marking feed items handled."""
+"""Live runs on the dispatcher's desk (DSP-04 desktop, DEG-03, DEG-05)."""
 
 from __future__ import annotations
 
@@ -47,8 +45,7 @@ class MoveIn(BaseModel):
 
 @router.post("/stops/{stop_id}/move")
 def move_stop(stop_id: uuid.UUID, body: MoveIn, scope: ScopeDep, user: Dispatcher) -> dict[str, Any]:
-    """Send one stop with a backup vehicle. The dock picks it, and the driver, the backup's driver and the store are
-    told; a message to a silent phone waits for its next contact."""
+    """Send one stop with a backup vehicle. The dock picks it, and both drivers and the store are told."""
     stop: Stop = _get(scope, Stop, stop_id, "stop")
     try:
         trip = backup.move_stop(scope.db, scope.now, user, stop, body.vehicle_id, body.reason)
@@ -65,7 +62,7 @@ class BackupIn(BaseModel):
 
 @router.post("/feed/{item_id}/backup")
 def decide_backup(item_id: uuid.UUID, body: BackupIn, scope: ScopeDep, user: Dispatcher) -> dict[str, Any]:
-    """After a store confirmed receipt from a silent run: keep the backup on the road, or call it off."""
+    """After a store confirmed receipt from a silent run. Keep the backup on the road, or call it off."""
     item: FeedItem = _get(scope, FeedItem, item_id, "item")
     copy_id = item.ref.get("copy_stop_id")
     if not copy_id:
@@ -85,9 +82,9 @@ def decide_backup(item_id: uuid.UUID, body: BackupIn, scope: ScopeDep, user: Dis
 
 
 class SettleIn(BaseModel):
+    # Whose copy stands. "driver" cancels the backup's copy. "backup" sets the driver's records for the stop
+    # aside, as when the driver answered no.
     keep: Literal["driver", "backup"] = "driver"
-    """Whose copy stands: the driver's delivery (the backup's copy is cancelled), or the backup's (the driver's
-    records for the stop are set aside, as when the driver answered no)."""
 
 
 @router.post("/conflicts/{conflict_id}/settle")
@@ -113,7 +110,7 @@ class HandleIn(BaseModel):
 
 @router.post("/feed/{item_id}/handle", status_code=status.HTTP_204_NO_CONTENT)
 def handle(item_id: uuid.UUID, body: HandleIn, scope: ScopeDep, user: Dispatcher) -> None:
-    """Mark as handled, or reviewed: the item moves to Earlier today with the time and who did it."""
+    """Mark as handled, or reviewed. The item moves to Earlier today with the time and who did it."""
     item: FeedItem = _get(scope, FeedItem, item_id, "item")
     if item.handled_at is None:
         item.handled_at = scope.now
@@ -124,13 +121,13 @@ def handle(item_id: uuid.UUID, body: HandleIn, scope: ScopeDep, user: Dispatcher
 
 @router.post("/feed/{item_id}/review", status_code=status.HTTP_204_NO_CONTENT)
 def review(item_id: uuid.UUID, scope: ScopeDep, user: Dispatcher) -> None:
-    """Mark a settled two-copy stop reviewed: the dispatcher has read how it was settled, so it leaves Now for
-    Earlier today with the time. A second review changes nothing."""
+    """Mark a settled two-copy stop reviewed. It leaves Now for Earlier today.
+    A second review changes nothing."""
     item: FeedItem = _get(scope, FeedItem, item_id, "item")
     if item.kind is not FeedKind.CONFLICT or item.handled_at is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only a settled two-copy stop is marked reviewed.")
     if not item.ref.get("reviewed_at"):
-        # a new dict, so the change to the JSON column is seen
+        # A new dict, so the change to the JSON column is seen.
         item.ref = {**item.ref, "reviewed_at": scope.now.isoformat(), "reviewed_by": str(user.id)}
     scope.db.commit()
 

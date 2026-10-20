@@ -1,8 +1,4 @@
-"""Relay's planning engine.
-
-Plain data in, plain data out: no database, no web framework. The API adapts its rows to
-these types, and the same code can plan a Datathon peak day from CSV files.
-"""
+"""Relay's planning engine. Plain data in and out, no database and no web framework."""
 
 from relay_engine.network import (
     Brand,

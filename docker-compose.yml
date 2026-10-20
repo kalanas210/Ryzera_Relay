@@ -1,6 +1,5 @@
-# Relay: `docker compose up` starts the database, applies migrations, seeds the shared network and
-# the story day, then serves the app on http://localhost:8080. Settings come from .env if present
-# (see .env.example); every one has a working default.
+# `docker compose up` starts the database, runs the migrations, seeds the network and the story day,
+# then serves the app on http://localhost:8080. Every setting has a default, see .env.example.
 name: relay
 
 x-api-env: &api-env
@@ -30,7 +29,7 @@ services:
       retries: 30
     restart: unless-stopped
 
-  # One-shot: apply migrations, then seed whatever is missing. Safe to run on every start.
+  # Runs once per start. Migrates, then seeds whatever is missing, so it is safe to repeat.
   migrate:
     image: relay-api
     build: *api-build

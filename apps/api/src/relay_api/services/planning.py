@@ -1,8 +1,5 @@
-"""The plan board's work: propose a depot's run with the engine, keep the dispatcher's edits, explain the
-deferrals, check the plan before it goes out, and publish it to the dock, the drivers and the stores.
-
-The plan lives in the database as trips and stops; the engine re-checks it on every read, so the meters and
-the eleven rules on the board always describe what is stored.
+"""The plan board's work: propose a depot's run, keep the dispatcher's edits, check the plan and publish it.
+The engine re-checks the stored trips on every read, so the meters and the eleven rules always match what is stored.
 """
 
 from __future__ import annotations
@@ -54,8 +51,8 @@ from relay_engine.standard import FRESH_BUDGET_MIN
 
 DEPOT_LABEL = {"Kandy": "Kandy hub", "Peliyagoda": "Peliyagoda"}
 
+# How far past the run being planned a vehicle can be marked in the workshop or on standby.
 FLEET_DAYS_AHEAD = 13
-"""How far past the run being planned the dispatcher can mark a vehicle in the workshop or on standby."""
 
 REASONS = {
     "reefer_short": "Refrigerated capacity short",
@@ -69,7 +66,6 @@ REASONS = {
 
 
 def and_list(items: Iterable[str]) -> str:
-    """'VEH039, VEH043 and VEH058': how every list in the dispatcher's sentences reads."""
     names = list(items)
     if len(names) < 2:
         return "".join(names)
@@ -80,10 +76,9 @@ class PlanError(Exception):
     """A request the plan can't take, in words for the dispatcher."""
 
 
-# ------------------------------------------------------------------------------------------------ loading
+# Two first reads can arrive together (the board's poll and a depot switch). The unique key
+# lets one insert win, and the other reads the winner's row.
 def get_plan(db: Session, depot: str, run_date: date) -> Plan:
-    """The depot's plan for a run, made empty on the first read. Two first reads can arrive together (the board's
-    poll and a depot switch): the unique key lets one insert win, and the other reads the winner's row."""
     found = select(Plan).where(Plan.depot == depot, Plan.run_date == run_date)
     plan = db.scalar(found)
     if plan is None:
@@ -97,7 +92,6 @@ def get_plan(db: Session, depot: str, run_date: date) -> Plan:
 
 
 def run_orders(db: Session, depot: str, run_date: date) -> list[Order]:
-    """Every order this run must decide on: the depot's orders for the run that have not moved to another day."""
     return list(
         db.scalars(
             select(Order)
@@ -108,8 +102,8 @@ def run_orders(db: Session, depot: str, run_date: date) -> list[Order]:
     )
 
 
+# Rule 2. Orders from stores whose last order of the same temperature waited.
 def protected_refs(db: Session, run_date: date, orders: Sequence[Order]) -> set[str]:
-    """Rule 2: orders from stores whose last order of the same temperature waited."""
     waited = {
         (h.outlet_id, h.temp)
         for h in db.scalars(select(ServiceHistory).where(ServiceHistory.deferred_on.is_not(None)))
@@ -134,7 +128,6 @@ def context(db: Session, plan: Plan, orders: Sequence[Order]) -> Context:
 
 
 def order_ref_of(db: Session, order_id: uuid.UUID) -> str:
-    """The order number of an order a stop or a deferral names by its id (a foreign key, so it is there)."""
     order = db.get(Order, order_id)
     if order is None:
         raise LookupError(f"No order {order_id}")
@@ -152,7 +145,6 @@ def stored_trips(db: Session, plan: Plan) -> list[EngineTrip]:
     return out
 
 
-# ------------------------------------------------------------------------------------------------ proposing
 def propose_plan(db: Session, now: datetime, plan: Plan, *, forced: Iterable[str] = ()) -> Plan:
     if plan.status is PlanStatus.PUBLISHED:
         raise PlanError("This plan is published. Change it trip by trip instead.")
@@ -201,10 +193,9 @@ def propose_plan(db: Session, now: datetime, plan: Plan, *, forced: Iterable[str
     return plan
 
 
+# Keeps the analysis made with every order. An override plans without the overridden order,
+# so its own analysis misses what no plan could avoid. Only while the fleet is the same.
 def _before_override(summary: dict[str, Any], fleet: list[str]) -> list[dict[str, Any]] | None:
-    """What the engine found with every order in the run, kept through an override: the override plans without
-    the overridden order, so its own analysis no longer counts what no plan could avoid. Only while the fleet is
-    the same one that analysis saw."""
     if summary.get("fleet") != fleet:
         return None
     return summary.get("analyses_before_override") if summary.get("overridden") else summary.get("analyses")
@@ -226,9 +217,8 @@ def _analysis_json(a: GroupAnalysis) -> dict[str, Any]:
 def _write_trips(
     db: Session, plan: Plan, trips: Sequence[EngineTrip], by_ref: dict[str, Order], ctx: Context | None = None
 ) -> None:
-    # One statement, the stops going with their trips in the database. Only a draft is ever rewritten, and nothing
-    # hangs on a draft's trips yet; deleting them one by one through the session cost a round trip for every
-    # relationship of every trip, about a second on each move.
+    # One delete statement, and the stops go with their trips. Only a draft is rewritten, so nothing
+    # hangs on its trips. Deleting one by one through the session took about a second per move.
     db.execute(delete(Trip).where(Trip.plan_id == plan.id))
     db.expire(plan, ["trips"])
     orders = list(by_ref.values())
@@ -314,19 +304,17 @@ def _write_deferrals(
     db.flush()
 
 
-# ------------------------------------------------------------------------------------------------ editing
 @dataclass(frozen=True)
 class Target:
     vehicle_id: str
     trip_no: int
 
 
+# One step of the board's undo. That is one order from Not placed, or every order of a store
+# when its stop is dragged. Relay never refuses the move. The board names what it breaks.
 def move_orders(
     db: Session, now: datetime, plan: Plan, order_refs: Sequence[str], target: Target | None, user: AppUser
 ) -> None:
-    """Move orders onto a trip, or off every trip, as one step of the board's undo: one order from Not placed, or
-    every order of a store when its stop is dragged. Relay never refuses the move; the board names what it
-    breaks."""
     if plan.status is PlanStatus.PUBLISHED:
         raise PlanError("This plan is published. Change it from Live runs.")
     refs = list(dict.fromkeys(order_refs))
@@ -361,7 +349,7 @@ def move_orders(
         resequence(ctx, trip, trips)
     _renumber(trips)
     _write_trips(db, plan, trips, by_ref, ctx)
-    # an order taken off every trip waits, and needs a reason; an order placed stops waiting
+    # an order taken off every trip waits and needs a reason. An order placed stops waiting
     placed = {o for t in trips for o in t.order_ids}
     for d in db.scalars(select(Deferral).where(Deferral.plan_id == plan.id)).all():
         if order_ref_of(db, d.order_id) in placed:
@@ -397,30 +385,27 @@ def move_orders(
 
 
 def _assignment(trips: Iterable[EngineTrip]) -> list[list[Any]]:
-    """Which orders ride which trip, in stop order: what the board compares with Relay's proposal."""
     return sorted([t.vehicle_id, t.trip_no, list(t.order_ids)] for t in trips)
 
 
+# strftime has no portable day without its leading zero.
 def _day(day: date) -> str:
-    """ "Wednesday 8 April" (strftime has no portable day without its leading zero)."""
     return f"{day:%A} {day.day} {day:%B}"
 
 
+# The board reads Edited from the first move until the plan is back to exactly what Relay proposed.
 def _mark_edited(plan: Plan, trips: Sequence[EngineTrip], now: datetime) -> None:
-    """The board reads "Edited" from the first move until it is back to exactly what Relay proposed, by undo or by
-    moving the orders back."""
     summary = {k: v for k, v in plan.summary.items() if k != "edited_at"}
     if _assignment(trips) != plan.summary.get("proposal"):
         summary["edited_at"] = now.isoformat()
     plan.summary = summary
 
 
+# The plan keeps its trips until the dispatcher proposes again. A trip left on a vehicle in the
+# workshop breaks rule 9, so it can't go out. Only a draft's fleet can change.
 def set_vehicle_status(
     db: Session, now: datetime, vehicle: Vehicle, run_date: date, status: VehicleDayStatus, note: str, user: AppUser
 ) -> Plan:
-    """Send a vehicle to the workshop, back into service, or onto standby for one run. The plan keeps its trips
-    until the dispatcher proposes again; a trip left on a vehicle in the workshop breaks rule 9, so it can't go
-    out. Only a draft's fleet can change: once a plan is published its trucks are loaded and on the road."""
     today = current_run(db, now)
     if not today <= run_date <= today + timedelta(days=FLEET_DAYS_AHEAD):
         raise PlanError(f"The fleet can be changed for runs from {_day(today)} to two weeks after it.")
@@ -463,10 +448,10 @@ def set_vehicle_status(
     return plan
 
 
+# Puts the stops in Relay's order if some order keeps every window, counted from when the vehicle
+# can leave. That is 2:00 AM for a first trip, and for a second, once the first is back.
+# Otherwise the dispatcher's order stays.
 def resequence(ctx: Context, trip: EngineTrip, trips: Sequence[EngineTrip] = ()) -> None:
-    """Put a changed trip's stops in Relay's order when some order keeps every window, counted from when the
-    vehicle can leave: 2:00 AM for a first trip, and for a second, once the first is back. Otherwise keep the
-    dispatcher's order, and the board shows what breaks."""
     orders = [ctx.orders[o] for o in trip.order_ids]
     brands = {o.brand for o in orders}
     districts = {ctx.network.outlets[o.outlet_id].district for o in orders}
@@ -480,6 +465,7 @@ def resequence(ctx: Context, trip: EngineTrip, trips: Sequence[EngineTrip] = ())
         # a second trip starting at 2:00 AM would find an order the van can never drive
         (report,), _ = evaluate(ctx, [before])
         ready = report.back + RELOAD_MINUTES
+    # latest is the last minute the trip may leave: 8:00 AM for Fresh, 5:00 PM for the rest
     found = sequence_stops(
         ctx.network, ctx.conditions, outlets, brand, ready, latest=480 if brand is Brand.FRESH else 17 * 60
     )
@@ -506,9 +492,9 @@ def _remember(plan: Plan, trips: Sequence[EngineTrip]) -> None:
     plan.summary = {**plan.summary, "undo": [*undo, snapshot]}
 
 
+# Only before publishing. Undo rewrites every trip, which on a published plan would wipe what
+# the dock has loaded, flagged and handed over.
 def undo(db: Session, now: datetime, plan: Plan) -> None:
-    """Put back the board as it was before the last move. Only before publishing: undo rewrites every trip, and on
-    a published plan that would wipe what the dock has loaded, flagged and handed over."""
     if plan.status is PlanStatus.PUBLISHED:
         raise PlanError("This plan is published, so board moves can't be undone. Change it trip by trip instead.")
     stack = list(plan.summary.get("undo", []))
@@ -555,7 +541,6 @@ def _proposed_explanation(plan: Plan, ref: str, order: Order) -> dict[str, Any]:
     }
 
 
-# ------------------------------------------------------------------------------------------------ deferrals
 def confirm_deferral(
     db: Session, now: datetime, plan: Plan, order_ref: str, reason: str, note: str, user: AppUser
 ) -> Deferral:
@@ -570,7 +555,7 @@ def confirm_deferral(
     if reason == "other" and not note.strip():
         raise PlanError("Add a note for the record")
     deferral.reason = REASONS[reason] if reason != "other" else note.strip()
-    # the note goes in first: with "Other", the note is the words the store reads
+    # the note goes in first. With "Other", the note is the words the store reads
     deferral.explanation = {**deferral.explanation, "reason_code": reason, "note": note.strip()}
     # the store is told the next run has room for it, whether or not the drawer was opened first
     check_next_run(db, plan)
@@ -596,12 +581,11 @@ _COUNTS = ("No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
 
 
 def _counted(n: int) -> str:
-    """A count that starts a sentence the store reads, in words while it is small: "Three of our ..."."""
     return _COUNTS[n] if 0 <= n < len(_COUNTS) else str(n)
 
 
+# STM-03. The words the store reads, in this order.
 def store_notice(db: Session, plan: Plan, order: Order, deferral: Deferral, reason: str) -> str:
-    """The words the store reads, in the order STM-03 shows them."""
     day = f"{plan.run_date:%A}"
     analysis = deferral.explanation.get("analysis") or {}
     limiting = analysis.get("limiting", [])
@@ -625,7 +609,7 @@ def store_notice(db: Session, plan: Plan, order: Order, deferral: Deferral, reas
     else:
         parts.append(deferral.explanation.get("note") or "We had to move it.")
     if deferral.explanation.get("rule") == 2 and reason != "store_asked":
-        # Relay's choice, told only when it is the reason: a store that asked for the move already knows why
+        # Relay's choice, told only when it is the reason. A store that asked already knows why
         parts.append(
             f"Another store in your area had its {'chilled' if order.temp == 'chilled' else 'dry'} order wait on its "
             "last run, so it goes first this time. We avoid making any store wait twice in a row."
@@ -637,11 +621,10 @@ def store_notice(db: Session, plan: Plan, order: Order, deferral: Deferral, reas
     return "\n\n".join(parts)
 
 
+# One plan of the next day with every waiting order added and protected (a store never waits
+# twice in a row), so two are never checked onto the same trip. A published plan keeps the check
+# its stores were told.
 def check_next_run(db: Session, plan: Plan) -> None:
-    """Will the next run carry the orders waiting on this plan? One plan of that day at the depot, with every
-    waiting order added and protected (a store never waits twice in a row), so two waiting orders are never each
-    checked onto the same trip in plans of their own. Kept on each deferral until the waiting orders change; a
-    published plan keeps the check its stores were told about."""
     if plan.status is PlanStatus.PUBLISHED:
         return
     deferrals = list(db.scalars(select(Deferral).where(Deferral.plan_id == plan.id)))
@@ -716,7 +699,7 @@ def _next_run(
             "trip_no": report.trip.trip_no,
             "district": report.district,
             "usual": report.usual,
-            # the time unloading starts: an early vehicle waits for the store to open
+            # the time unloading starts, since an early vehicle waits for the store to open
             "planned": ampm(stop.start),
             "arrives": ampm(stop.arrive) if stop.start - stop.arrive >= 1 else None,
             "depart": ampm(report.depart),
@@ -753,7 +736,6 @@ def _next_run(
     return out
 
 
-# ------------------------------------------------------------------------------------------------ checking
 def publish_check(db: Session, plan: Plan) -> dict[str, Any]:
     orders = run_orders(db, plan.depot, plan.run_date)
     ctx = context(db, plan, orders)
@@ -769,7 +751,7 @@ def publish_check(db: Session, plan: Plan) -> dict[str, Any]:
     late = []
     for r in reports:
         if r.brand is not Brand.FRESH:
-            continue  # the morning windows are the ones at risk; daytime deliveries have hours of slack
+            continue  # the morning windows are at risk, daytime deliveries have hours of slack
         explained = False
         for p, e in zip(r.planned, r.expected, strict=True):
             close = ctx.network.outlets[e.outlet_id].receiving_window[1]
@@ -809,8 +791,6 @@ def _why_kept(
     *,
     same_trip: bool,
 ) -> str:
-    """Why Relay keeps a stop it expects after the window where it is: what holds the trip back, whether another
-    stop order would bring the store in, and what every other vehicle that could carry it would cost instead."""
     parts = ["Same trip."] if same_trip else [_holds_back(report, reports)]
     parts.append(_stop_order(ctx, report, order_ref, reports, names))
     parts += _other_vehicles(ctx, report, order_ref, reports, names)
@@ -830,8 +810,8 @@ def _holds_back(report: TripReport, reports: Sequence[TripReport]) -> str:
     return f"{vehicle_id} leaves for {report.district} at {ampm(report.depart)}."
 
 
+# A second trip waits for the first to be back.
 def _expected_start(report: TripReport, reports: Sequence[TripReport]) -> float:
-    """When the trip leaves on Relay's expected clock: a second trip waits for the first to be back."""
     if report.trip.trip_no == 1:
         return float(report.depart)
     first = next(r for r in reports if r.trip.vehicle_id == report.trip.vehicle_id and r.trip.trip_no == 1)
@@ -841,7 +821,6 @@ def _expected_start(report: TripReport, reports: Sequence[TripReport]) -> float:
 def _stop_order(
     ctx: Context, report: TripReport, order_ref: str, reports: Sequence[TripReport], names: dict[str, str]
 ) -> str:
-    """Would any other stop order, keeping every window at the published standard, bring this store in?"""
     net = ctx.network
     stops = [(s.order_id, s.outlet_id) for s in report.planned]
     if len(stops) < 2 or len(stops) > 7:
@@ -880,11 +859,10 @@ def _stop_order(
     return f"Serving {name} earlier would make {and_list(names.get(r.outlet_id, r.outlet_id) for r in fewest)} late."
 
 
+# Tries each other vehicle for real, on its trip to the same district or on a trip of its own.
 def _other_vehicles(
     ctx: Context, report: TripReport, order_ref: str, reports: Sequence[TripReport], names: dict[str, str]
 ) -> list[str]:
-    """Each other vehicle that could carry the order, tried for real: on its trip to the same district, or on a trip
-    of its own. Says what the nearest one that works would cost, and groups the ones that can't."""
     net = ctx.network
     order = ctx.orders[order_ref]
     outlet = net.outlets[order.outlet_id]
@@ -995,7 +973,6 @@ def _other_vehicles(
     return lines
 
 
-# ------------------------------------------------------------------------------------------------ publishing
 def publish(db: Session, now: datetime, plan: Plan, user: AppUser | None) -> None:
     check = publish_check(db, plan)
     if not check["can_publish"]:

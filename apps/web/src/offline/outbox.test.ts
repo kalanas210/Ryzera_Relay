@@ -137,7 +137,7 @@ describe("the driver's outbox", () => {
   });
 });
 
-/** A transport whose first send waits until the test lets it answer, so the test can save while it is going. */
+// The first send waits until the test lets it answer, so the test can save while it is going.
 function slowFirstSend(log: string[], offline = false) {
   let answer = () => {};
   const going = new Promise<void>((resolve) => {
@@ -169,7 +169,6 @@ describe("saving while the outbox is sending", () => {
     await expect.poll(() => outbox.inFlight().has("first")).toBe(true);
     await outbox.add(record("second", "delivered"));
     await outbox.addPhoto(photo("proof"));
-    // the save's own nudge joins the run already going, and the phone counts the new ones as on their way
     const joined = outbox.flush(slow);
     expect([...outbox.inFlight()].sort()).toEqual(["first", "proof", "second"]);
 

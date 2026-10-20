@@ -2,7 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Sheet } from "./Sheet";
 
-// jsdom has <dialog> but not its methods; these do what the browser does to the open attribute.
+// jsdom has <dialog> but not its methods. These set the open attribute like a browser does.
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
     this.setAttribute("open", "");
@@ -35,15 +35,15 @@ describe("a sheet opened in the middle of a press", () => {
 
   it("is not closed by the release of that press, only by a tap that starts after it", () => {
     const view = render(sheet(false));
-    press("pointerdown", 1); // the press and hold on a load line
+    press("pointerdown", 1);
     view.rerender(sheet(true));
     expect(document.querySelector("dialog")?.hasAttribute("open")).toBe(true);
     expect(closedBy()).toBe("closerequest");
 
-    press("pointerup", 1); // the finger lifts: the browser would read this as a tap outside
+    press("pointerup", 1); // the browser reads this release as a tap outside
     expect(closedBy()).toBe("closerequest");
 
-    press("pointerdown", 2); // a fresh tap may close it again
+    press("pointerdown", 2);
     expect(closedBy()).toBe("any");
     press("pointerup", 2);
   });

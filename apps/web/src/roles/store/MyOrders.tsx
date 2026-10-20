@@ -57,7 +57,7 @@ import {
   windowOf,
 } from "./words";
 
-/** STM-01 My orders: "is it coming, and when?", one card per order. */
+// STM-01 My orders. One card per order, answering "is it coming, and when?"
 export function MyOrders() {
   const home = useStoreHome();
   const notices = useStoreNotices();
@@ -67,8 +67,7 @@ export function MyOrders() {
   const now = useSimNow(15_000);
   const data = home.data;
   const focus = data?.next_run;
-  // The day's orders: those on its run, and one asked for that day but moved to a later run. Waypoint's order
-  // numbers, dry before chilled, so a moved order never hides behind one on time.
+  // Orders on that day's run, plus ones asked for that day but moved later. Dry first.
   const focusOrders = (data?.orders ?? [])
     .filter((o) => o.run_date === focus || o.requested_date === focus)
     .sort((a, b) => (a.temp === b.temp ? a.order_ref.localeCompare(b.order_ref) : a.temp === "ambient" ? -1 : 1));
@@ -78,7 +77,7 @@ export function MyOrders() {
     failed: trackerFailed,
   } = useTrackers(focusOrders.filter((o) => o.run_date === focus).map((o) => o.order_ref));
 
-  // until every card knows its state, none is shown, so a card never flashes an earlier one
+  // Wait for every tracker, so a card never flashes an earlier state first.
   if (!data || !now || !focus || waiting) {
     return <PhoneScreen header={<HomeHeader title="My orders" />}>{null}</PhoneScreen>;
   }
@@ -173,7 +172,6 @@ function OrderCard({
   const window = windowOf(home.outlet);
   const names = Object.fromEntries(home.case_types.map((c) => [c.code, c.name]));
   const movedTo = state === "deferred" ? dayOf(order.run_date) : null;
-  // an order moved here from its first day says so, once, on the day it runs
   const movedFrom = order.run_date !== order.requested_date && !movedTo ? dayOf(order.requested_date) : null;
   const driver = calledName(tracker?.driver);
   const after = state === "arrived" || state === "delivered" || state === "confirmed" || state === "disputed";
@@ -183,7 +181,7 @@ function OrderCard({
     ? notices.find((n) => n.kind === "order_deferred" && n.data.deferral_id === order.deferral?.id)
     : undefined;
   const track = `/store/orders/${order.order_ref}/track`;
-  // until its cutoff a received order can still be changed; at 4:00 PM the row goes and the meta says Locked
+  // Changeable until the 4:00 PM cutoff. After that the row goes and the meta says Locked.
   const changeable =
     state === "received" &&
     !order.locked &&
@@ -327,7 +325,6 @@ function OrderCard({
         </Button>
       ) : null}
       {state === "on_the_way" || state === "passed" ? (
-        // the same link to the tracker before and after the estimate; under Confirm receipt it steps back
         <ButtonLink to={track} icon={Navigation} variant={confirm ? "secondary" : "primary"}>
           Track delivery
         </ButtonLink>
@@ -341,8 +338,6 @@ function OrderCard({
   );
 }
 
-/** When the next orders close: a countdown under 4 hours, the time when it is later today, or which run a new
- *  order joins once today's cutoff has passed. */
 function CutoffLine({ home, now }: { home: StoreHome; now: Date }) {
   const cutoff = new Date(home.cutoff);
   const minutesLeft = (cutoff.getTime() - now.getTime()) / 60_000;
@@ -390,8 +385,6 @@ function CutoffLine({ home, now }: { home: StoreHome; now: Date }) {
   );
 }
 
-/** Updates: every notice the store has had, newest first, with how many are still unread. Each opens in full, which
- *  marks it read. */
 function Updates({ home, notices }: { home: StoreHome; notices: StoreNotice[] }) {
   const [open, setOpen] = useState(false);
   if (!notices.length) return null;

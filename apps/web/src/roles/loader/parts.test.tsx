@@ -16,7 +16,6 @@ beforeAll(async () => {
 
 afterEach(cleanup);
 
-/** The text a reader sees: what is not laid out unseen to hold a box's size. */
 function seen(text: string): HTMLElement[] {
   return screen.queryAllByText(text).filter((el) => !el.closest(".invisible"));
 }
@@ -50,7 +49,7 @@ describe("How many are on?", () => {
     fireEvent.click(screen.getByRole("button", { name: "More rice and dhal cases", hidden: true }));
     expect(value()).toBe("1");
 
-    view.rerender(sheet(null)); // closed without saving
+    view.rerender(sheet(null));
     view.rerender(sheet(rice));
     expect(value()).toBe("0");
   });
@@ -103,7 +102,7 @@ describe("a load line", () => {
 
   it("sits in a group named by its case and stop, with its Flag button", () => {
     render(row(rice));
-    // jsdom lays nothing out, so it reads the stop and the kind with no space between them; a browser puts one
+    // jsdom lays nothing out, so there is no space between the stop and the kind. A browser puts one.
     const line = screen.getByRole("group", { name: /^Rice and dhal Stop 3\s?Dry$/ });
     expect(
       within(line).getByRole("button", { name: "Flag", description: /^Rice and dhal Stop 3\s?Dry$/ }),
@@ -173,7 +172,6 @@ describe("a flagged line", () => {
 
   it("holds the room of the answer to come, so the answer never changes its height", () => {
     const view = render(row(waiting));
-    // laid out unseen while it waits: the decided lines, for any day the cases may come
     expect(screen.getAllByText("30 loaded, 6 short").length).toBeGreaterThan(0);
     expect(screen.getByText("6 come on Thursday")).toBeTruthy();
     expect(seen("6 come on Thursday")).toHaveLength(0);
@@ -227,7 +225,7 @@ describe("a button that has just appeared", () => {
     const action = vi.fn();
     const { result, rerender } = renderHook(({ moved }) => useSettledTap(moved), { initialProps: { moved: 1 } });
 
-    now += 350; // the second tap of a double tap
+    now += 350;
     act(() => result.current(action)());
     expect(action).not.toHaveBeenCalled();
 
@@ -235,7 +233,6 @@ describe("a button that has just appeared", () => {
     act(() => result.current(action)());
     expect(action).toHaveBeenCalledTimes(1);
 
-    // it moved, or was replaced by another button in the same place: it waits again
     rerender({ moved: 2 });
     now += 100;
     act(() => result.current(action)());

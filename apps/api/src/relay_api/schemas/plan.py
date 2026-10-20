@@ -48,8 +48,8 @@ class TripOut(Schema):
     broken: int
     stops: list[StopOut]
     note: str
+    # Packed or gone, so its stop order can no longer change. The cases went on in that order.
     load_locked: bool
-    """Packed or gone, so its stop order can no longer change: the cases went on in that order."""
 
 
 class LaneOut(Schema):
@@ -78,10 +78,9 @@ class DeferralOut(Schema):
     to_date: date
     confirmed_at: datetime | None
     store_notice: str
+    # The notice goes out when the plan is published.
     notified_at: datetime | None = None
-    """When the store was sent the notice: the plan's publish."""
     acknowledged_at: datetime | None = None
-    """When the store pressed Got it on the notice: the dispatcher's "Seen 6:41 PM"."""
 
 
 class WaitingOut(Schema):
@@ -106,12 +105,12 @@ class PlanOut(Schema):
     version: int
     proposed_at: datetime | None
     published_at: datetime | None
+    # The last hand move, while the board differs from Relay's proposal.
     edited_at: datetime | None
-    """The last hand move, while the board differs from Relay's proposal."""
+    # When the draft last became publishable. Every rule kept and every waiting order given a reason.
     ready_at: datetime | None
-    """When the draft last became publishable: every rule kept and every waiting order given a reason."""
+    # A vehicle went to the workshop, back into service or onto standby after the proposal.
     fleet_changed_at: datetime | None
-    """A vehicle went to the workshop, back into service or onto standby after the proposal."""
 
 
 class BoardOut(Schema):
@@ -125,8 +124,8 @@ class BoardOut(Schema):
     analyses: list[dict[str, Any]]
     can_undo: bool
     broken: int
+    # The run's orders are locked, because its 4:00 PM cutoff has passed.
     locked: bool
-    """The run's orders are locked: its 4:00 PM cutoff has passed."""
     published_peers: list[dict[str, Any]]
 
 
@@ -135,12 +134,11 @@ class FitOut(Schema):
     trip_no: int
     fits: bool
     hint: str
+    # What the trip would carry with the dragged orders on it.
     weight_kg: float
-    """What the trip would carry with the dragged orders on it."""
     volume_m3: float
     weight_cap_kg: float
     volume_cap_m3: float
+    # Where the first dragged order would ride, counting from 1, once Relay puts the stops in order.
     stop: int
-    """Where the first dragged order would ride, counting from 1, once Relay puts the stops in order."""
     current: bool
-    """The trip the dragged orders are on now."""

@@ -1,6 +1,4 @@
-"""Load the shared network (the organizers' reference tables and the tables derived from the history) and
-the people. Each table is loaded only while it is empty, so a table added by a later migration is filled on
-the next start without touching the rest."""
+"""Loads the shared network and the people. A table is loaded only while it is empty."""
 
 from __future__ import annotations
 
@@ -296,7 +294,6 @@ def _hub_stock(seed: Path) -> list[dict[str, Any]]:
     ]
 
 
-# In dependency order: a table is loaded after the tables it refers to.
 TABLES: list[tuple[type[Base], Rows]] = [
     (District, _districts),
     (Outlet, _outlets),
@@ -319,7 +316,6 @@ TABLES: list[tuple[type[Base], Rows]] = [
 
 
 def load_reference(db: Session, seed_dir: Path) -> list[str]:
-    """Fill every empty network table. Returns the tables it filled."""
     filled = []
     for model, rows in TABLES:
         if db.execute(select(model.__table__).limit(1)).first() is not None:
@@ -334,13 +330,13 @@ def load_reference(db: Session, seed_dir: Path) -> list[str]:
 def load_people(db: Session, seed_dir: Path, password: str) -> int:
     existing = {u.username: u for u in db.scalars(select(AppUser))}
     if existing:
-        # people are seeded once; a phone number added to the file later is filled in where none is set yet
+        # People are seeded once. A phone number added later is filled in only where none is set.
         for r in read(seed_dir / "story" / "people.csv"):
             user = existing.get(r["username"])
             if user is not None and user.phone is None and r.get("phone"):
                 user.phone = r["phone"]
         return 0
-    password_hash = hash_secret(password)  # one hash for every seeded account keeps the seed fast
+    password_hash = hash_secret(password)
     pins: dict[str, str] = {}
     rows = []
     for r in read(seed_dir / "story" / "people.csv"):

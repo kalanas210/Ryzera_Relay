@@ -2,9 +2,8 @@ import type { Page } from "@playwright/test";
 import { ACCOUNTS, DESK, expect, PASSWORD, PHONE, type Role, test } from "../support/relay";
 import { expectNoSidewaysScroll, watchErrors } from "../support/screens";
 
-/** Each role signs in on the sign-in page, as a judge does, and lands on its home screen at the README's size for
- *  it: the dispatcher at a desk, everyone else on a phone, where nothing may scroll sideways at 375 px. Every role
- *  works in a private copy of the day, so the shared walkthrough is never touched. */
+// Each role signs in as a judge does and lands on its home screen at the README's size for it.
+// Every role works in a private copy of the day, so the shared walkthrough is never touched.
 
 type Case = {
   role: Role;
@@ -33,7 +32,7 @@ const CASES: Case[] = [
     tag: "@desk",
     home: async (page) => {
       await expect(page.getByRole("heading", { name: "Order queue", level: 1 })).toBeVisible();
-      // the desk's side rail, with keys 1 to 4, or the tab bar on a phone
+      // the desk's side rail with keys 1 to 4, or the tab bar on a phone
       await expect(page.getByRole("navigation", { name: /^Dispatcher/ })).toBeVisible();
       for (const screen of ["Queue", "Plan", "Live", "Outlook"]) {
         await expect(page.getByRole("link", { name: new RegExp(`^${screen}( \\d)?$`) })).toBeVisible();
@@ -48,7 +47,6 @@ const CASES: Case[] = [
     home: async (page) => {
       await expect(page.getByRole("heading", { name: "Kandy hub", level: 1 })).toBeVisible();
       await expect(page.getByText("Mohamed Rizwan", { exact: true })).toBeVisible();
-      // before the plan is published, the dock says so
       await expect(page.getByRole("heading", { name: "No plan yet" })).toBeVisible();
     },
   },
@@ -74,13 +72,11 @@ for (const c of CASES) {
     await page.setViewportSize(c.size);
     await page.goto("/signin");
     await expect(page.getByRole("heading", { name: "Who is signing in?" })).toBeVisible();
-    // the copy this test started, named in the demo bar on a desk, and in Demo controls everywhere
     if (c.size === DESK) await expect(page.getByText(`Walkthrough ${copy.code}`, { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: c.card }).click();
     await expect(page.getByRole("button", { name: c.card })).toHaveAttribute("aria-pressed", "true");
     if (c.role === "loader") {
-      // the dock tablet: tap a name, then the PIN
       await expect(page.getByRole("button", { name: "MR Rizwan", exact: true })).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -96,8 +92,7 @@ for (const c of CASES) {
     await c.home(page);
     await expect(page.getByRole("button", { name: "Demo controls" })).toBeVisible();
     await expectNoSidewaysScroll(page);
-    // the narrowest phone the design draws, for every role (the dispatcher's desk also opens on a phone on call):
-    // nothing scrolls sideways at 375 px
+    // 375 px is the narrowest phone the design draws. The dispatcher's desk also opens on a phone on call.
     if (c.size !== PHONE) {
       await page.setViewportSize(PHONE);
       await c.home(page);
@@ -111,7 +106,7 @@ test("a wrong PIN on the dock tablet stays on the PIN pad @phone", async ({ copy
   const errors = watchErrors(page, { allow: [/status of 401/] });
   await page.setViewportSize(PHONE);
   await page.goto("/signin?role=loader");
-  // the keys take digits once a name is picked, so wait for Rizwan's name
+  // The keys take digits once a name is picked, so wait for Rizwan's name.
   await expect(page.getByRole("button", { name: "MR Rizwan", exact: true })).toHaveAttribute("aria-pressed", "true");
   for (const digit of "1111") await page.getByRole("button", { name: digit, exact: true }).click();
   await expect(page.getByText("That PIN did not match. Try again.")).toBeVisible();

@@ -8,17 +8,15 @@ type Props = {
   error?: boolean;
   length?: number;
   disabled?: boolean;
-  /** The Delete key's name and the dots' description, in the reader's language. */
   deleteLabel?: string;
   progressLabel?: (entered: number, length: number) => string;
-  /** The line under the dots: a note, or what went wrong. The caller keeps its height fixed, so a message coming
-   *  or going never moves the keys. */
+  // The caller keeps this line's height fixed, so a message never moves the keys.
   message?: ReactNode;
 };
 
 const enteredInEnglish = (entered: number, length: number) => `${entered} of ${length} digits entered`;
 
-/** The shared dock tablet's PIN pad: 4 rows of 3 keys, 64 high, 8 apart for gloved fingers. */
+// The dock tablet's PIN pad. Keys are 64 px high and 8 px apart, for gloved fingers.
 export function PinPad({
   value,
   onChange,
@@ -47,7 +45,7 @@ export function PinPad({
     </div>
   );
   return (
-    // full width, so a centred parent cannot shrink the keys below their 114 x 64
+    // Full width, so a centred parent cannot shrink the keys below 114 x 64.
     <div className={cx("flex w-full flex-col items-center", message === undefined ? "gap-6" : "gap-4")}>
       {message === undefined ? (
         dots

@@ -1,5 +1,5 @@
 # One small server runs the same Docker Compose stack a judge runs locally, behind Caddy with HTTPS.
-# The default VPC is enough: one public instance, a fixed address, and a firewall that only opens the web.
+# The default VPC is enough for one public server with a fixed IP.
 
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -87,7 +87,7 @@ resource "aws_instance" "relay" {
   }
 
   lifecycle {
-    # a newer Ubuntu image must not replace the running server and its database
+    # A newer Ubuntu image must not replace the running server and its database.
     ignore_changes = [ami, user_data]
   }
 }

@@ -30,7 +30,7 @@ def test_expected_clock_for_kasuns_run(network: Network, wednesday: Conditions) 
 
 
 def test_an_early_vehicle_waits_for_the_store_to_open(network: Network) -> None:
-    # Aranayake opens at 5:00; leaving at 2:00 the van would arrive at 2:53 and wait
+    # Aranayake opens at 5:00. Leaving at 2:00 the van would arrive at 2:53 and wait.
     rows, _ = free_flow(network, ["OUT116"], clock_to_minutes("02:00"), FRESH)
     assert format_clock(rows[0].arrive) == "02:53"
     assert format_clock(rows[0].start) == "05:00"

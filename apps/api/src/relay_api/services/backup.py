@@ -1,12 +1,4 @@
-"""Sending a stop with a backup vehicle while its driver is out of contact (DEG-03), and what becomes of the backup.
-
-The dispatcher sees how long a run has been silent and when each store can expect it, picks a free vehicle, and
-Relay checks the move against the same rules as the plan: the vehicle's temperature and access, its room, and whether
-it can reach the store before the window closes. The original stop is marked moved and its version goes up, so a
-record the silent phone later sends for it is recognised as a clash and settled with one question. The backup is
-picked at the dock like any other load; when the original driver turns out to have delivered, the backup's copy is
-withdrawn: a backup still at the dock is cancelled, one on the road turns back.
-"""
+"""A backup vehicle takes one stop from a silent run (DEG-03). Withdrawn if the driver delivered."""
 
 from __future__ import annotations
 
@@ -48,8 +40,8 @@ from relay_engine.network import Brand, DockType
 from relay_engine.rules import trip_litres
 from relay_engine.standard import trip_minutes
 
+# Cases a minute when the dock picks a backup load.
 PICK_RATE = 4.0
-"""Cases a minute when the dock picks a backup load."""
 
 
 class BackupError(Exception):
@@ -62,10 +54,8 @@ class Option:
     vehicle_kind: str
     driver: str | None
     status: str
-    """standby, available or busy"""
     departs: datetime
     arrives: datetime
-    """Expected, to the minute."""
     closes: datetime
     fits: bool
     blocked: list[str]
@@ -86,8 +76,7 @@ def _stop_load(db: Session, stop: Stop) -> tuple[int, float, float, list[LoadLin
 
 
 def _busy(db: Session, plan: Plan, vehicle_id: str, now: datetime) -> bool:
-    """On the road now (a finished trip too, until it is back from its last stop), or about to leave on a trip of
-    its own."""
+    # Busy: on the road, leaving within the hour, or a finished trip not yet back at the hub.
     for trip in db.scalars(select(Trip).where(Trip.plan_id == plan.id, Trip.vehicle_id == vehicle_id)):
         if trip.status is TripStatus.FINISHED:
             back = records.back_at_hub(trip)
@@ -104,7 +93,6 @@ def _busy(db: Session, plan: Plan, vehicle_id: str, now: datetime) -> bool:
 
 
 def move_options(db: Session, now: datetime, trip: Trip, stop: Stop) -> list[Option]:
-    """Every vehicle of the depot that could take the stop now, best first, with why the others cannot."""
     plan = db.get(Plan, trip.plan_id)
     assert plan is not None
     net = adapters.network(db)
@@ -117,6 +105,7 @@ def move_options(db: Session, now: datetime, trip: Trip, stop: Stop) -> list[Opt
     days = {d.vehicle_id: d for d in db.scalars(select(VehicleDay).where(VehicleDay.run_date == plan.run_date))}
     vehicles = db.scalars(select(Vehicle).where(Vehicle.depot == plan.depot).order_by(Vehicle.vehicle_id)).all()
     brand = Brand(trip.brand)
+    # Picking takes at least 10 minutes.
     pick = max(10, math.ceil(cases / PICK_RATE))
     depart_min = adapters.minutes_of(plan.run_date, now) + pick
     out = []
@@ -170,7 +159,6 @@ def move_options(db: Session, now: datetime, trip: Trip, stop: Stop) -> list[Opt
 
 
 def move_stop(db: Session, now: datetime, user: AppUser | None, stop: Stop, vehicle_id: str, reason: str) -> Trip:
-    """Send one stop with another vehicle. The original driver keeps the rest of the run."""
     trip = db.get(Trip, stop.trip_id)
     assert trip is not None
     if stop.status not in (StopStatus.PENDING, StopStatus.ARRIVED):
@@ -235,6 +223,7 @@ def move_stop(db: Session, now: datetime, user: AppUser | None, stop: Stop, vehi
             )
         )
     stop.status = StopStatus.MOVED
+    # The silent phone's later record for this stop now clashes, and is settled with one question.
     stop.version += 1
     stop.reason = reason.strip()
 
@@ -321,13 +310,11 @@ def backup_for(db: Session, stop: Stop) -> Stop | None:
 
 
 def carrier(db: Session, copy: Stop | None) -> str | None:
-    """The vehicle that carries a backup's copy of a stop."""
     trip = db.get(Trip, copy.trip_id) if copy is not None else None
     return trip.vehicle_id if trip is not None else None
 
 
 def keep_backup(db: Session, now: datetime, user: AppUser | None, item: FeedItem, note: str) -> None:
-    """After a store's receipt, the dispatcher keeps the backup on the road: nobody is told, the note is kept."""
     item.handled_at = now
     item.handled_by = user.id if user else None
     item.outcome = f"You kept the backup at {words.clock(now)}." + (f" {note.strip()}" if note.strip() else "")
@@ -348,7 +335,6 @@ def keep_backup(db: Session, now: datetime, user: AppUser | None, item: FeedItem
 
 
 def cancel_backup(db: Session, now: datetime, user: AppUser | None, copy: Stop) -> None:
-    """The dispatcher calls the backup off: its copy is withdrawn and the original stop is the driver's again."""
     original = db.get(Stop, copy.backup_of) if copy.backup_of else None
     withdraw_copy(db, now, copy, by=user, reason="cancelled")
     if original is not None and original.status is StopStatus.MOVED:
@@ -357,8 +343,7 @@ def cancel_backup(db: Session, now: datetime, user: AppUser | None, copy: Stop) 
 
 
 def withdraw_copy(db: Session, now: datetime, copy: Stop, *, by: AppUser | None, reason: str) -> None:
-    """The backup's copy of a stop is no longer needed: a backup still at the dock is cancelled and its picks are
-    withdrawn; one on the road turns back to the hub."""
+    # At the dock the backup is cancelled and its picks withdrawn. On the road it turns back.
     if copy.status is StopStatus.CANCELLED:
         return
     copy.status = StopStatus.CANCELLED
@@ -418,8 +403,6 @@ def _tell_driver(
 
 
 def receipt_question(db: Session, now: datetime, stop: Stop, receipt_at: datetime) -> FeedItem | None:
-    """A store confirmed receipt from a silent run while a backup is on its way to a later stop of the same trip: the
-    dispatcher is asked whether to keep the backup."""
     trip = db.get(Trip, stop.trip_id)
     if trip is None:
         return None

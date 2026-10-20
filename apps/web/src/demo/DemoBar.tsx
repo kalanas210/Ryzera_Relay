@@ -27,19 +27,14 @@ import { inStorm, playedSummary } from "./model";
 
 type ClockMove = { action: "jump"; to: string; label: string } | { action: "advance"; minutes: number; label: string };
 
-/** A control in the bar: one compact row on a phone, where each is a 48 px target, and the full row from tablet
- *  width, kept large enough for a finger on a touch screen. */
+// 48 px targets on a phone. From tablet width they shrink to 32 px, except on a touch screen.
 const CONTROL =
   "inline-flex min-h-12 shrink-0 items-center justify-center gap-1.5 rounded-button t-label-strong md:min-h-8 pointer-coarse:md:min-h-12";
 
-/** The drawer's buttons, a finger's width on a phone. */
 const PHONE = "max-md:min-h-12";
 
-/** The judge's controls, kept apart from the product: the scenario clock, the next moment in the story, a private
- *  copy of the day, and reset. Hidden when demo mode is off. English only: it is the judge's, not the field's.
- *
- *  The shared walkthrough (MAIN), where every browser lands until it starts or joins a copy, stays at the start of the
- *  story for everyone, so a jump there first offers the judge a copy of their own and makes the jump in it. */
+// The judge's controls, kept apart from the product. English only, it is not for the field.
+// A jump in the shared walkthrough (MAIN) first offers the judge a copy of their own and jumps there.
 export function DemoBar() {
   const { data } = useDemoState();
   const now = useSimNow(15_000);
@@ -53,17 +48,16 @@ export function DemoBar() {
   const act = useMutation({
     mutationFn: async (input: { path: string; body?: unknown; andMove?: ClockMove }) => {
       const state = await api.post<DemoState>(input.path, input.body);
-      // a new copy carries its cookie from here on, so the move asked for in the shared walkthrough lands in it
+      // The new copy's cookie is set by now, so the move asked for in the shared walkthrough lands in it.
       return input.andMove ? api.post<DemoState>("/api/demo/clock", clockBody(input.andMove)) : state;
     },
     onSuccess: (state) => {
       setPlayed(state.played ?? []);
       setShowPlayed(false);
       client.setQueryData(["demo"], state);
-      // everything on screen depends on the clock or the copy of the day
       void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "demo" && q.queryKey[0] !== "me" });
     },
-    // a copy may have been started before the move failed: the bar shows the copy this browser is in now
+    // A copy may have started before the move failed, so ask which copy this browser is in.
     onError: () => void client.invalidateQueries({ queryKey: ["demo"] }),
   });
 
@@ -349,9 +343,8 @@ function clockBody(move: ClockMove) {
 
 const advanced = (now: Date, minutes: number) => new Date(now.getTime() + minutes * 60_000);
 
-/** For the driver only: cut this device off as if the phone had lost its signal, so a judge on a desktop browser can
- *  walk the offline flow. The scenario clock keeps running; nothing the phone saves is sent until it is switched off.
- *  Inside the story's storm the phone has no signal whatever the switch says, so it reads on until the storm ends. */
+// Driver only. Cuts this device off, so a judge on a desktop browser can walk the offline flow.
+// Inside the story's storm there is no signal whatever the switch says, so it reads on until the storm ends.
 function NoSignalSwitch({ now, outages }: { now: Date; outages: DemoState["outages"] }) {
   const forced = useForcedSignal();
   const client = useQueryClient();

@@ -1,11 +1,4 @@
-"""The driver's phone (DRV-01 to DRV-05): the run, the outbox's records, proof photos and the minute check-in.
-
-Inside the story's scripted outage the phone has no signal, whatever it tries: Relay notes no contact, applies no
-record and stores no photo until the window ends. The demo keeps a stand-in for the phone's own memory meanwhile
-(services/story.py), which is all the run and the held records below ever read from in that window. The demo bar's
-"no signal" switch cuts the phone off at any time; the phone says so on the demo's own channel (/signal), so the
-story's autopilot leaves that driver alone until the phone is back.
-"""
+"""The driver's phone (DRV-01 to DRV-05): the run, the outbox's records, proof photos and the check-in."""
 
 from __future__ import annotations
 
@@ -38,8 +31,9 @@ router = APIRouter(prefix="/api/driver", tags=["driver"])
 Driver = Annotated[AppUser, Depends(require(Role.DRIVER))]
 
 
+# In the story's scripted outage the phone has no signal. Relay notes no contact, applies no record and
+# stores no photo. The demo keeps a stand-in for the phone's memory meanwhile (services/story.py).
 def _no_signal(workspace: Workspace, user: AppUser, now: datetime) -> None:
-    """The phone is inside its scripted outage: the request never reached Relay."""
     if story.no_signal(workspace, user, now):
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No signal")
 
@@ -71,10 +65,9 @@ def get_run(scope: ScopeDep, user: Driver) -> DriverRunOut:
 
 @router.post("/records", response_model=RecordsOut)
 def post_records(body: RecordsIn, scope: ScopeDep, user: Driver) -> RecordsOut:
-    """Records from the phone's outbox, in the order the phone saved them. Idempotent by each record's id: a resend
-    is answered "duplicate" and changes nothing."""
+    """Records from the phone's outbox, in order. A resend is answered "duplicate" and changes nothing."""
     _no_signal(scope.workspace, user, scope.now)
-    field.switch_signal(scope.db, user, scope.now, on=False)  # the phone reached Relay: it has signal
+    field.switch_signal(scope.db, user, scope.now, on=False)  # the phone reached Relay, so it has signal
     results = field.receive(scope.db, scope.now, user, body.device_id, _records(body.records))
     scope.db.commit()
     return RecordsOut(
@@ -85,8 +78,7 @@ def post_records(body: RecordsIn, scope: ScopeDep, user: Driver) -> RecordsOut:
 
 @router.post("/checkin", response_model=CheckinOut)
 def checkin(body: CheckinIn, scope: ScopeDep, user: Driver) -> CheckinOut:
-    """Once a minute while the app is open, without a location: how the office knows the phone is in contact. Inside
-    the story's outage it only tells the phone so: Relay notes nothing."""
+    """Sent once a minute while the app is open. This is how the office knows the phone is in contact."""
     if story.no_signal(scope.workspace, user, scope.now) is None:
         field.switch_signal(scope.db, user, scope.now, on=False)
         back_from = field.touch_contact(scope.db, scope.now, user, body.device_id)
@@ -98,10 +90,8 @@ def checkin(body: CheckinIn, scope: ScopeDep, user: Driver) -> CheckinOut:
 
 @router.put("/signal", status_code=status.HTTP_204_NO_CONTENT, tags=["demo"])
 def switch_signal(body: SignalIn, scope: ScopeDep, user: Driver) -> None:
-    """Demo mode: the demo bar's "no signal" switch on this driver's phone went on or off. While it is on, the phone
-    sends nothing and Relay hears nothing from it, so the story's autopilot leaves the driver's phone to the judge
-    holding it and a jump never plays a stop that phone may have saved. A record or a check-in from the phone ends it
-    as well."""
+    """Demo mode. The demo bar's "no signal" switch went on or off on this driver's phone. While it is on, the
+    story's autopilot leaves the driver to the judge holding the phone. A record or a check-in ends it too."""
     if not get_settings().demo_mode:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Demo mode is off")
     field.switch_signal(scope.db, user, scope.now, on=body.on)
@@ -110,9 +100,8 @@ def switch_signal(body: SignalIn, scope: ScopeDep, user: Driver) -> None:
 
 @router.post("/held", status_code=status.HTTP_204_NO_CONTENT, tags=["demo"])
 def hold(body: HeldIn, scope: ScopeDep, user: Driver) -> None:
-    """Demo mode, inside the story's outage only: what this phone saved with no signal joins the story's stand-in for
-    the phone's memory, so a demo jump leaves those stops to this phone instead of playing them again. Relay applies
-    nothing from it until the signal returns."""
+    """Demo mode, inside the story's outage only. The phone's saved records join the story's stand-in for its
+    memory, so a demo jump does not play those stops again. Relay applies nothing until the signal returns."""
     if not get_settings().demo_mode:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Demo mode is off")
     if story.no_signal(scope.workspace, user, scope.now) is None:
@@ -124,7 +113,6 @@ def hold(body: HeldIn, scope: ScopeDep, user: Driver) -> None:
 
 @router.get("/held/photos/{photo_id}", tags=["demo"])
 def held_photo(photo_id: uuid.UUID, scope: ScopeDep, user: Driver) -> Response:
-    """A photo the story's autopilot took on this driver's phone in the storm, for the phone to keep with its record."""
     data = story.stand_in(scope.db, photo_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such photo")
@@ -143,7 +131,8 @@ async def put_photo(
     width: Annotated[int | None, Form()] = None,
     height: Annotated[int | None, Form()] = None,
 ) -> RecordResult:
-    """A proof photo, resized on the phone to about 180 KB. Sent after its stop record; idempotent by its id."""
+    """A proof photo, resized on the phone to about 180 KB. Sent after its stop record.
+    A resend changes nothing."""
     _no_signal(scope.workspace, user, scope.now)
     data = await file.read(field.MAX_PHOTO_BYTES + 1)
     try:

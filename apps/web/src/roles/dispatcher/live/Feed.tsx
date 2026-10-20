@@ -1,3 +1,4 @@
+// The exceptions feed on Live runs, for the desk and for the on-call phone.
 import {
   Check,
   ChevronDown,
@@ -51,7 +52,6 @@ import { EstimateMark, moveFocus } from "./Runs";
 type FeedEnv = {
   depot: Depot;
   depotLabel: string;
-  /** The desk shows desk density and the Move drawer; the on-call phone shows the same items at phone size. */
   desk: boolean;
   rows: RunRow[];
   items: FeedItem[];
@@ -69,7 +69,6 @@ function useEnv(): FeedEnv {
   return env;
 }
 
-/** "You" for the signed-in dispatcher, the name for anyone else. */
 function useWho() {
   const me = useMe("dispatcher");
   return (name: string | null | undefined) =>
@@ -81,12 +80,10 @@ function useMinutesSince(iso: string) {
   return now ? Math.max(0, Math.round((now.getTime() - Date.parse(iso)) / 60_000)) : 0;
 }
 
-/** Items that ask for a decision open on their own; the rest open on a click. */
 const DECISIONS = new Set(["shortfall", "receipt", "conflict"]);
 
-/** The feed: open items under Now, handled ones under Earlier today, newest first. A stop sent with a backup stays
- *  under Now while the backup's copy is live and the driver silent, and gives way to the two-copy item; a two-copy
- *  stop settled meanwhile stays under Now until it is marked reviewed. */
+// A stop sent with a backup stays under Now while the backup's copy is live and the driver silent,
+// until the two-copy item takes over. A settled two-copy stop stays under Now until it is reviewed.
 export function FeedGroups({ feed }: { feed: Feed }) {
   const { desk, allInContact, rows } = useEnv();
   const all = [...feed.now, ...feed.earlier];
@@ -100,7 +97,7 @@ export function FeedGroups({ feed }: { feed: Feed }) {
       <h3 className="t-caption text-asphalt-500">Now</h3>
       {now.length ? (
         now.map((item, i) => (
-          // the item on top opens; when another takes its place, each starts again in its new place
+          // The key includes "is on top", so an item starts over when it moves to or from the top.
           <FeedEntry
             key={`${item.id}:${item.id === now[0]?.id}`}
             item={item}
@@ -148,7 +145,6 @@ function FeedEntry({ item, startOpen }: { item: FeedItem; startOpen: boolean }) 
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the item
 type ItemTone = "attention" | "waiting" | "problem" | "done";
 
 const TONES: Record<ItemTone, { bar: string; icon: string; border: string }> = {
@@ -159,8 +155,7 @@ const TONES: Record<ItemTone, { bar: string; icon: string; border: string }> = {
   done: { bar: "bg-done", icon: "text-done", border: "border-asphalt-200" },
 };
 
-/** Exception item: a tone bar, its icon and title, the minutes or the time at the right, and, opened, what happened
- *  and the decision it asks for. Collapsed, it keeps one line. There is never a call button on a driver's item. */
+// There is never a call button on a driver's item.
 function ItemShell({
   open,
   onToggle,
@@ -252,7 +247,6 @@ function Line({
 
 type TimelineEvent = { at: string; text: string; photo?: { id: string; label: string } | null };
 
-/** Event timeline: time, a dot on the rail, what happened, and the photo taken then. The last dot is the outcome. */
 function Timeline({ events }: { events: TimelineEvent[] }) {
   return (
     <ol className="flex flex-col">
@@ -279,7 +273,6 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
   );
 }
 
-/** A photo from the driver's phone, 56 px; it shows once the photo itself has reached Relay. */
 function RecordPhoto({ id, label }: { id: string; label: string }) {
   const [missing, setMissing] = useState(false);
   if (missing) return null;
@@ -296,7 +289,6 @@ function RecordPhoto({ id, label }: { id: string; label: string }) {
   );
 }
 
-/** "stop 4", "stops 3 and 4", "stops 2, 3 and 4" */
 function stopsWords(markers: RunMarker[]): string {
   const seqs = markers.map((m) => m.seq);
   if (seqs.length === 1) return `stop ${seqs[0]}`;
@@ -312,8 +304,6 @@ function rangePastClose(m: RunMarker): boolean {
   return !!m.range && Date.parse(m.range[1]) > Date.parse(m.closes);
 }
 
-/** Estimate row: the stop, its window, Relay's time and, while the phone is silent, the likely range. A range that
- *  runs past the close is in attention; an estimate past the close is late risk. */
 function EstimateRow({
   row,
   m,
@@ -333,7 +323,6 @@ function EstimateRow({
     <li className="flex min-h-10 items-center gap-3">
       <EstimateMark n={m.seq} size={24} />
       <span className="flex min-w-0 flex-1 flex-col">
-        {/* the mark beside it already shows the stop's number: the name keeps the narrow column to itself */}
         <span className="t-dense-strong">
           <span className="sr-only">Stop {m.seq}, </span>
           {label ?? m.place}
@@ -371,7 +360,6 @@ function EstimateRow({
   );
 }
 
-/** Late risk only when an estimate crosses a close; a range that runs past it is said in attention. */
 function RiskLines({ markers }: { markers: RunMarker[] }) {
   return (
     <>
@@ -390,9 +378,7 @@ function RiskLines({ markers }: { markers: RunMarker[] }) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ silence
-/** DEG-03: a phone gone quiet on a running trip. It says what is known and never why, shows each store still to come
- *  with Relay's estimate and likely range, and resolves itself when the phone is back. */
+// DEG-03. A phone has gone quiet on a running trip. It says what is known, never why.
 function SilenceEntry(props: EntryProps) {
   const { item } = props;
   const env = useEnv();
@@ -481,14 +467,11 @@ function SilenceEntry(props: EntryProps) {
   );
 }
 
-/** The person at the store who reads the same estimate, by the name they are called, or the store. */
 function storeWho(m: RunMarker): string {
   return calledName(m.store_contact) || m.place;
 }
 
-// ------------------------------------------------------------------------------------------------ backup
-/** DEG-03 / stop moved: the dispatcher sent a stop with a backup while its driver was silent. While the backup's copy
- *  is live and the driver silent it is in attention under Now; after that it is the record. */
+// DEG-03, stop moved. Attention while the backup's copy is live and the driver silent, then the record.
 function MovedEntry(props: EntryProps) {
   const { item } = props;
   const env = useEnv();
@@ -505,7 +488,6 @@ function MovedEntry(props: EntryProps) {
   const order = row && marker ? env.dir.stop(row, marker.outlet_id)?.order_ref : undefined;
   const first = row ? driverName(row) : "The driver";
   const live = movedLive(item, env.rows);
-  // where the backup is now, not where it was when the stop moved
   const now =
     copy?.state === "cancelled"
       ? `${backup}'s copy was cancelled.`
@@ -559,8 +541,7 @@ function MovedEntry(props: EntryProps) {
   );
 }
 
-/** DEG-03 / receipt in: a store confirmed receipt from a silent run while a backup is on its way to a later stop.
- *  The receipt moves the estimate; it never settles the driver's records. Keep the backup, or call it off. */
+// DEG-03, receipt in. The receipt moves the estimate. It never settles the driver's records.
 function ReceiptEntry(props: EntryProps) {
   const { item } = props;
   const env = useEnv();
@@ -667,9 +648,7 @@ function ReceiptEntry(props: EntryProps) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ two copies
-/** DEG-05: records from a phone that was silent clash with a move made meanwhile. Kasun has been asked; whichever
- *  answer comes first, the driver's or the dispatcher's, settles it. */
+// DEG-05. A silent phone's records clash with a move. Whichever answer comes first settles it.
 function ConflictEntry(props: EntryProps) {
   const { item } = props;
   const env = useEnv();
@@ -701,7 +680,7 @@ function ConflictEntry(props: EntryProps) {
 
   if (item.handled_at) {
     const byDriver = item.outcome.startsWith("The driver answered yes");
-    // settled the other way: the backup carries the stop and the driver's records for it are set aside
+    // Settled the other way. The backup carries the stop and the driver's records for it are set aside.
     const keptBackup = item.ref?.resolution === "backup";
     const outcome =
       marker?.state === "delivered" && marker.recorded
@@ -838,7 +817,7 @@ function ConflictEntry(props: EntryProps) {
           {first} has been asked too. Whichever answer comes first settles it.
         </p>
       )}
-      {/* the driver's "no" makes keeping the backup's copy the answer that fits; cancelling it stays possible */}
+      {/* After the driver's "no", keeping the backup's copy comes first. Cancelling stays possible. */}
       {(marker?.denied ? (["backup", "driver"] as const) : (["driver", "backup"] as const)).map((keep, i) =>
         keep === "backup" && (!copy || copy.state === "cancelled") ? null : (
           <Button
@@ -859,7 +838,6 @@ function ConflictEntry(props: EntryProps) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ reports
 const REPORT_ICON: Record<string, LucideIcon> = {
   delay: Clock,
   failed_stop: TriangleAlert,
@@ -867,8 +845,6 @@ const REPORT_ICON: Record<string, LucideIcon> = {
   dispute: CircleAlert,
 };
 
-/** A driver's report (delay, a stop not delivered, a problem) or a store's receipt issue. Handled with one action,
- *  which moves it to Earlier today with the time and who handled it. */
 function ReportEntry(props: EntryProps) {
   const { item } = props;
   const env = useEnv();
@@ -883,7 +859,6 @@ function ReportEntry(props: EntryProps) {
   const fromStore = item.kind === "dispute";
 
   const ahead = row && item.kind === "delay" ? row.markers.filter(isEstimated) : [];
-  // what the report said and what it changed, both while it is open and once it is the record
   const story = (
     <>
       {row && !fromStore ? (
@@ -960,15 +935,12 @@ function ReportEntry(props: EntryProps) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ shortfall
-/** "1 rice and dhal case", "6 rice and dhal cases" */
 function casesOf(count: number, name = "") {
   return `${count} ${name ? `${name} ` : ""}${count === 1 ? "case" : "cases"}`;
 }
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
-/** A flag from the dock: open, the decision it needs; handled, the record of what happened. */
 function ShortfallEntry({ s, ...props }: EntryProps & { s: ShortfallDetail }) {
   const { item } = props;
   const minutes = useMinutesSince(item.created_at);
@@ -1012,8 +984,7 @@ function ShortfallDecision({ item, s }: { item: FeedItem; s: ShortfallDetail }) 
     s.kind === "missing"
       ? "None left on the shelf."
       : `The damaged ${s.qty === 1 ? "case stays" : "cases stay"} at the hub.`;
-  // What the hub holds decides whether holding the truck could help: a spare, or a delivery before it leaves.
-  // Where Relay does not know the hub's stock of this case type, the box says what holding the truck costs.
+  // Holding the truck only helps if the hub has a spare, or a delivery lands before it leaves.
   const hold = `Holding ${s.vehicle_id} past ${formatTime(s.departs)} delays ${s.trip_stops === 1 ? "its only stop" : `all ${s.trip_stops} stops`}.`;
   const spare =
     s.hub_spare === null
@@ -1098,7 +1069,6 @@ function ShortfallDecision({ item, s }: { item: FeedItem; s: ShortfallDetail }) 
   );
 }
 
-/** "6 rice and dhal cases short. Decided 2:52 AM: send short, add to Thursday." */
 function decidedLine(s: ShortfallDetail) {
   const answer =
     s.decision === "send_short"
@@ -1107,7 +1077,6 @@ function decidedLine(s: ShortfallDetail) {
   return `${casesOf(s.qty, lowerFirst(s.case_name))} short. Decided ${formatTime(s.decided_at ?? "")}: ${answer}.`;
 }
 
-/** The shortfall's record, in the order it happened: the flag, the answer, the store told, the load handed over. */
 function ShortfallRecord({ item, s }: { item: FeedItem; s: ShortfallDetail }) {
   const who = useWho();
   const flagged = `${casesOf(s.qty, lowerFirst(s.case_name))} ${s.kind} on ${s.vehicle_id}, stop ${s.stop_seq}`;

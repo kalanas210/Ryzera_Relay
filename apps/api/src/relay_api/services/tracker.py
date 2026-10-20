@@ -1,11 +1,5 @@
 """The store's view of a delivery on its way (STM-04) and its confirmation of what arrived (STM-05).
-
-The tracker reads the same estimate as the dispatcher: while the driver is in contact it shows "around 6:35 AM"; while
-the driver's phone is silent it adds the likely range and says plainly that the van has gone quiet, never why. Once
-the estimate has passed with no word, the store can confirm receipt itself: that counts as the delivery for every
-estimate after it, and if a backup is still on the road to a later stop, the dispatcher is asked whether to keep it.
-A store that confirmed can still report a problem with the goods until 4:00 PM on the delivery day.
-"""
+When the driver's phone is silent it says the van has gone quiet, never why."""
 
 from __future__ import annotations
 
@@ -44,8 +38,8 @@ from relay_api.services.dock import Lookup
 from relay_api.services.estimates import run_estimate
 from relay_api.services.notify import add_feed_item
 
+# A store can report a problem with a delivery until this time on the delivery day.
 ISSUES_UNTIL = time(16, 0)
-"""A store can report a problem with a delivery until this time on the delivery day."""
 
 
 class TrackerError(Exception):
@@ -56,8 +50,8 @@ class TrackerError(Exception):
 class TrackerStop:
     seq: int
     place: str
+    # delivered, arrived, last_known, yours, pending
     state: str
-    """delivered, arrived, last_known, yours, pending"""
     at: datetime | None
 
 
@@ -65,8 +59,8 @@ class TrackerStop:
 class Tracker:
     order_ref: str
     kind: str
+    # scheduled, on_the_way, arrived, delivered, confirmed, disputed, moved
     status: str
-    """scheduled, on_the_way, arrived, delivered, confirmed, disputed, moved"""
     vehicle_id: str | None
     vehicle_kind: str | None
     driver: str | None
@@ -81,12 +75,9 @@ class Tracker:
     window: str
     can_confirm: bool
     planned: datetime | None = None
-    """The plan's time for the store's stop: "Planned 5:19 AM"."""
     departed_at: datetime | None = None
     arrived_at: datetime | None = None
-    """When the driver recorded arriving at the store."""
     issues_until: datetime | None = None
-    """Until when the store can still report a problem with this delivery."""
     on_board: list[dict[str, Any]] = field(default_factory=list)
     stops: list[TrackerStop] = field(default_factory=list)
     proof: dict[str, Any] | None = None
@@ -97,8 +88,7 @@ class Tracker:
 
 
 def _stop_for(db: Session, order: Order) -> Stop | None:
-    """The stop carrying this order on a published plan, so a store never sees a draft: a live backup copy wins over
-    the moved original."""
+    # Published plans only, so a store never sees a draft. A live backup copy beats the original.
     stops = list(
         db.scalars(
             select(Stop)
@@ -162,7 +152,7 @@ def tracker(db: Session, now: datetime, order: Order) -> Tracker:
     kind_, where = estimate.position
     to_come = [r for r in sorted(estimate.stops, key=lambda r: r.seq) if not r.done and r.arrived_at is None]
     if kind_ == "unloading" and where and to_come and to_come[0].stop_id == stop.id:
-        out.position = "Your store is probably the next stop."  # what the store needs, not where the truck stands
+        out.position = "Your store is probably the next stop."
     elif kind_ == "unloading" and where:
         out.position = f"Probably still unloading at {look.outlets[where].short_name}."
     elif kind_ == "on_the_road" and where:
@@ -265,7 +255,6 @@ def confirm_receipt(
     issues: list[dict[str, Any]],
     client_ref: str | None,
 ) -> Receipt:
-    """The store confirms what arrived, with any missing, damaged or warm cases. Idempotent by client_ref."""
     if client_ref:
         existing = db.scalar(select(Receipt).where(Receipt.client_ref == client_ref))
         if existing is not None:
@@ -358,11 +347,9 @@ def _dispute(
 
 
 def issues_body(types: dict[str, CaseType], clean: list[Issue]) -> str:
-    """What the store reported, in its own words and word order, as the dispatcher reads it under "From the store",
-    for example: 1 damaged packet foods case and 2 dairy crates not cold. Crushed at the back."""
     parts = []
     for code, kind, qty, _ in clean:
-        counted = words.cases(types[code].name, qty)  # "1 packet foods case"
+        counted = words.cases(types[code].name, qty)
         if kind is IssueKind.NOT_COLD:
             parts.append(f"{counted} not cold")
         else:
@@ -376,8 +363,6 @@ def issues_body(types: dict[str, CaseType], clean: list[Issue]) -> str:
 def report_issues(
     db: Session, now: datetime, user: AppUser, order: Order, issues: list[dict[str, Any]], client_ref: str
 ) -> Receipt:
-    """A problem the store finds after confirming receipt (a crushed case at the back of the pile), until 4:00 PM on
-    the delivery day. Idempotent by client_ref: Try again never reports it twice."""
     receipt = db.scalar(select(Receipt).where(Receipt.order_id == order.id))
     if receipt is None:
         raise TrackerError("Confirm the receipt first.")

@@ -1,5 +1,4 @@
-"""Small pieces of English that several screens and notices share, so a time or a count reads the same
-everywhere: "9:12 PM", "6 rice and dhal cases", "Dry-box truck"."""
+"""Small bits of English shared by screens and notices, like "9:12 PM" and "6 rice and dhal cases"."""
 
 from __future__ import annotations
 
@@ -15,14 +14,13 @@ def clock(moment: datetime) -> str:
 
 
 def round5(moment: datetime) -> datetime:
-    """Drivers and stores read expected times to 5 minutes ("around 6:25 AM"); the dispatcher reads the minute."""
+    # Drivers and stores read 5 minutes ("around 6:25 AM"). The dispatcher reads the minute.
     local = moment.astimezone(COLOMBO)
     minutes = round((local.hour * 60 + local.minute + local.second / 60) / 5) * 5
     return local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=minutes)
 
 
 def cases(name: str, qty: int) -> str:
-    """cases('Rice and dhal case', 6) is '6 rice and dhal cases'."""
     lower = name[:1].lower() + name[1:]
     if qty != 1:
         lower = f"{lower}es" if lower.endswith("box") else f"{lower}s"
@@ -30,7 +28,6 @@ def cases(name: str, qty: int) -> str:
 
 
 def short_case_name(name: str) -> str:
-    """The loader's short name: 'Rice and dhal case' is 'Rice and dhal'."""
     for suffix in (" case", " crate", " box", " carton"):
         if name.endswith(suffix):
             return name[: -len(suffix)]
@@ -44,7 +41,6 @@ def vehicle_kind(vehicle_type: str, temp: str) -> str:
 
 
 def load_kind(brand: str, temp: str) -> str:
-    """How the dock names a load: Dry or Chilled for Fresh, the brand otherwise."""
     if brand == "Fresh":
         return "Chilled" if temp == "chilled" else "Dry"
     return brand
@@ -56,8 +52,6 @@ def initials(display_name: str) -> str:
 
 
 def window(open_hhmm: str, close_hhmm: str) -> str:
-    """window('04:00', '07:45') is '4:00 to 7:45 AM'; the AM or PM is written once when both ends share it."""
-
     def ampm(hhmm: str) -> str:
         hour, minute = int(hhmm[:2]), int(hhmm[3:5])
         return f"{hour % 12 or 12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"

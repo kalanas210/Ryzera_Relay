@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { Health } from "@/api/types";
 
-/** Seconds since `active` turned on, counted while it stays on. */
 function useElapsed(active: boolean): number {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
@@ -16,12 +15,10 @@ function useElapsed(active: boolean): number {
   return seconds;
 }
 
-/** How long a search runs before Relay asks the API whether it is still warming up, and how often it asks again. */
 export const WARMING_FIRST_ASK_MS = 2_000;
 export const WARMING_ASK_AGAIN_MS = 5_000;
 
-/** Whether the API is still warming the engine cache after it started (GET /api/health). A plan asked for meanwhile
- *  waits for the warm-up's answer. Asked once the search has run a moment, then again while the warm-up lasts. */
+// A plan asked for while the API warms the engine cache waits for the warm-up (GET /api/health).
 function useWarming(active: boolean): boolean {
   const [warming, setWarming] = useState(false);
   useEffect(() => {
@@ -44,8 +41,6 @@ function useWarming(active: boolean): boolean {
   return warming;
 }
 
-/** While the engine searches: a proposal Relay has made before comes back at once, a new fleet or new orders take
- *  longer, and the wait is shown rather than hidden behind a button label. */
 export function Replanning({ active }: { active: boolean }) {
   const seconds = useElapsed(active);
   const warming = useWarming(active);

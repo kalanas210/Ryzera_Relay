@@ -1,7 +1,3 @@
-"""The runs panel on the dispatcher's desk at the end of Kasun's morning: a finished trip is never read as back at the
-hub, the driver's "no" reaches the track, the caption names every stop that will be late, the store line names the
-person at the store, and a settled two-copy stop waits under Now until the dispatcher has reviewed it."""
-
 from __future__ import annotations
 
 import uuid
@@ -21,7 +17,6 @@ def hm(value: str | None) -> str | None:
 
 
 def spoken(value: datetime) -> str:
-    """How captions print a time: '9:10 AM'."""
     local = value.astimezone(COLOMBO)
     return f"{local.hour % 12 or 12}:{local.minute:02d} {'AM' if local.hour < 12 else 'PM'}"
 
@@ -54,7 +49,6 @@ def test_a_finished_trip_is_not_back_at_the_hub(new_copy: Callable[[], Copy]) ->
     run = copy.get("/api/driver/run", "driver")
     row = kasun_row(copy)
     assert (row["status"], hm(row["finished_at"])) == ("finished", "07:17")
-    # the desk reads the time home the phone shows, and only as Relay's estimate
     assert row["expected_back"] == run["trip"]["expected_back"]
     back = datetime.fromisoformat(row["expected_back"])
     assert back > datetime.fromisoformat(row["finished_at"])
@@ -67,7 +61,7 @@ def test_a_finished_trip_is_not_back_at_the_hub(new_copy: Callable[[], Copy]) ->
 def test_the_desk_shows_expected_to_the_minute_and_around_while_silent(new_copy: Callable[[], Copy]) -> None:
     copy = jumped(new_copy, "on_the_road")
     stops = kasun_row(copy)["markers"][1:]
-    # DSP-04 at 5:20 AM: the desk reads the minute, where Kasun's phone and Dilani's tracker read 5 minutes
+    # DSP-04 at 5:20 AM. The desk shows the minute, the phone and the tracker round to 5 minutes.
     assert [(m["state"], hm(m["estimate"])) for m in stops] == [
         ("next", "05:30"),
         ("pending", "06:35"),
@@ -79,12 +73,10 @@ def test_the_desk_shows_expected_to_the_minute_and_around_while_silent(new_copy:
     copy.jump("silence")
     row = kasun_row(copy)
     assert row["out_of_contact"]
-    # once the phone is silent the desk says "around", with the time the store reads
     assert [hm(m["estimate"]) for m in row["markers"][2:]] == ["06:35", "07:15"]
 
 
 def _say_no(copy: Copy) -> dict[str, Any]:
-    """Kasun answers the one question at 7:14: the delivery at Aranayake was not made."""
     run = copy.get("/api/driver/run", "driver")
     [question] = run["questions"]
     aranayake = next(s for s in run["trip"]["stops"] if s["place"] == "Aranayake")
@@ -110,7 +102,6 @@ def test_after_the_drivers_no_the_backup_keeps_the_stop(new_copy: Callable[[], C
 
     panel = copy.post(settle, {"keep": "backup"}, "dispatcher")
     row = next(r for r in panel["rows"] if r["vehicle_id"] == "VEH045" and not r["is_backup"])
-    # the stop is VEH060's alone now, and VEH060 carries on to it
     assert {k: marker(row, "Aranayake")[k] for k in ("state", "moved_to", "handed_over")} == {
         "state": "moved",
         "moved_to": "VEH060",
@@ -126,7 +117,6 @@ def test_after_the_drivers_no_the_backup_keeps_the_stop(new_copy: Callable[[], C
         "The driver answered no: not delivered. VEH060's copy stands.",
     )
 
-    # the phone hears it settled, and Relay no longer holds a delivery for the stop from its records
     run = copy.get("/api/driver/run", "driver")
     [asked] = run["questions"]
     assert (asked["status"], asked["resolution"]) == ("resolved", "backup")
@@ -134,7 +124,6 @@ def test_after_the_drivers_no_the_backup_keeps_the_stop(new_copy: Callable[[], C
     assert (stop["status"], stop["completed_at"], stop["has_photo"]) == ("moved", None, False)
     assert any(n["title"] == "Stop 4 stays with VEH060" for n in run["notices"])
 
-    # the first answer wins: cancelling the backup's copy now changes nothing
     copy.post(settle, {"keep": "driver"}, "dispatcher")
     assert marker(kasun_row(copy), "Aranayake")["handed_over"] is True
 
@@ -160,7 +149,6 @@ def test_the_drivers_no_reaches_the_track(new_copy: Callable[[], Copy]) -> None:
 
     row = kasun_row(copy)
     stop4 = marker(row, "Aranayake")
-    # still two copies, but the phone's delivery is no longer shown as if it stood
     assert (stop4["state"], stop4["denied"]) == ("conflict", True)
     assert row["caption"] == "Kasun says stop 4, Aranayake, was not delivered. It has two copies until it is settled."
 
@@ -193,7 +181,6 @@ def test_every_late_stop_is_named() -> None:
 def test_a_settled_two_copy_stop_waits_for_review(new_copy: Callable[[], Copy]) -> None:
     copy = jumped(new_copy, "signal_back")
     open_item = next(i for i in feed(copy)["now"] if i["kind"] == "conflict")
-    # nothing to review before it is settled
     copy.post(f"/api/dispatch/live/feed/{open_item['id']}/review", role="dispatcher", expect=409)
 
     state = copy.jump("settled")
@@ -204,7 +191,6 @@ def test_a_settled_two_copy_stop_waits_for_review(new_copy: Callable[[], Copy]) 
     assert hm(reviewed["reviewed_at"]) == hm(state["now"])
     assert reviewed["reviewed_by"] == "Nuwan Perera"
 
-    # a second review keeps the first time
     copy.advance(3)
     copy.post(f"/api/dispatch/live/feed/{settled['id']}/review", role="dispatcher", expect=204)
     again = next(i for i in feed(copy)["earlier"] if i["kind"] == "conflict")

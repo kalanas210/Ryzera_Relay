@@ -23,7 +23,7 @@ import { calledName } from "@/lib/names";
 import type { Tracker } from "./api";
 import { around, cases, clock } from "./words";
 
-/** "36 rice and dhal cases, 44 packet foods cases": the list wraps between items, never inside one. */
+// The list wraps between items, never inside one.
 export function Contents({ lines, className }: { lines: { name: string; qty: number }[]; className?: string }) {
   return (
     <p className={cx("t-body", className)}>
@@ -37,7 +37,6 @@ export function Contents({ lines, className }: { lines: { name: string; qty: num
   );
 }
 
-/** A row at the foot of a card that opens something: "Read the notice". */
 export function LinkRow({ to, children }: { to: string; children: ReactNode }) {
   return (
     <Link
@@ -50,7 +49,6 @@ export function LinkRow({ to, children }: { to: string; children: ReactNode }) {
   );
 }
 
-/** An action that opens another screen, with the store button's look: a link, so it reads and opens as one. */
 export function ButtonLink({
   to,
   icon: Icon,
@@ -71,7 +69,6 @@ export function ButtonLink({
   );
 }
 
-/** The amber row for something that changed: "6 rice and dhal cases short. They come Thursday." */
 export function AttentionRow({ to, children }: { to: string | null; children: ReactNode }) {
   const body = (
     <>
@@ -90,7 +87,6 @@ export function AttentionRow({ to, children }: { to: string | null; children: Re
   );
 }
 
-/** Good-to-know news, in petrol rather than amber: "Moved later at 9:12 PM. It was expected around 5:20 AM." */
 export function InfoNote({ icon: Icon = CalendarClock, children }: { icon?: LucideIcon; children: ReactNode }) {
   return (
     <p className="flex items-start gap-2 rounded-button bg-petrol-50 p-3 t-body text-asphalt-900">
@@ -124,7 +120,7 @@ export function DetailRow({
   );
 }
 
-/** A time Relay works out rather than one it was told: a white circle in a dashed ring. */
+// Marks a time Relay worked out rather than one it was told.
 export function EstimateMark({ className }: { className?: string }) {
   return (
     <span
@@ -137,7 +133,7 @@ export function EstimateMark({ className }: { className?: string }) {
   );
 }
 
-/** The store's own phone lost Relay: what is on screen is what was known at the last answer, in scenario time. */
+// The phone lost Relay. The screen shows what was known at the last answer, in scenario time.
 export function OfflineNotice({ failed, knownAt }: { failed: boolean; knownAt: string | undefined }) {
   const online = useOnline();
   if ((online && !failed) || !knownAt) return null;
@@ -148,7 +144,6 @@ export function OfflineNotice({ failed, knownAt }: { failed: boolean; knownAt: s
   );
 }
 
-/** "Receipt confirmed" or "Issue sent", once the server has the record. */
 export function ConfirmationPanel({
   icon: Icon,
   tone,
@@ -179,7 +174,6 @@ export function ConfirmationPanel({
   );
 }
 
-/** The driver's proof of delivery, or a plain line that it has not reached Relay yet. */
 export function ProofCard({ tracker }: { tracker: Tracker }) {
   const [enlarged, setEnlarged] = useState(false);
   const proof = tracker.proof;
@@ -267,8 +261,7 @@ export function ProofCard({ tracker }: { tracker: Tracker }) {
   );
 }
 
-/** The delivery photo filling the screen, with a close button; Esc closes it too. On the native <dialog>, so the
- *  browser keeps focus inside it and gives it back to the thumbnail. */
+// A native <dialog>, so the browser keeps focus inside it and gives it back to the thumbnail.
 function PhotoViewer({
   open,
   onClose,
@@ -312,17 +305,15 @@ function PhotoViewer({
   );
 }
 
-/** The photo endpoint checks who may see it; an <img> cannot send the role header, so the role rides along. */
+// An <img> cannot send the role header, so the role rides in the query.
 const photoUrl = (id: string) => `/api/photos/${id}?as=store_manager`;
 
-/** The driver's run up to this store: what is done, where the truck was last known, and this store. */
 export function RunCard({ tracker }: { tracker: Tracker }) {
   const name = calledName(tracker.driver);
-  // out of contact, or past the estimate: the store's own row stops claiming a time Relay was told
+  // Out of contact or past the estimate, so the store's row stops claiming a time Relay was told.
   const quiet = tracker.out_of_contact || tracker.passed;
   const reached = ["arrived", "delivered", "confirmed", "disputed"].includes(tracker.status);
   const before = tracker.stops.filter((s) => s.state !== "yours");
-  // the stop the truck is at or heading to: the furthest one with an arrival, else the first still to come
   const current = reached
     ? undefined
     : ([...before].reverse().find((s) => s.state === "arrived") ?? before.find((s) => s.state === "pending"));
@@ -434,7 +425,7 @@ function PendingDot() {
   return <span aria-hidden className="size-3 rounded-full border-[1.5px] border-asphalt-300 bg-white" />;
 }
 
-/** Who is driving; there is no call button anywhere for the store. */
+// There is no call button anywhere for the store.
 export function DriverRow({ tracker, depot }: { tracker: Tracker; depot: string }) {
   if (!tracker.driver) return null;
   return (
@@ -458,7 +449,6 @@ export function DriverRow({ tracker, depot }: { tracker: Tracker; depot: string 
   );
 }
 
-/** An order not on a published run yet (or moved to a later one) has nothing to track. */
 export function NotPlanned({ header }: { header: ReactNode }) {
   return (
     <PhoneScreen header={header}>

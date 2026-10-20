@@ -6,17 +6,13 @@ import { cx } from "@/lib/cx";
 import { type Fit, fetchFits, type Lane, type MoveInput } from "./api";
 import { tripName } from "./words";
 
-/** What is being moved: one Not placed order, or every order of a stop. */
 export type Moving = {
   refs: string[];
-  /** "OUT117 Hemmathagama" */
   label: string;
-  /** The trip it rides now; none for a Not placed order. */
   from: { vehicle_id: string; trip_no: number } | null;
 };
 
-/** The Trip picker, M on a focused stop or order: the keyboard path for a drag. One row per trip with the same fit
- *  hint the drag shows, the trips it fits first; Up and Down move between rows, Enter moves it. */
+// The keyboard path for a drag, opened with M on a focused stop or order.
 export function TripPicker({
   planId,
   moving,
@@ -39,7 +35,6 @@ export function TripPicker({
   const list = useRef<HTMLUListElement>(null);
   const rows = sortFits(fits.data ?? []);
 
-  // the first row takes focus once the trips are in, so Up, Down and Enter work straight away
   const loaded = Boolean(moving && fits.data);
   useEffect(() => {
     if (loaded) list.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
@@ -125,7 +120,7 @@ export function TripPicker({
   );
 }
 
-/** The trips it fits first, then the rest, each group in lane order; the trip it is on now goes last. */
+// The trips it fits first, then the rest, each group in lane order. The trip it is on now goes last.
 export function sortFits(fits: Fit[]): Fit[] {
   const rank = (f: Fit) => (f.current ? 2 : f.fits ? 0 : 1);
   return fits

@@ -1,13 +1,5 @@
-"""Two clocks for every trip.
-
-*Planned* is the published standard at free flow: the outbound drive, a fixed drive between stops in
-the district, and each stop's handling allowance. A vehicle that arrives before a store opens waits.
-This is the clock the plan is checked on.
-
-*Expected* is Relay's model of the day: each drive at free flow times 100/speed index for that hour,
-times 100/road index for that date, plus each store's usual unloading time from the route history.
-It is what Relay tells the store and the driver, and what the publish check warns about.
-"""
+"""Planned is the published free-flow standard the plan is checked on.
+Expected is Relay's model of the day."""
 
 from __future__ import annotations
 
@@ -20,21 +12,17 @@ from relay_engine.network import Brand, Network
 
 LATEST_FRESH_DEPARTURE = 8 * 60
 MARGIN_MINUTES = 30
-"""Relay leaves as late as it can while every store is expected at least this long before it closes."""
 
 
 @dataclass(frozen=True, slots=True)
 class Conditions:
-    """The day's conditions for Relay's expected clock."""
-
     speed: Mapping[tuple[str, int], float] = field(default_factory=dict)
-    """(district, hour) to the speed index for the day's season; 100 is free flow."""
     road: Mapping[str, float] = field(default_factory=dict)
-    """District to that date's road index; 100 is a clear road."""
     dwell: Mapping[str, float] = field(default_factory=dict)
-    """Outlet to its usual unloading minutes (Fresh), from the route history."""
 
     def factor(self, district: str, minute: float) -> float:
+        # Drive time is free flow times 100/speed index for the hour and 100/road index for the date.
+        # 100 is normal for both.
         hour = int(minute // 60) % 24
         speed = self.speed.get((district, hour), 100.0) or 100.0
         road = self.road.get(district, 100.0) or 100.0
@@ -52,7 +40,6 @@ FREE_FLOW = Conditions()
 def free_flow(
     network: Network, outlets: Sequence[str], depart: float, brand: Brand, order_ids: Sequence[str] | None = None
 ) -> tuple[list[StopTiming], float]:
-    """Planned arrivals at free flow, as the route history plans them, and the time back at the depot."""
     return _simulate(network, outlets, depart, brand, order_ids, None)
 
 
@@ -64,7 +51,6 @@ def expected(
     brand: Brand,
     order_ids: Sequence[str] | None = None,
 ) -> tuple[list[StopTiming], float]:
-    """Relay's expected arrivals for the day's conditions, and the expected time back at the depot."""
     return _simulate(network, outlets, depart, brand, order_ids, conditions)
 
 
@@ -103,11 +89,10 @@ def fits_windows(network: Network, rows: Sequence[StopTiming]) -> bool:
     return all(r.arrive <= network.outlets[r.outlet_id].receiving_window[1] for r in rows)
 
 
+# None when even leaving at `ready` misses a window. Later departures only make arrivals later.
 def latest_departure(
     network: Network, outlets: Sequence[str], brand: Brand, ready: float, latest: float = LATEST_FRESH_DEPARTURE
 ) -> int | None:
-    """The latest whole minute the vehicle can leave and still reach every store inside its window at free flow.
-    None when even leaving at `ready` misses a window. Later departures only make arrivals later."""
     lo, hi = int(ready), int(latest)
     if not fits_windows(network, free_flow(network, outlets, lo, brand)[0]):
         return None
@@ -128,6 +113,8 @@ def min_margin(network: Network, rows: Sequence[StopTiming]) -> float:
     return min(network.outlets[r.outlet_id].receiving_window[1] - r.arrive for r in rows)
 
 
+# Fresh trips leave as late as they can with MARGIN_MINUTES to spare, else as early as they can.
+# Style and Tech trips reach the first store as it opens, or leave as soon as the vehicle is ready.
 def choose_departure(
     network: Network,
     conditions: Conditions,
@@ -137,12 +124,6 @@ def choose_departure(
     latest: int,
     expected_ready: float | None = None,
 ) -> int:
-    """When a trip leaves.
-
-    Fresh trips leave as late as they can while every store is expected at least MARGIN_MINUTES before it closes;
-    when no departure gives that margin they leave as early as they can. Style and Tech trips leave so the first
-    store is reached as it opens, or as soon as the vehicle is ready.
-    """
     start = int(ready + 0.999)
     if latest < start:
         return start
@@ -173,10 +154,8 @@ class Sequenced:
     depart: int
     expected_late: int
     margin: float
-    """At the tightest store, by the expected clock."""
     back: float
     margin_total: float
-    """Across all stores."""
 
 
 def sequence_candidates(network: Network, outlets: Sequence[str], exhaustive_up_to: int = 7) -> list[tuple[str, ...]]:
@@ -198,8 +177,6 @@ def timed(
     expected_ready: float | None = None,
     depart: int | None = None,
 ) -> Sequenced | None:
-    """One stop order, timed: its departure (Relay's choice unless given), and how the day is expected to go.
-    None when the order can't keep every window, or can't be back by `back_by`."""
     last = latest_departure(network, seq, brand, ready, latest)
     if last is None:
         return None
@@ -216,6 +193,8 @@ def timed(
     return Sequenced(tuple(seq), depart, late_count(network, rows), min(margins), back, sum(margins))
 
 
+# A store in `lead`, whose last order waited, goes first when that still fits.
+# `back_by` caps the free-flow return so a second trip can still leave in time.
 def sequence_stops(
     network: Network,
     conditions: Conditions,
@@ -229,13 +208,6 @@ def sequence_stops(
     lead: Sequence[str] = (),
     exhaustive_up_to: int = 7,
 ) -> Sequenced | None:
-    """The stop order and departure for a set of stores in one district.
-
-    Every order that keeps each planned arrival inside its window is tried (exhaustively up to 7 stops). A store
-    in `lead`, whose last order waited, goes first when that still fits. Then Relay takes the fewest stores
-    expected late, the most margin at the tightest store (up to 30 minutes), the most margin across all stores,
-    and the latest start. `back_by` caps the free-flow return so a second trip can still leave in time.
-    None when no order fits."""
     candidates = sequence_candidates(network, outlets, exhaustive_up_to)
     first = {o for o in outlets if o in set(lead)}
     pools = [[c for c in candidates if set(c[: len(first)]) == first]] if first else []
@@ -256,7 +228,6 @@ def sequence_stops(
 def _latest_for_back(
     network: Network, seq: Sequence[str], brand: Brand, ready: float, last: int, back_by: float
 ) -> int | None:
-    """The latest departure up to `last` that is back by `back_by` at free flow."""
     lo = int(ready + 0.999)
     if free_flow(network, seq, lo, brand)[1] > back_by + 1e-6:
         return None
@@ -273,8 +244,6 @@ def _latest_for_back(
 def latest_start_for(
     network: Network, outlets: Sequence[str], brand: Brand, latest: float = LATEST_FRESH_DEPARTURE
 ) -> tuple[tuple[str, ...], int] | None:
-    """The stop order that can leave latest while keeping every window, and that departure. A second trip's
-    first trip must be back before it."""
     best: tuple[tuple[str, ...], int] | None = None
     for seq in sequence_candidates(network, outlets):
         last = latest_departure(network, seq, brand, 0, latest)
@@ -283,14 +252,12 @@ def latest_start_for(
     return best
 
 
+# Fewest stores late, then tightest margin up to 30 minutes, then total margin, then latest start.
 def rank(s: Sequenced) -> tuple[int, float, float, int, tuple[str, ...]]:
-    """Fewest stores expected late, margin up to 30 minutes at the tightest store, margin across all stores,
-    then the latest start."""
     return s.expected_late, -round(min(s.margin, MARGIN_MINUTES), 6), -round(s.margin_total, 3), -s.depart, s.outlets
 
 
 def _heuristic_orders(network: Network, stops: Sequence[str]) -> list[tuple[str, ...]]:
-    """For long trips: earliest close first, earliest open first, and one swap of each neighbouring pair."""
     by_close = sorted(
         stops, key=lambda o: (network.outlets[o].receiving_window[1], network.outlets[o].receiving_window[0], o)
     )
@@ -307,8 +274,6 @@ def _heuristic_orders(network: Network, stops: Sequence[str]) -> list[tuple[str,
 
 
 def quick_fit(network: Network, outlets: Sequence[str], brand: Brand, ready: float) -> tuple[bool, float]:
-    """A fast free-flow check for option screening: does some simple stop order keep every window, and how early
-    can the vehicle be back. Tries earliest-close-first and earliest-open-first."""
     best_back = float("inf")
     ok = False
     for order in _simple_orders(network, outlets):

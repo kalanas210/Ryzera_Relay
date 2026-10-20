@@ -1,10 +1,6 @@
-"""The capacity outlook (DSP-05): for the six ISO weeks from today, a depot's forecast demand against its refrigerated
-fleet, the vehicles each week's busiest day needs, and what to arrange.
-
-The forecast and the fewest-vehicles search come with the seed (OutlookForecast, OutlookWeek and OutlookDay), because
-both need the order history. The run being planned counts its own orders instead, so its row agrees with the queue
-and the deferrals drawer in the same copy of the day, and a day the plan board holds vehicle statuses for takes its
-workshop from there. Everything the page says is built here from those numbers."""
+"""The capacity outlook (DSP-05): six ISO weeks of a depot's forecast demand against its refrigerated fleet.
+The forecast and the fewest-vehicles search come with the seed. The run being planned counts its own orders instead.
+"""
 
 from __future__ import annotations
 
@@ -49,8 +45,8 @@ from relay_engine.model import EARLIEST_DEPARTURE, RELOAD_MINUTES
 from relay_engine.rules import ampm
 
 WEEKS = 6
+# Keeps a day and its month, or a number and its unit, on one line.
 NBSP = "\u00a0"
-"""Keeps a day and its month, or a number and its unit, on one line."""
 FESTIVALS = {"new_year": "New Year", "thai_pongal": "Thai Pongal"}
 WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 ORDINALS = ["", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -63,9 +59,7 @@ TONE: dict[FleetState, Literal["problem", "attention", "neutral"]] = {
 }
 
 
-# ------------------------------------------------------------------------------------------------ words
 def festival_name(code: str) -> str:
-    """festival_name('new_year') is 'New Year'."""
     return FESTIVALS.get(code, code.replace("_", " ").title())
 
 
@@ -82,23 +76,20 @@ def _join(parts: Sequence[str]) -> str:
 
 
 def _short(day: date) -> str:
-    """'Wed 22 Apr'"""
     return f"{day:%a}{NBSP}{day.day}{NBSP}{day:%b}"
 
 
 def _long(day: date) -> str:
-    """'Wednesday 29 April'"""
     return f"{day:%A} {day.day}{NBSP}{day:%B}"
 
 
 def _day_month(day: date) -> str:
-    """'8 April'"""
     return f"{day.day}{NBSP}{day:%B}"
 
 
+# Within one month it reads 'Mon 13 and Tue 14'. Across two, 'Thu 30 Apr and Fri 1 May'.
+# Without weekdays and long, '11 and 25 April'.
 def _days(days: Sequence[date], *, weekday: bool = True, long: bool = False) -> str:
-    """'Mon 13 and Tue 14' within a month (the week's dates carry it), 'Thu 30 Apr and Fri 1 May' across two;
-    without weekdays and long, '11 and 25 April'."""
     if len(days) == 1:
         return _day_month(days[0]) if long else _short(days[0])
     if len({d.month for d in days}) == 1:
@@ -116,26 +107,21 @@ def _m3(value: float) -> str:
 
 
 def _clock(minutes: int) -> str:
-    """'2:00 AM'"""
     return ampm(minutes).replace(" ", NBSP)
 
 
 def _hour(hhmm: str) -> str:
-    """'8 AM' from '08:00', for a limit such as the last window close."""
     hour, minute = int(hhmm[:2]), int(hhmm[3:5])
     return f"{hour % 12 or 12}{f':{minute:02d}' if minute else ''}{NBSP}{'AM' if hour < 12 else 'PM'}"
 
 
-# ------------------------------------------------------------------------------------------------ the calendar
 class Calendar:
-    """The shared calendar around the outlook's weeks: open days, closures, paydays and festival ramps."""
-
     def __init__(self, days: Sequence[CalendarDay]) -> None:
         self.days = {c.date: c for c in sorted(days, key=lambda c: c.date)}
 
+    # A month before to four months after, so a ramp day finds the festival it leads up to.
     @classmethod
     def around(cls, db: Session, first: date, last: date) -> Calendar:
-        """From a month before to four months after, so a ramp day finds the festival it leads up to."""
         span = CalendarDay.date.between(first - timedelta(days=31), last + timedelta(days=120))
         return cls(db.scalars(select(CalendarDay).where(span)).all())
 
@@ -147,7 +133,6 @@ class Calendar:
         return c is not None and c.festival_ramp > 0 and not c.festival
 
     def festival_after(self, day: date) -> CalendarDay | None:
-        """The named festival a ramp day leads up to."""
         return next((c for d, c in self.days.items() if d >= day and c.festival), None)
 
     def ramp_start(self, day: date) -> date:
@@ -160,7 +145,6 @@ class Calendar:
         return festival_name(festival.festival or "") if festival else None
 
     def context(self, day: date) -> list[str]:
-        """Why a day is heavy: 'Vesak ramp', 'payday' or 'payday week'."""
         parts = [f"{name} ramp"] if (name := self._ramp_name(day)) else []
         monday = day - timedelta(days=day.weekday())
         if self.days[day].is_payday:
@@ -170,11 +154,10 @@ class Calendar:
         return parts
 
     def reason(self, day: date) -> str | None:
-        """One word for why a day breaks its weekday's pattern: 'payday', or the festival it ramps up to."""
         return "payday" if self.days[day].is_payday else self._ramp_name(day)
 
+    # A festival that only closes days gets a neutral chip.
     def header(self, monday: date) -> tuple[CalendarChip | None, list[str]]:
-        """The week's calendar chip, and its lines in date order. A festival that only closes days is neutral."""
         week = self.week(monday)
         ramp = [c.date for c in week if self.is_ramp(c.date)]
         named = [c for c in week if c.festival]
@@ -192,7 +175,6 @@ class Calendar:
         return chip, [text for _, text in sorted(lines)]
 
 
-# ------------------------------------------------------------------------------------------------ the days
 def _state(needed: int, available: int) -> FleetState:
     if needed > available:
         return "over"
@@ -206,12 +188,13 @@ def _segments(needed: int, available: int, fleet: int) -> Segments:
     return Segments(filled=filled, short=short, standby=standby, workshop=max(0, fleet - filled - short - standby))
 
 
+# orders, kg, m3, and how many orders the plan lets wait
 Book = tuple[int, float, float, int]
 
 
+# Counts the way the queue and the deferrals drawer do, so the row agrees with them.
+# Late orders ride the next run.
 def _order_book(db: Session, depot: str, day: date) -> Book:
-    """The depot's Fresh chilled orders for the run as the queue counts them (late orders ride the next run), with
-    their kg and m³, and how many of them the plan lets wait, as the deferrals drawer counts them."""
     orders = list(
         db.scalars(
             select(Order)
@@ -226,9 +209,9 @@ def _order_book(db: Session, depot: str, day: date) -> Book:
     return len(book), round(sum(o.weight_kg for o in book), 1), round(sum(o.volume_m3 for o in book), 1), len(waits)
 
 
+# Only the run and the next day have vehicle statuses on the plan board.
+# The forecast's workshop bookings cover the other days.
 def _planned_workshop(db: Session, fleet: set[str], first: date, last: date) -> dict[date, list[str]]:
-    """The refrigerated vehicles in the workshop on each day the plan board holds vehicle statuses for (the run and
-    the next), counted as the queue counts them. The forecast's workshop bookings cover the other days."""
     out: dict[date, list[str]] = {}
     for vd in db.scalars(
         select(VehicleDay).where(VehicleDay.vehicle_id.in_(fleet), VehicleDay.run_date.between(first, last))
@@ -254,18 +237,17 @@ def _day(row: OutlookDay, fleet: set[str], in_workshop: Sequence[str], book: Boo
         state=_state(row.needed, available),
         from_order_book=book is not None,
         waits=waits,
-        # the search counted the forecast's orders; the run's own answer is the plan's, in the deferrals drawer
+        # the search counted the forecast's orders, so the run's own answer is the plan's,
+        # in the deferrals drawer
         served_one_fewer=None if book else row.served_one_fewer,
     )
 
 
 def _same_weekday(peers: Sequence[OutlookDayOut]) -> str | None:
-    """'Wednesday' when every day that needs the most vehicles falls on one."""
     names = {WEEKDAYS[d.date.weekday()] for d in peers}
     return names.pop() if len(peers) > 1 and len(names) == 1 else None
 
 
-# ------------------------------------------------------------------------------------------------ the outlook
 def capacity_outlook(db: Session, now: datetime, depot: str) -> OutlookOut:
     today = now.astimezone(COLOMBO).date()
     run_date = current_run(db, now)
@@ -312,12 +294,13 @@ def capacity_outlook(db: Session, now: datetime, depot: str) -> OutlookOut:
     planned = _planned_workshop(db, fleet, first, last)
     days = {d: _day(r, fleet, planned.get(d, r.in_workshop), book if d == run_date else None) for d, r in rows.items()}
 
+    # volume of one load per refrigerated vehicle in service that day
     def one_load(day: date) -> float:
-        """One load per refrigerated vehicle in service that day."""
         out = days[day].in_workshop if day in days else []
         return sum(cap for v, cap in caps.items() if v not in out)
 
-    # the headline: the day ahead that needs the most refrigerated vehicles, the heaviest of them if several do
+    # the headline is the day ahead that needs the most refrigerated vehicles,
+    # the heaviest of them if several do
     ahead = [d for d in days.values() if d.date > run_date]
     most = max((d.needed for d in ahead), default=0)
     peers = [d for d in ahead if d.needed == most]
@@ -560,9 +543,9 @@ def _method(
     return paragraphs
 
 
+# Reads like 'Wednesdays need 6, Mondays and Thursdays 5, most other days 4 (the payday
+# Saturdays need 5)'.
 def _pattern(days: Sequence[OutlookDayOut], calendar: Calendar) -> str:
-    """'Wednesdays need 6, Mondays and Thursdays 5, most other days 4 (the New Year and payday Saturdays, 11 and
-    25 April, need 5).'"""
     counts: dict[int, Counter[int]] = {}
     for d in days:
         counts.setdefault(d.date.weekday(), Counter())[d.needed] += 1
@@ -597,7 +580,6 @@ def _pattern(days: Sequence[OutlookDayOut], calendar: Calendar) -> str:
 
 
 def _record_week(db: Session, f: OutlookForecast) -> str:
-    """'the week before New Year 2025', from the calendar around the record week."""
     monday = date.fromisocalendar(f.record_year, f.record_week, 1)
     festival = Calendar.around(db, monday, monday + timedelta(days=6)).festival_after(monday)
     if festival is not None:

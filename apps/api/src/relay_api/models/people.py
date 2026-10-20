@@ -31,4 +31,4 @@ class AppUser(Base):
     locale: Mapped[str] = mapped_column(String(2), default="en")
     phone: Mapped[str | None] = mapped_column(String(20))
     judge_account: Mapped[bool] = mapped_column(default=False)
-    """One of the four accounts in the README; shown as a quick sign-in card in demo mode."""
+    """One of the four README accounts. Demo mode shows it as a quick sign-in card."""

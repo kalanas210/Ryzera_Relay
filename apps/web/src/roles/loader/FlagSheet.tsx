@@ -30,17 +30,15 @@ type Props = {
   load: TripLoad;
   group: StopGroup | null;
   line: LoadLine | null;
-  /** The line's flag is still on this tablet a minute after it was made. */
   unsent?: boolean;
-  /** Saves the flag on the tablet and sends it, with the photo after it. */
   onSend: SendFlag;
   onClose: () => void;
 };
 
-/** LDR-03 Flag a shortfall: two taps for a missing line, and the dispatcher's answer in the same place. */
+// LDR-03. Two taps flag a missing line, and the dispatcher's answer shows in the same sheet.
 export function FlagSheet({ load, group: opened, line, unsent = false, onSend, onClose }: Props) {
   const { t } = useLoaderText();
-  // the stop as the load reads now, not as it was when the sheet opened
+  // The stop as the load has it now, not as it was when the sheet opened.
   const group = opened ? (load.groups.find((g) => g.stop_id === opened.stop_id) ?? opened) : null;
   const open = Boolean(group && line);
   const item = line ? t(`cases.${line.case_type}`, { defaultValue: line.case_type }) : "";
@@ -102,14 +100,12 @@ function NewFlag({
     setPhoto(readable ? { blob, url: URL.createObjectURL(blob) } : null);
   };
 
-  // The flag saves on the tablet first, so the sheet closes at once and loading goes on; it reaches Relay as soon
-  // as it can, and the line says so if it has not after a minute.
+  // The flag saves on the tablet first, so the sheet closes at once and loading goes on.
   const send = () => {
     onSend({ lineId: line.id, kind, qty }, kind === "damaged" && photo ? photo.blob : null);
     onClose();
   };
 
-  // The dispatcher decides about the cases still to come: the missing ones, or the damaged ones kept off the truck.
   const info = (forKind: "missing" | "damaged") => (
     <p className="flex items-start gap-3 t-body text-asphalt-700">
       <InfoIcon size={24} strokeWidth={1.75} aria-hidden className="shrink-0" />
@@ -158,9 +154,7 @@ function NewFlag({
           })}
         </div>
       </fieldset>
-      {/* Missing and Damaged read differently below this point, and Damaged adds the photo. Every text that changes
-          keeps the room of its longer reading, and the sheet is as tall as its taller form from the moment it
-          opens, so tapping Damaged or Missing never moves the choice under the finger that tapped it. */}
+      {/* Swapped text keeps the room of its longer reading, so the buttons never move under the finger. */}
       <div className="flex flex-col gap-2">
         <Swap
           as="div"
@@ -205,7 +199,6 @@ function NewFlag({
           ),
           damaged: (
             <div className="flex flex-col gap-4">
-              {/* a photo is asked for only for damage: there is nothing to photograph when a case is not there */}
               <div className="flex flex-col gap-2">
                 <input
                   ref={camera}
@@ -274,7 +267,7 @@ function FlagRecord({
   const Icon = s.kind === "missing" ? PackageX : TriangleAlert;
   const day = s.added_to_day ? weekdayName(t, s.added_to_day) : "";
   const from = weekdayName(t, load.planned_depart);
-  // what the stop's lines say goes off at the door: every decided short on the stop, not only this one
+  // Cases that go out at the door. Every decided short on the stop counts, not only this one.
   const stopCases = group.cases - group.short;
   return (
     <div className="flex flex-col gap-4 pb-2">
@@ -305,7 +298,6 @@ function FlagRecord({
       </div>
 
       {unsent && load.dispatcher_phone ? (
-        // the number is shown large enough to dial from a phone, and a phone can call it with a tap
         <div className="flex flex-col gap-2">
           <Button density="field" full icon={Phone} aria-expanded={showNumber} onClick={() => setShowNumber(true)}>
             {t("call.title", { name: calledName(load.dispatcher) })}
@@ -371,8 +363,7 @@ function FlagRecord({
   );
 }
 
-/** The dispatch number in Display size. On a phone a tap calls it; the dock tablet cannot place calls, so the
- *  number is large enough to dial from a phone, and the note says so in words that suit either device. */
+// The dock tablet cannot place calls, so the number is big enough to dial from a phone.
 function DispatchNumber({ phone }: { phone: string }) {
   const { t } = useLoaderText();
   return (
@@ -388,12 +379,10 @@ function DispatchNumber({ phone }: { phone: string }) {
   );
 }
 
-/** "081 000 2145" as a dialable link: digits only, and a leading + kept for an international number. */
 export function telLink(phone: string): string {
   return `tel:${phone.trim().replace(/(?!^\+)[^\d]/g, "")}`;
 }
 
-/** "Call Nuwan at dispatch" from the bar alert row, when a flag still has no answer close to departure. */
 export function CallSheet({ open, onClose, load }: { open: boolean; onClose: () => void; load: TripLoad }) {
   const { t } = useLoaderText();
   return (

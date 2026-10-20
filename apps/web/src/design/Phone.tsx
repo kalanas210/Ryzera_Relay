@@ -4,8 +4,6 @@ import { useNavigate } from "react-router";
 import { cx } from "@/lib/cx";
 import { IconButton } from "./Button";
 
-/** The phone layout the field and store roles share: a fixed header, scrolling content and an optional
- *  fixed action bar. On a wide screen the same column sits centered. */
 export function PhoneScreen({
   header,
   children,

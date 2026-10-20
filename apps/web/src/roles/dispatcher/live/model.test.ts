@@ -95,7 +95,7 @@ function item(over: Partial<FeedItem> = {}): FeedItem {
   };
 }
 
-/** Kasun's run at 6:15: Kegalle delivered, Mawanella arrived, then nothing from the phone since 5:41. */
+// Kasun's run at 6:15. Kegalle delivered, Mawanella arrived, then nothing from the phone since 5:41.
 const silent = row({
   out_of_contact: true,
   silent_minutes: 34,
@@ -126,7 +126,6 @@ describe("the track's words", () => {
     expect(markerStatus(mawanella!, true).text).toBe("Arrived 5:30");
     expect(markerStatus(hemmathagama!, true).text).toBe("around 6:35");
     expect(markerStatus(aranayake!, true)).toEqual({ text: "Also on VEH060", tone: "attention" });
-    // settled by keeping the backup's copy, the stop is VEH060's alone
     expect(markerStatus({ ...aranayake!, handed_over: true }, false)).toEqual({ text: "With VEH060", tone: "muted" });
   });
 
@@ -145,7 +144,7 @@ describe("the track's words", () => {
 
   it("never uses a dash or an arrow", () => {
     const words = silent.markers.map((m) => markerStatus(m, true).text).join(" ");
-    // dashes U+2012 to U+2015 and every arrow from U+2190 to U+21FF
+    // Dashes U+2012 to U+2015 and every arrow from U+2190 to U+21FF.
     const ch = String.fromCodePoint;
     expect(words).not.toMatch(new RegExp(`[${ch(0x2012)}-${ch(0x2015)}${ch(0x2190)}-${ch(0x21ff)}]`));
   });
@@ -186,7 +185,7 @@ describe("vehicles on the desk", () => {
     const [vehicle] = vehicleRuns([trip2, trip1]);
     expect(vehicle?.current.trip_id).toBe("t1");
     expect(vehicle?.later?.trip_id).toBe("t2");
-    expect(vehicle?.attention).toBe(0); // the trip on the road: a later trip keeps the vehicle in view, not first
+    expect(vehicle?.attention).toBe(0);
   });
 
   it("puts a silent run first and folds runs with nothing to act on", () => {
@@ -247,7 +246,7 @@ describe("feed items and their runs", () => {
 });
 
 describe("the end of a trip", () => {
-  /** Kasun at 7:22: all four stops delivered, Finish trip tapped at Aranayake's dock at 7:17. */
+  // Kasun at 7:22. All four stops delivered, Finish trip tapped at Aranayake's dock at 7:17.
   const finished = row({
     status: "finished",
     finished_at: at("07:17"),
@@ -304,7 +303,7 @@ describe("a stop with two copies", () => {
 });
 
 describe("needs attention first", () => {
-  /** 5:20: nothing open, Sampath's delay handled at 4:35, Kasun's shortfall decided at 2:52. */
+  // 5:20. Nothing open, Sampath's delay handled at 4:35, Kasun's shortfall decided at 2:52.
   const kasun = row({
     markers: [
       marker(1, "Kegalle", { state: "delivered", recorded: at("05:11") }),

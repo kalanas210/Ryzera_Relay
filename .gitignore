@@ -1,4 +1,3 @@
-# Dependencies and build output
 node_modules/
 dist/
 build/
@@ -16,29 +15,25 @@ playwright-report/
 test-results/
 blob-report/
 
-# Environment and secrets
 .env
 .env.*
 !.env.example
 
-# Competition material we don't redistribute
+# Not ours to redistribute
 Challenge Booklet.pdf
 
-# The organizers' full dataset download stays out of git.
-# seed/data holds only the reference tables and the story day the seed needs.
+# The organizers' full dataset stays out of git. seed/data has the small part the seed needs.
 /data/
 
-# OS and editor files
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
 
-# Local tool settings
 .claude/
 
-# Terraform: local state holds the server's details; tfvars holds your own IP
+# Terraform state holds the server's details and tfvars holds your own IP
 .terraform/
 *.tfstate
 *.tfstate.*

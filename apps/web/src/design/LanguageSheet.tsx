@@ -3,7 +3,6 @@ import { LANGUAGES, type Lang } from "@/i18n";
 import { cx } from "@/lib/cx";
 import { Sheet } from "./Sheet";
 
-/** Overlay / Language sheet, shared by the dock tablet and the driver's phone: each option in its own script. */
 export function LanguageSheet({
   open,
   onClose,
@@ -20,9 +19,7 @@ export function LanguageSheet({
   onChange: (lang: Lang) => void;
   title: string;
   helper: string;
-  /** A caption under the choices, where the screen has one. */
   note?: string;
-  /** The close button's name in the reader's language. */
   closeLabel?: string;
 }) {
   return (

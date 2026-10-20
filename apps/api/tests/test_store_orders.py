@@ -1,7 +1,3 @@
-"""Dilani's orders through the API: the 4:00 PM cutoff decides the run by Relay's receive time, a resend never makes
-a second order, an order can be changed until its cutoff, and a notice the store opens is marked read. The last tests
-check that every screen's API answers only its own role, and that a wrong password or PIN signs nobody in."""
-
 from __future__ import annotations
 
 import uuid
@@ -46,18 +42,16 @@ def test_an_order_before_the_cutoff_joins_tomorrows_run_once(new_copy: Callable[
     assert (home["ordering_for"], hm(home["cutoff"]), home["closed_for"]) == (WEDNESDAY, "16:00", None)
 
     sent = order(copy, "chilled", CHILLED, for_date=WEDNESDAY, ref="chilled-order-1")
-    assert sent["order_ref"] == "ORD0098596"  # the number the order book keeps for this store's chilled order
+    assert sent["order_ref"] == "ORD0098596"
     assert (sent["requested_date"], sent["run_date"], sent["deferral"]) == (WEDNESDAY, WEDNESDAY, None)
     assert (sent["units"], sent["weight_kg"], sent["volume_m3"]) == (92, 659.2, 3.464)
     assert (sent["locked"], hm(sent["locks_at"])) == (False, "16:00")
 
-    # Try again with the same client_ref finds the first order, never a second one
     again = order(copy, "chilled", CHILLED, for_date=WEDNESDAY, ref="chilled-order-1")
     assert again["id"] == sent["id"]
     home = copy.get("/api/store/home", "store_manager")
     assert [o["order_ref"] for o in home["orders"] if o["requested_date"] == WEDNESDAY] == ["ORD0098596"]
 
-    # the store read "Received by Waypoint" on its own screen, so it is not an unread notice
     received = [n for n in notices(copy) if n["kind"] == "order_received"]
     assert len(received) == 1
     assert received[0]["read_at"] is not None
@@ -68,13 +62,14 @@ def test_a_line_that_does_not_belong_is_refused(new_copy: Callable[[], Copy]) ->
     copy = new_copy()
     copy.sign_in("dilani", "store_manager")
     body = {"temp": "chilled", "lines": [{"case_type": "rice_dhal", "qty": 3}], "client_ref": "wrong-temp-1"}
-    copy.post("/api/store/orders", body, "store_manager", expect=422)  # a dry case in a chilled order
+    copy.post("/api/store/orders", body, "store_manager", expect=422)
     body = {"temp": "ambient", "lines": [{"case_type": "no_such_case", "qty": 3}], "client_ref": "wrong-case-1"}
     copy.post("/api/store/orders", body, "store_manager", expect=422)
     twice = [{"case_type": "rice_dhal", "qty": 3}, {"case_type": "rice_dhal", "qty": 4}]
     copy.post("/api/store/orders", {"temp": "ambient", "lines": twice, "client_ref": "twice-1"}, "store_manager", 422)
     later = {"temp": "ambient", "lines": DRY, "client_ref": "too-early-1", "for_date": THURSDAY}
-    copy.post("/api/store/orders", later, "store_manager", expect=422)  # Thursday's orders are not open yet
+    # Thursday's orders are not open yet
+    copy.post("/api/store/orders", later, "store_manager", expect=422)
     assert notices(copy) == []
 
 
@@ -88,7 +83,7 @@ def test_a_send_that_reaches_relay_after_four_goes_on_the_next_run(new_copy: Cal
     assert (home["closed_for"], hm(home["closed_at"])) == (WEDNESDAY, "16:00")
     assert (home["ordering_for"], hm(home["cutoff"])) == (THURSDAY, "16:00")
 
-    # the form showed Wednesday (the store's phone was offline at 3:58); Relay received it at 4:05
+    # The form showed Wednesday, the phone was offline at 3:58. Relay received it at 4:05.
     late = order(copy, "ambient", [{"case_type": "tea_biscuit", "qty": 5}], for_date=WEDNESDAY)
     assert (late["requested_date"], late["run_date"]) == (WEDNESDAY, THURSDAY)
     assert late["deferral"]["kind"] == "cutoff"
@@ -98,7 +93,6 @@ def test_a_send_that_reaches_relay_after_four_goes_on_the_next_run(new_copy: Cal
     queue = copy.get(f"/api/dispatch/queue?run_date={WEDNESDAY}", "dispatcher")
     assert late["order_ref"] in [o["order_ref"] for o in queue["late"]]
 
-    # a form opened after the cutoff already showed Thursday: that order is on time for Thursday
     thursday = order(copy, "ambient", [{"case_type": "tea_biscuit", "qty": 5}], for_date=THURSDAY)
     assert (thursday["requested_date"], thursday["run_date"], thursday["deferral"]) == (THURSDAY, THURSDAY, None)
     assert thursday["locked"] is False
@@ -125,7 +119,7 @@ def test_an_order_can_be_changed_until_its_cutoff(new_copy: Callable[[], Copy]) 
         json={"lines": [{"case_type": "dairy", "qty": 4}]},
         headers={"X-Relay-Role": "store_manager"},
     )
-    assert chilled.status_code == 422  # a dry order stays dry
+    assert chilled.status_code == 422
 
     copy.jump("cutoff")
     closed = copy.client.patch(
@@ -141,7 +135,7 @@ def test_an_order_can_be_changed_until_its_cutoff(new_copy: Callable[[], Copy]) 
 def test_opening_a_notice_marks_it_read(new_copy: Callable[[], Copy]) -> None:
     copy = new_copy()
     copy.sign_in("dilani", "store_manager")
-    copy.jump("evening")  # the plan is published: the deferral notice is waiting
+    copy.jump("evening")
     before = copy.get("/api/store/home", "store_manager")["unread_notices"]
     deferral = next(n for n in notices(copy) if n["kind"] == "order_deferred")
     assert (deferral["read_at"], deferral["acknowledged_at"]) == (None, None)
@@ -157,7 +151,6 @@ def test_opening_a_notice_marks_it_read(new_copy: Callable[[], Copy]) -> None:
     copy.post(f"/api/store/notices/{uuid.uuid4()}/read", None, "store_manager", expect=404)
 
 
-# ------------------------------------------------------------------------------------------------ who may see what
 ROUTES = [
     ("/api/store/home", "store_manager"),
     ("/api/dispatch/queue", "dispatcher"),
@@ -191,7 +184,6 @@ def test_each_screen_answers_only_its_own_role(everyone: Copy, path: str, owner:
     assert everyone.client.get(path, headers={"X-Relay-Role": owner}).status_code == 200
     for role in PEOPLE:
         if role != owner:
-            # signed in as that role, and acting as it: the right person, the wrong screen
             assert everyone.client.get(path, headers={"X-Relay-Role": role}).status_code == 403, role
     anonymous = TestClient(app, headers={"X-Relay-Client": "web"})
     assert anonymous.get(path, headers={"X-Relay-Role": owner}).status_code == 401
@@ -203,7 +195,7 @@ def test_a_wrong_password_or_pin_signs_nobody_in(new_copy: Callable[[], Copy]) -
     assert client.post("/api/auth/login", json={"username": "nuwan", "password": "not-the-password"}).status_code == 401
     assert client.post("/api/auth/login", json={"username": "nobody", "password": PASSWORD}).status_code == 401
     assert client.post("/api/auth/pin", json={"username": "rizwan", "pin": "0000"}).status_code == 401
-    # a store manager's account has no PIN: the dock tablet is for loaders and drivers
+    # A store manager's account has no PIN, the dock tablet is for loaders and drivers.
     assert client.post("/api/auth/pin", json={"username": "dilani", "pin": "2580"}).status_code == 401
     assert client.get("/api/dispatch/queue", headers={"X-Relay-Role": "dispatcher"}).status_code == 401
     assert client.get("/api/dock/loads", headers={"X-Relay-Role": "loader"}).status_code == 401

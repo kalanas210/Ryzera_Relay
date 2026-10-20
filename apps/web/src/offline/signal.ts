@@ -1,13 +1,12 @@
-/** The demo's "no signal" switch for this device. A judge on a desktop browser cannot drive into the hills, so the
- *  demo bar can cut the driver's phone off: while it is on, the phone sends nothing and fetches nothing, exactly as
- *  with no network, and the scenario clock keeps running. It is kept for this browser only, until switched off. */
+// The demo's "no signal" switch. A judge on a desktop browser cannot drive into the hills, so the demo bar
+// cuts the driver's phone off. It sends and fetches nothing, as with no network. Kept for this browser only.
 import { useSyncExternalStore } from "react";
 
 const KEY = "relay.phone.noSignal";
 
 export type ForcedSignal = {
   on: boolean;
-  /** Scenario time the switch went on: "No signal since 5:41 AM". */
+  // scenario time the switch went on, for "No signal since 5:41 AM"
   since: string | null;
 };
 

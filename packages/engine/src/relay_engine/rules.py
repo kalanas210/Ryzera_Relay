@@ -1,14 +1,5 @@
 """The eleven rules every trip is checked against, in plain words.
-
-1 Weight within the vehicle's limit. 2 Volume within the vehicle's limit. 3 Chilled on a refrigerated
-vehicle, Fresh dry on an ambient one. 4 Van-only stores go by van. 5 Every store belongs to the vehicle's
-home depot. 6 One brand and one district a trip. 7 Fresh trips within 270 minutes a day (Style and Tech
-within 480). 8 Every planned arrival inside the store's window. 9 At most two trips a day. 10 First trips
-leave at 2:00 AM or later; a second trip leaves at least 10 minutes after the first is back. 11 Fuel stays
-within the weekly quota.
-
-Rules 1 to 7 and 9 are the organizers' published standard; 8 and 10 are Relay's clock; 11 is Waypoint's quota.
-"""
+Rules 1 to 7 and 9 are the organizers' standard, 8 and 10 are Relay's clock, 11 is Waypoint's quota."""
 
 from __future__ import annotations
 
@@ -47,7 +38,6 @@ RULE_NAMES = {
 
 
 def ampm(minutes: float) -> str:
-    """465 becomes '7:45 AM'."""
     whole = round(minutes) % (24 * 60)
     h, m = divmod(whole, 60)
     suffix = "AM" if h < 12 else "PM"
@@ -59,7 +49,7 @@ def kg(value: float) -> str:
 
 
 def trip_litres(network: Network, vehicle_id: str, district: str, stops: int) -> float:
-    """Fuel for one trip at the district table's distances, counting the drive back to the depot."""
+    # Counts the drive back to the depot, at the district table's distances.
     if stops == 0:
         return 0.0
     d = network.districts[district]
@@ -69,18 +59,14 @@ def trip_litres(network: Network, vehicle_id: str, district: str, stops: int) ->
 
 @dataclass(frozen=True, slots=True)
 class Context:
-    """Everything a check needs besides the trips themselves."""
-
     network: Network
     orders: Mapping[str, Order]
     vehicles: Mapping[str, VehicleDay]
     conditions: Conditions
     usual: Mapping[str, Sequence[UsualTrip]]
-    """Vehicle to its usual trips for the weekday."""
 
 
 def evaluate(ctx: Context, trips: Sequence[Trip]) -> tuple[list[TripReport], dict[str, VehicleReport]]:
-    """Time, measure and check every trip. A trip without a departure gets the clock's choice."""
     from relay_engine.clock import choose_departure, latest_departure
 
     network = ctx.network
@@ -325,8 +311,7 @@ def _report(
 
 
 def fit_hint(ctx: Context, order: Order, trip: Trip, trips: Sequence[Trip]) -> tuple[bool, str]:
-    """While an order is dragged: would it fit on this trip, and if not, the reason in a few words. A trip that
-    serves another district says so before anything else: no change of load would make it fit."""
+    # A trip that serves another district says so first, since no change of load would make it fit.
     candidate = Trip(trip.vehicle_id, trip.trip_no, [*trip.order_ids, order.order_id], trip.depart)
     others = [t for t in trips if t.key != trip.key]
     reports, _ = evaluate(ctx, [*others, candidate])

@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
-"""
-validate_scenario.py: checks docs/design/05-scenario-data.md (v0.4, data aligned) against the competition data.
-
-It reads the CSVs in data/raw/data, imports the organizers' trip-time standard from data/raw/check_allocation.py,
-parses the machine-readable appendix at the end of the scenario (fenced ```csv relay:<name>``` and ```json relay:<name>```
-blocks), recomputes every checkable fact and compares. It also checks that the numbers the story prints appear in the
-text, that the timeline table matches its appendix block, that wording found wrong in review stays out, and that the
-text has no em dash, en dash or arrow.
-
-Run from anywhere:
-    python tools/data-check/validate_scenario.py            full check (about 6 minutes: exact searches for 33 days and
-                                                            the five-vehicle case for each Wednesday ahead)
-    python tools/data-check/validate_scenario.py --quick    skip those searches
-    python tools/data-check/validate_scenario.py -v         also list every check that passed
-"""
+"""Checks docs/design/05-scenario-data.md (v0.4) against the competition data and its own appendix.
+It also checks the printed numbers appear in the text and that banned wording stays out."""
+# Run it from anywhere with python tools/data-check/validate_scenario.py. The full check takes about
+# 6 minutes because of the exact searches. --quick skips them, -v also lists every check that passed.
 import argparse
 import csv
 import io
@@ -32,7 +21,7 @@ from relay_model import hm, fmt, ampm, r5, num, OUT, VEH, CAL, DT  # noqa: E402
 MD_PATH = M.REPO / "docs" / "design" / "05-scenario-data.md"
 DAY, PLAN_DAY, THU, MON, TUE = "2026-04-08", "2026-04-07", "2026-04-09", "2026-04-06", "2026-04-07"
 
-# Team knowledge (not in the data): the district each store name lies in. outlets.csv has no names.
+# Team knowledge, not in the data. The district each store name lies in. outlets.csv has no names.
 TOWN_DISTRICT = {
     "Katugastota": "Kandy", "Mahaiyawa": "Kandy", "Asgiriya": "Kandy", "Bahirawakanda": "Kandy", "Watapuluwa": "Kandy",
     "Hantana": "Kandy", "Ampitiya": "Kandy", "Suduhumpola": "Kandy", "Bogambara": "Kandy", "Kandy Town": "Kandy",
@@ -45,20 +34,18 @@ TOWN_DISTRICT = {
     "Aranayake": "Kegalle", "Hemmathagama": "Kegalle", "Mawanella": "Kegalle", "Kegalle": "Kegalle",
     "Borella": "Colombo", "Kadawatha": "Gampaha", "Panadura": "Kalutara", "Hikkaduwa": "Galle",
 }
-# district_travel.csv puts Kandy district stores 8 km from the hub and 3 km apart: only Kandy city areas fit.
-# Team knowledge (approximate road distance from Kandy Town in km, read off a map). A Fresh store must sit within about
-# 4.5 km, so any two Kandy Fresh stores are a short city drive apart, as the data's 3 km between stops assumes.
-# Peradeniya and Kundasale are separate towns on opposite sides of Kandy, about 14 km apart through the city; they are
-# listed only so the check can reject them. Tennekumbura (the Tech store, one stop on a daytime trip) is a suburb.
+# Approximate road km from Kandy Town, read off a map. The data puts Kandy stores 3 km apart,
+# so a Fresh store must sit within about 4.5 km. Peradeniya and Kundasale are separate towns,
+# listed only so the check can reject them. Tennekumbura, the Tech store, is a suburb.
 KANDY_KM_FROM_TOWN = {"Kandy Town": 0.0, "Asgiriya": 1.0, "Bogambara": 1.5, "Mahaiyawa": 1.5, "Bahirawakanda": 2.0,
                       "Lewella": 2.0, "Mulgampola": 2.5, "Watapuluwa": 3.0, "Suduhumpola": 3.0, "Ampitiya": 4.0,
                       "Hantana": 4.0, "Katugastota": 4.0, "Tennekumbura": 5.5, "Peradeniya": 6.5, "Kundasale": 8.0}
 KANDY_CITY_AREAS = {n for n, km in KANDY_KM_FROM_TOWN.items() if km <= 6.0}
-# Nuwara Eliya stores in road order from the hub via Nuwara Eliya town (A5 then A7)
+# Nuwara Eliya stores in road order from the hub, through Nuwara Eliya town (A5 then A7).
 NE_ROAD_ORDER = ["OUT105", "OUT108", "OUT104", "OUT106", "OUT107"]
 BANNED = {chr(0x2014): "em dash", chr(0x2013): "en dash", "-" + ">": "ASCII arrow", "<" + "-": "ASCII arrow", "=" + ">": "ASCII arrow"}
-# wording that review found wrong or overclaimed; each must stay out of the scenario (outside the Changes section,
-# which may quote old strings)
+# Wording that review found wrong or overclaimed. Each must stay out of the scenario,
+# except in the Changes section, which may quote old strings.
 BANNED_PHRASES = {
     "heaviest morning ahead": "29 April is the heaviest Wednesday ahead, not the heaviest day",
     "Why nothing else can move": "the publish check column is 'Why Relay keeps it'",
@@ -91,7 +78,6 @@ BANNED_PHRASES = {
 }
 
 
-# ------------------------------------------------------------------ bookkeeping
 class Checks:
     def __init__(self, verbose=False):
         self.n = 0
@@ -133,7 +119,6 @@ def close(a, b, tol=1e-6):
     return abs(float(a) - float(b)) <= tol
 
 
-# ------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true")
@@ -144,7 +129,6 @@ def main():
     A = parse_appendix(md)
     F = A.get("facts", {})
 
-    # ============================================================== text
     C.sec("text")
     C("v0.4 (data aligned)" in md, "the scenario is headed v0.4 (data aligned)")
     for ch, label in BANNED.items():
@@ -165,7 +149,6 @@ def main():
               "## The shortfall", "## Timeline and screen snapshot times", "## Capacity outlook (DSP-05)", "## Additional facts"]:
         C(h in md, f"section '{h}' is present")
 
-    # ============================================================== dates
     C.sec("calendar")
     for r in A["dates"]:
         d = r["date"]
@@ -177,7 +160,6 @@ def main():
     C(CAL.index.max() == "2026-06-28", "calendar ends 28 June 2026 (v0.2's October dates were outside it)")
     wk_ops = CAL[(CAL.iso_year == 2026) & (CAL.iso_week.between(15, 20))].groupby("iso_week").is_operating.sum().to_dict()
 
-    # ============================================================== vehicles
     C.sec("vehicles")
     VT = {r["vehicle_id"]: r for r in A["vehicles"]}
     C(sorted(VT) == sorted(VEH[VEH.depot == "Kandy"].index), "the vehicles table lists the whole Kandy fleet, VEH039 to VEH060")
@@ -195,7 +177,6 @@ def main():
         counts.setdefault((VEH.loc[v, "temp"], r["wednesday"]), 0)
         counts[(VEH.loc[v, "temp"], r["wednesday"])] += 1
 
-    # ============================================================== outlets and names
     C.sec("outlets")
     OT = {r["outlet_id"]: r for r in A["outlets"]}
     for o, r in OT.items():
@@ -217,7 +198,6 @@ def main():
     for o in ["OUT116", "OUT117", "OUT118", "OUT119"]:
         C(o in OT, f"{o} is named on the screens")
 
-    # ============================================================== case types
     C.sec("cases")
     CASES = {r["case_type"]: (r["temp"], float(r["kg"]), float(r["m3"])) for r in A["cases"]}
     pu = M.PER_UNIT.loc["Fresh"]
@@ -231,7 +211,6 @@ def main():
         return (sum(counts_), round(sum(n * CASES[c][1] for c, n in zip(names, counts_)), 1),
                 round(sum(n * CASES[c][2] for c, n in zip(names, counts_)), 3))
 
-    # ============================================================== order book and numbering
     C.sec("orders")
     ORD = A["orders"]
     wed = [r for r in ORD if r["delivery_date"] == DAY]
@@ -284,7 +263,6 @@ def main():
     late = [r for r in wed if r["status"].startswith("late")]
     C(sorted((r["outlet_id"], r["temp"]) for r in late) == [("OUT032", "chilled"), ("OUT032", "dry")], "the two late orders are OUT032's")
 
-    # Thursday
     thu = [r for r in ORD if r["delivery_date"] == THU]
     tech_thu = sorted(o for o in M.tech_candidates("Thu") if o in F["thursday"]["tech_outlets"])
     C(len(tech_thu) == M.expected_orders("Thu") - len(M.fixed_streams("Thu")), "Thursday's Tech count is the expected count")
@@ -314,7 +292,6 @@ def main():
     C(abs(oc[1] / f["kg"] - 1) <= 0.05 and abs(oc[2] / f["m3"] - 1) <= 0.08, "Dilani's own Thursday dry order is within 5% of the forecast's weight and 8% of its volume")
     C("within 3% of its weight and 6% of its volume (5% and 8% for the Thursday order)" in md, "the text states the case-built tolerances the checks use")
 
-    # ============================================================== the plan
     C.sec("plan")
     TR = A["trips"]
     trips = {}
@@ -381,7 +358,6 @@ def main():
     C((sum(v in running for v in amb), sum(v in standby for v in amb), sum(VT[v]["wednesday"] == "not needed" for v in amb)) == (7, 1, 7),
       "ambient: 7 running, 1 standby, 7 not needed")
 
-    # fuel
     C.sec("fuel")
     tfuel = {(v, tn): dict(district=t["district"], stops=t["seq"], std=t["std"], brand=t["brand"]) for (v, tn), t in trips.items()}
     mon_matale = sum(1 for o, t in M.fixed_streams("Mon") if t == "chilled" and OUT.loc[o, "district"] == "Matale")
@@ -394,7 +370,6 @@ def main():
           == (int(r["fresh_min"]), int(r["daytime_min"]), r["mon_l"], r["tue_l"], r["wed_l"], r["week_l"], int(r["quota_l"])), f"{v} fuel row")
         C(x["week"] <= x["quota"], f"{v}: {x['week']:.1f} of {x['quota']} L this week, within the weekly quota")
 
-    # ============================================================== expected times at publish
     C.sec("expected")
     EXPT = {}
     for (v, tn) in sorted(trips):
@@ -416,7 +391,7 @@ def main():
     n_fresh = sum(len(t["seq"]) for t in trips.values() if t["brand"] == "Fresh")
     C(n_fresh == 53, "53 Fresh stops on Wednesday")
     C(len(late_pub) == F["publish"]["expected_after_window"], f"{len(late_pub)} of 53 Fresh stops expected after their window")
-    # Relay's departures: no other departure for the same stop order has fewer stops expected after the window
+    # No other departure for the same stop order has fewer stops expected after the window.
     for (v, tn), t in trips.items():
         if t["brand"] != "Fresh" or tn == 2:
             continue
@@ -438,7 +413,8 @@ def main():
     edep42 = max(trips[("VEH042", 2)]["dep"], EXPT[("VEH042", 1)]["back"] + M.RELOAD)
     a85 = [[a_ for o_, a_, _, _ in M.simulate_model(list(p_), edep42, "Fresh", DAY)[0] if o_ == "OUT085"][0] for p_ in _it.permutations(trips[("VEH042", 2)]["seq"])]
     C(min(a85) > hm(OUT.loc["OUT085", "window_close_time"]), "Kandy Town would miss its 7:30 close in any stop order")
-    # Matale runs leave earlier than the route history ever has; the text says so and what a usual departure would cost
+    # Matale runs leave earlier than the route history ever has.
+    # The text says so and what a usual departure would cost.
     PM_ = F["publish"]["matale_departures"]
     SBm = M.matale_first_departures()
     C(trips[("VEH048", 1)]["dep"] < hm(SBm["matale_first_dep_min_dry"])
@@ -456,7 +432,7 @@ def main():
     n42 = sum(1 for o_, a_, _, _ in r42x if a_ > hm(OUT.loc[o_, "window_close_time"]))
     n42now = sum(1 for o_, a_, _, _ in EXPT[("VEH042", 2)]["rows"] if a_ > hm(OUT.loc[o_, "window_close_time"]))
     C((n42, n42now) == (PM_["VEH042"]["trip2_late"], PM_["VEH042"]["trip2_late_now"]), f"VEH042 leaving {PM_['VEH042']['depart']}: {n42} of its second-trip stores expected late ({n42now} now)")
-    # Maskeliya: an idle truck could take it alone; the text states the cost of that choice
+    # Maskeliya alone on an idle truck. The text states the cost.
     O7 = F["publish"]["out107_alone"]
     f7, b7 = M.simulate_ff(["OUT107"], hm(O7["depart"]), "Fresh")
     e7, _ = M.simulate_model(["OUT107"], hm(O7["depart"]), "Fresh", DAY)
@@ -469,7 +445,6 @@ def main():
         C(trips[(v, 1)]["back"] > hm("08:40"), f"publish check: {v} is back after 8:40 AM")
     C(trips[("VEH057", 1)]["back"] == hm("06:02"), "publish check: VEH057 is back at 6:02 (needed for Kegalle, rule 1)")
 
-    # ============================================================== why one chilled order waits
     C.sec("deferral")
     chilled = {s: dict(district=o["district"], kg=o["kg"], m3=o["m3"]) for s, o in orders.items() if o["temp"] == "chilled"}
     opts = M.trip_options(chilled)
@@ -521,7 +496,6 @@ def main():
     C(trips[("VEH042", 1)]["district"] == "Matale" and trips[("VEH042", 2)]["district"] == "Kandy" and trips[("VEH057", 2)]["seq"] == ["OUT116", "OUT119"],
       "rule 1: VEH042 runs Matale before its Kandy run; VEH057's second trip runs Kegalle")
     C(M.earliest_back(["OUT116", "OUT117", "OUT119"], trips[("VEH057", 2)]["dep"]) is None, "dragging Dilani's order onto VEH057 trip 2 also breaks a window")
-    # paper plan
     P = FD["paper_plan"]
     pmin = {}
     for v, tn, st in P:
@@ -539,7 +513,7 @@ def main():
     C(r87[0][1] > hm(OUT.loc["OUT087", "window_close_time"]), "Mulgampola would be reached after it closes")
     C(pmin["VEH040"] - 31 + M.std_minutes("Kegalle", "Fresh", ["rear_dock"]) == FD["veh040_kegalle_paper"] > M.TRIP_BUDGET_PREDAWN,
       "VEH040 cannot take Dilani's order even on paper: 239 + 68 = 307 of 270 minutes")
-    # the example behind "every plan that leaves OUT111 moves another vehicle off its usual run"
+    # The example behind "every plan that leaves OUT111 moves another vehicle off its usual run".
     LX = FD["lightest_example"]
     (s1, s2) = LX["VEH040"]
     m1, m2 = [M.std_minutes(OUT.loc[x[0], "district"], "Fresh", [OUT.loc[o, "dock_type"] for o in x]) for x in (s1, s2)]
@@ -555,10 +529,10 @@ def main():
     C(M.earliest_back(["OUT116", "OUT117", "OUT119"], b42 + M.RELOAD) is None, "VEH042 after Matale cannot reach all three Kegalle stores in time")
     third = b42 + M.RELOAD + DT.loc["Kegalle", "depot_to_district_freeflow_min"] + 2 * (15 + DT.loc["Kegalle", "inter_stop_freeflow_min"])
     C(fmt(third) == FD["paper_veh042_third_stop"], f"its third Kegalle stop would be {fmt(third)}")
-    # protected store on VEH057 trip 2
     e57 = {o: a for o, a, _, _ in EXPT[("VEH057", 2)]["rows"]}
     C(fmt(e57["OUT119"]) == FD["protected_expected"] and e57["OUT119"] > hm("08:00"), "OUT119 is expected after its window, the same morning")
-    # Monday: VEH039 fails at 2:50 AM loaded for Matale; the Matale load moves whole to VEH042; Kegalle goes to VEH057 trip 2
+    # Monday. VEH039 fails at 2:50 AM loaded for Matale. The Matale load moves whole to VEH042
+    # and Kegalle goes to VEH057 trip 2.
     MO = F["monday"]
     mon = forecast_day(MON)
     keg = {s: x for s, x in mon.items() if x["district"] == "Kegalle"}
@@ -591,7 +565,7 @@ def main():
     tue[("OUT119", "chilled-mon")] = dict(district="Kegalle", kg=keg[("OUT119", "chilled")]["kg"], m3=keg[("OUT119", "chilled")]["m3"])
     nt, _ = M.solve(tue, R5)
     C(nt == len(tue) == F["tuesday"]["served"], f"Tuesday: 5 refrigerated vehicles serve all {len(tue)} chilled orders, OUT119's Monday order included")
-    # Thursday: the next run can carry it
+    # On Thursday the next run can carry it.
     th = forecast_day(THU)
     th[("OUT117", "chilled-wed")] = dict(district="Kegalle", kg=orders[("OUT117", "chilled")]["kg"], m3=orders[("OUT117", "chilled")]["m3"])
     nth, _ = M.solve(th, R7, objective="min_vehicles")
@@ -605,7 +579,8 @@ def main():
     C([fmt(a) for _, a, _, _ in ffk] == ft["kegalle_planned"] and all(a <= hm(OUT.loc[o, "window_close_time"]) for o, a, _, _ in ffk),
       "Thursday Kegalle run: every planned arrival inside its window")
     C(fmt(bk) == ft["kegalle_back"], f"Thursday Kegalle run back at {fmt(bk)}")
-    # VEH039's usual Thursday is Kegalle then Matale: the extra Hemmathagama stop must still leave room for Matale
+    # VEH039's usual Thursday is Kegalle then Matale.
+    # The extra Hemmathagama stop must still leave room for Matale.
     tmat = sorted(o for o, t in M.fixed_streams("Thu") if t == "chilled" and OUT.loc[o, "district"] == "Matale")
     C(tmat == ft["matale_outlets"], "Thursday's Matale chilled stores")
     day_std = ft["kegalle_std"] + M.std_minutes("Matale", "Fresh", [OUT.loc[o, "dock_type"] for o in tmat])
@@ -620,7 +595,6 @@ def main():
     C((len(dd39), int((dd39 == {"Kegalle", "Matale"}).sum())) == (ft["veh039_thursdays"], ft["veh039_kegalle_matale"]),
       f"VEH039 ran Kegalle and Matale on {int((dd39 == {'Kegalle', 'Matale'}).sum())} of the {len(dd39)} Thursdays it ran")
 
-    # ============================================================== Kasun
     C.sec("kasun")
     KT = A["kasun"]
     EV = {r["event"]: r["time"] for r in A["kasun_events"]}
@@ -636,12 +610,14 @@ def main():
             C((r[pcol], r[ecol]) == (fmt(a), fmt(r5(e))), f"{label} 9:12 PM, {o}: planned {fmt(a)}, expected about {fmt(r5(e))}")
             C(a <= hm(OUT.loc[o, "window_close_time"]) and e <= hm(OUT.loc[o, "window_close_time"]), f"{label} 9:12 PM, {o}: planned and expected inside the window")
     C(M.std_minutes("Kegalle", "Fresh", [OUT.loc[o, "dock_type"] for o in after]) == 153, "Kasun's run is 153 standard minutes")
-    # why Kegalle town first: Mawanella is the slowest of the four to unload, and the data has no map inside a district
+    # Why Kegalle town goes first. Mawanella is the slowest of the four to unload,
+    # and the data has no map inside a district.
     med = {o: M.DWELL.loc[o, 0.5] for o in after}
     C(max(med, key=med.get) == "OUT118" and OUT.loc["OUT118", "dock_type"] == "street", f"Mawanella is the slowest stop of the run to unload (medians {med})")
     C(f"every pair of Kegalle stores is the same {int(DT.loc['Kegalle', 'inter_stop_freeflow_min'])} minutes apart at free flow" in md,
       "the text states the data's single inter-stop time for Kegalle")
-    # the 9:12 PM swap: the reason holds on the planned clock only, and Relay states its cost on the expected clock
+    # The 9:12 PM swap. The reason holds on the planned clock only.
+    # Relay states its cost on the expected clock.
     FK = F["kasun"]
     ffb, _ = M.simulate_ff(before, hm(EV["planned_departure"]), "Fresh")
     ffa, _ = M.simulate_ff(after, hm(EV["planned_departure"]), "Fresh")
@@ -683,7 +659,8 @@ def main():
     C(hm(EV["backup_moved"]) - lost == 34, "stop 4 moved after 34 minutes of silence")
     C(hm(KT[2]["delivered"]) < hm(EV["store_receipt"]) < hm(EV["backup_kept"]) < back, "the store confirms receipt after the goods arrived, Nuwan keeps the backup, then Kasun reconnects")
     C(EV["answered"] == EV["backup_cancelled"] and hm(EV["resolved"]) == hm(EV["answered"]) + 1, "answer, cancel and resolve times")
-    # drivers act only when stopped (booklet p.6): every tap on Kasun's phone falls while he is at the dock or at a store
+    # Drivers act only when stopped (booklet p.6).
+    # Every tap on Kasun's phone falls at the dock or at a store.
     stops_ = [(hm(EV["planned_departure"]) - 60, hm(EV["departed"]))] + [(hm(r["arrived"]), hm(r["left"])) for r in KT]
     for ev in ["answered", "summary", "finish"]:
         C(any(a_ <= hm(EV[ev]) <= l_ for a_, l_ in stops_), f"Kasun's {ev} at {EV[ev]} happens while he is stopped")
@@ -691,8 +668,9 @@ def main():
     home = hm(EV["finish"]) + DT.loc["Kegalle", "depot_to_district_freeflow_min"] * M.factor("Kegalle", hm(EV["finish"]), DAY)
     C(fmt(r5(home)) == FK["home_after_finish"], f"after Finish trip Relay expects him at the hub around {fmt(r5(home))}")
     C(not any(r["time"] == "07:40" and r["day"] == "Wed" for r in A["timeline"]), "no Finish trip on the road at 7:40")
-    # the estimate rule: last stop event (+ usual unloading if it is an arrival) + legs by the expected model; a store's
-    # confirmed receipt counts as a delivery at the receipt time; range +-(15 + silence/2) rounded out, never before now
+    # The estimate rule. Take the last stop event, add the usual unloading time if it was an arrival,
+    # then add the legs from the expected model. A store's confirmed receipt counts as a delivery
+    # at the receipt time. The range is +-(15 + silence/2), rounded out, and never starts before now.
     e530 = estimate_chain(hm(KT[1]["arrived"]), 1, after)
     erec = estimate_chain(hm(EV["store_receipt"]), 2, after, arrived=False)
     for r in A["estimates"]:
@@ -717,7 +695,6 @@ def main():
       "after the store's receipt Aranayake's estimate moves, and its range still runs past the 7:30 close (so Nuwan keeps the backup)")
     at605 = [r for r in A["estimates"] if r["at"] == "06:05" and r["stop"] == "4"][0]
     C(hm(at605["high"]) > hm(OUT.loc["OUT116", "window_close_time"]), "at 6:05 stop 4's range runs past Aranayake's 7:30 close")
-    # the backup
     BK = F["backup"]
     bo = orders[("OUT116", "ambient")]
     C(VEH.loc["VEH060", "temp"] == "ambient" and bo["kg"] <= VEH.loc["VEH060", "weight_cap_kg"] and bo["m3"] <= VEH.loc["VEH060", "volume_cap_m3"],
@@ -734,7 +711,6 @@ def main():
     C([out_min, round(2 * out_km), round(2 * out_km / VEH.loc["VEH060", "km_per_l"]), fmt(r5(hm(EV["backup_cancelled"]) + back_min))]
       == [BK["out_min"], BK["km"], BK["litres"], BK["home"]], "the cancelled backup: minutes out, km, litres, home time")
 
-    # ============================================================== loading
     C.sec("loading")
     LD = A["loading"]
     kas_units = trips[("VEH045", 1)]["units"]
@@ -753,7 +729,6 @@ def main():
     C(("Wed", "02:18") in tlk and ("Wed", "02:36") in tlk and ("Wed", "02:40") in tlk,
       "Rizwan signs in (2:18) before loading starts (2:20); Anjali signs in at 2:36, so Rizwan switches back at 2:40")
 
-    # ============================================================== the morning on Nuwan's screen
     C.sec("morning")
     ACT = {}
     for (v, tn) in sorted(trips):
@@ -784,7 +759,7 @@ def main():
     C(round((M.mult(DAY, "Fresh_chilled") - 1) * 100) == 38 and round((M.mult(DAY, "Fresh_dry") - 1) * 100) == 38, "Fresh orders about 38% larger (New Year lift times growth)")
     C(all(M.RC[(d, DAY)] == 100 for d in ["Kandy", "Badulla", "Nuwara Eliya"]), "road index 100 in the other Kandy districts")
 
-    # ============================================================== the queue (DSP-01)
+    # The queue, DSP-01.
     C.sec("queue")
     Q = F["queue"]
     at400 = [s for s in wed_streams if s[0] != "OUT032"]
@@ -794,7 +769,7 @@ def main():
     C([ids[("OUT032", "ambient")], ids[("OUT032", "chilled")]] == Q["late_ids"], "OUT032's late orders keep Wednesday's numbers")
     C(all(OUT.loc[o, "brand"] == "Fresh" for o in Q["not_ordered_312"]), "the outlets not yet ordered at 3:12 PM are Fresh")
 
-    # ============================================================== capacity outlook (DSP-05)
+    # The capacity outlook, DSP-05.
     C.sec("outlook")
     fc = M.FC[(M.FC.depot == "Kandy") & (M.FC.wk.between(202615, 202620))].pivot_table(index="wk", columns="g", values="pred", aggfunc="sum")
     for r in A["outlook"]:
@@ -853,7 +828,6 @@ def main():
     ch15 = round(fc.loc[202615].Fresh_chilled, 1)
     C(round(ch15 / F["story"]["kandy_2026_w1_13_chilled_mean"], 2) == FO["week15_ratio"], "week 15 chilled against an ordinary 2026 week")
 
-    # ============================================================== numbers for the story boards
     C.sec("story")
     SB = M.story_numbers()
     for k, v in F["story"].items():
@@ -887,7 +861,6 @@ def main():
     C([tot["dry"][0], tot["dry"][1], round(tot["dry"][2], 1), round(tot["dry"][3], 3)] == F["plan"]["fresh_dry"], "Kandy Fresh dry totals")
     C([tot["chilled"][0], tot["chilled"][1], round(tot["chilled"][2], 1), round(tot["chilled"][3], 3)] == F["plan"]["fresh_chilled"], "Kandy Fresh chilled totals")
 
-    # ============================================================== timeline
     C.sec("timeline")
     TL = A["timeline"]
     order_day = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3}
@@ -909,12 +882,10 @@ def main():
     C("DRV-02 / Behind plan" in " ".join(r["frames"] for r in TL) and "DRV-02 / Early" not in md.split("## Changes from v0.3")[0] + md.split("## Appendix")[1],
       "DRV-02 / Behind plan replaces DRV-02 / Early")
 
-    # ============================================================== printed values in the text
     C.sec("printed")
     for label, s in printed_strings(orders, trips, EXPT, F, KT, EV, A, NAME):
         C(s in md, f"text prints {label}: '{s}'")
 
-    # ============================================================== summary
     print()
     for s, (p, f_) in C.per.items():
         print(f"  {s:<10} {p:>4} passed" + (f", {f_} failed" if f_ else ""))
@@ -926,7 +897,6 @@ def main():
     print("ALL CHECKS PASSED")
 
 
-# ------------------------------------------------------------------ helpers used above
 def style_size(o, day):
     dow = CAL.loc[day, "dow_name"]
     k = M.DEL[(M.DEL.outlet_id == o) & (M.DEL.dow_name == dow) & (M.DEL.wk >= 202601) & (M.DEL.wk <= 202613)
@@ -953,9 +923,10 @@ def ordinary_wednesday():
     return {(o, "chilled"): dict(district=OUT.loc[o, "district"], kg=r.kg, m3=r.m3) for o, r in t.iterrows()}
 
 
+# Expected arrival at each later stop from a stop event at stop idx.
+# An arrival adds that store's usual unloading time.
+# A delivery, or a store's confirmed receipt, does not.
 def estimate_chain(event_at, idx, seq, arrived=True):
-    """expected arrival at each later stop from a stop event at stop idx: an arrival adds that store's usual unloading
-    time, a delivery (or a store's confirmed receipt) does not"""
     t = event_at + (M.dwell(seq[idx]) if arrived else 0)
     out = {}
     for j in range(idx + 1, len(seq)):
@@ -1000,7 +971,6 @@ def dthu_rice_wed(ORD):
 
 
 def printed_strings(orders, trips, EXPT, F, KT, EV, A, NAME):
-    """numbers the story prints, rebuilt from the checked values; each must appear word for word in the scenario"""
     from printed import strings
     return strings(orders=orders, trips=trips, EXPT=EXPT, F=F, KT=KT, EV=EV, A=A, NAME=NAME, M=M)
 

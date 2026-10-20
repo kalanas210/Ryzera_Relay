@@ -1,9 +1,5 @@
-/** DEG-02's one question, and what the run says about stops the office moved.
- *
- *  Relay asks only when a record from this phone clashed with a change the office made while the phone was silent:
- *  the stop was moved to a backup vehicle. The card sits at the top of the screen the driver is on, makes no sound
- *  and opens nothing; the answer is saved on the phone first, like any record. Once it is settled the card becomes a
- *  note saying how. */
+// DEG-02. The one question Relay asks when this phone's record clashed with the office moving the stop.
+// The card is silent and opens nothing. Once it is settled it becomes a note saying how.
 import { Camera, Check, Clock, Info, PenLine, TriangleAlert, X } from "lucide-react";
 import { Button } from "@/design/Button";
 import { Notice } from "@/design/Notice";
@@ -14,7 +10,6 @@ import { useDriver } from "./sync";
 import type { DriverNotice, DriverRun, DriverStop, DriverTrip, Question } from "./types";
 import { useDriverText } from "./words";
 
-/** The office's message about a stop it moved: "Stop 4 moved to VEH060 at 6:15 AM". */
 export function movedNotice(run: DriverRun, stop: DriverStop): { vehicle: string; at: string } | null {
   const notice = (run.notices as DriverNotice[]).find(
     (n) => n.kind === "stop_moved" && n.data?.stop_id === stop.stop_id,
@@ -24,7 +19,6 @@ export function movedNotice(run: DriverRun, stop: DriverStop): { vehicle: string
   return vehicle ? { vehicle, at: notice.created_at } : null;
 }
 
-/** Who moved the stop, to which vehicle and when: from the question when Relay asked one, else from the message. */
 function moveOf(run: DriverRun, stop: DriverStop, question: Question | undefined) {
   const notice = movedNotice(run, stop);
   return {
@@ -35,7 +29,6 @@ function moveOf(run: DriverRun, stop: DriverStop, question: Question | undefined
   };
 }
 
-/** Every open question, at the top of the run list or the trip summary. */
 export function QuestionCards({ run, trip }: { run: DriverRun; trip: DriverTrip }) {
   const open = run.questions.filter((q) => q.status !== "resolved");
   if (!open.length) return null;
@@ -67,12 +60,11 @@ function QuestionCard({
   const said = answer?.answer ?? (question.answer === "no" ? "no" : null);
   const move = moveOf(run, stop, question);
   const vehicle = move.vehicle;
-  // "Stop 4 was also given to Nimal": the backup's driver by name when Relay knows who, else the vehicle
   const who = move.driver || vehicle;
   const name = move.by;
   const where = place(stop.place).text;
 
-  // the phone's own record of the stop, or Relay's copy of it when a demo jump recorded it for this driver
+  // This phone's record of the stop, or Relay's copy when a demo jump recorded it for this driver.
   const delivery = local.delivery?.record;
   const arrivedAt = local.arrival?.record.occurred_at ?? question.arrived_at;
   const deliveredAt = delivery?.occurred_at ?? question.delivered_at;
@@ -184,7 +176,6 @@ function QuestionCard({
   );
 }
 
-/** True while a question waits for this driver: the screen's action bar steps aside for it. */
 export function useOpenQuestion(run: DriverRun | null): boolean {
   const { items } = useDriver();
   if (!run) return false;
@@ -192,8 +183,6 @@ export function useOpenQuestion(run: DriverRun | null): boolean {
   return run.questions.some((q) => q.status !== "resolved" && !answers.has(q.id) && q.answer !== "no");
 }
 
-/** Office changes to the run, said once each: a stop moved to a backup vehicle while the phone had signal, and a
- *  two-copy stop that is now settled. */
 export function RunChanges({ run, trip }: { run: DriverRun; trip: DriverTrip }) {
   const { t, clock, place } = useDriverText();
   const { server, items } = useDriver();
@@ -206,7 +195,7 @@ export function RunChanges({ run, trip }: { run: DriverRun; trip: DriverTrip }) 
     const name = move.by;
     const relay = server?.trip?.stops.find((s) => s.stop_id === stop.stop_id);
     if (settled?.resolution === "backup" && relay?.status === "moved" && move.vehicle) {
-      // the office kept the backup's copy: the stop is the other vehicle's, and what this phone saved is set aside
+      // The office kept the backup's copy. The stop is the other vehicle's now.
       out.push(
         <Notice key={stop.stop_id} tone="info" icon={Info} field title={t("summary.settledTitle", { n: stop.seq })}>
           {move.at
@@ -215,11 +204,10 @@ export function RunChanges({ run, trip }: { run: DriverRun; trip: DriverTrip }) 
         </Notice>,
       );
     } else if (settled || local.conflict) {
-      // the stop had two copies; once nothing is open and Relay has it delivered, it is settled
       if (questionFor(run, stop.stop_id) || relay?.status !== "delivered") continue;
       const yes = answers.find((i) => i.record?.stop_id === stop.stop_id && i.record.payload.answer === "yes");
       const vehicle = move.vehicle;
-      // the driver's yes cancelled the backup's visit; the office cancelling it first leaves no such time
+      // A yes cancelled the backup's visit. If the office cancelled first, there is no time.
       const at = settled ? (settled.resolution === "driver" ? settled.resolved_at : null) : (yes?.at ?? null);
       const body =
         !move.at || !vehicle

@@ -19,18 +19,15 @@ type Props = {
   measure: Measure;
   value: number;
   limit: number;
-  /** "801.6 of 1,040 kg" */
   label: string;
   caption?: string;
-  /** full: the trip detail's 2 x 2 grid. compact: a trip card's line, icon, bar and value. fuel: a lane's vehicle
-   *  block, "Fuel" and the value over the bar. */
+  // full is the trip detail's 2 x 2 grid. compact is a trip card's line. fuel is a lane's vehicle block.
   size?: "full" | "compact" | "fuel";
   title?: string;
   className?: string;
 };
 
-/** Capacity meter: how close a trip is to a limit. Normal below 90% (fuel 85%), near the limit up to 100%,
- *  over above it, with the word "Over" so it never relies on color. */
+// Near starts at 90% (fuel 85%), over is above 100%. Over also shows the word, so color is not the only sign.
 export function Meter({ measure, value, limit, label, caption, size = "compact", title, className }: Props) {
   const state = meterState(value, limit, measure);
   const pct = Math.max(0, Math.min(100, limit > 0 ? (value / limit) * 100 : 0));
@@ -69,7 +66,7 @@ export function Meter({ measure, value, limit, label, caption, size = "compact",
     <div
       className={cx(
         "h-1 overflow-hidden rounded-full bg-asphalt-100",
-        // a narrow card gives up bar before it gives up a digit of the value
+        // A narrow card gives up bar before it gives up a digit of the value.
         size === "fuel" ? "w-full" : "w-16 min-w-6 shrink",
       )}
       role="meter"

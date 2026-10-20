@@ -1,10 +1,5 @@
-"""Write docs/data-model.md from the SQLAlchemy models, so the document can never drift from the schema.
-
-    uv run python tools/data_model.py
-
-Each table gets its docstring, its columns (type, key, nullability, docstring) and its relationships, and one
-Mermaid ER diagram per area shows how the tables connect.
-"""
+"""Writes docs/data-model.md from the SQLAlchemy models, so it cannot drift from the schema.
+Run it with `uv run python tools/data_model.py`. Column docstrings in the models feed Notes."""
 
 from __future__ import annotations
 

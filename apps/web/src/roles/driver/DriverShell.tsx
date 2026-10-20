@@ -24,14 +24,12 @@ function keepLanguage(lang: Lang) {
   try {
     localStorage.setItem(LANG_KEY, lang);
   } catch {
-    // private mode: the choice lasts for this page only
+    // Private mode blocks storage, so the choice lasts for this page only.
   }
 }
 
 const LanguageContext = createContext<(() => void) | null>(null);
 
-/** The driver's phone: the run and its outbox for every screen below, Night colours from the phone's dark setting,
- *  the language chosen on this phone, and the screen kept on while a trip runs. */
 export function DriverShell() {
   return (
     <DriverSync>
@@ -46,16 +44,14 @@ function Phone() {
   const { lang, t } = useDriverText();
   const [languageOpen, setLanguageOpen] = useState(false);
 
-  // "Changes the words on this phone only": the choice stays on this phone, and the account's language is where it
-  // starts on a new one.
+  // The choice stays on this phone. The account's language is only where a new phone starts.
   const locale = me.data?.locale;
   useEffect(() => {
     const start = keptLanguage() ?? (isLang(locale) ? locale : "en");
     if (i18n.language !== start) void i18n.changeLanguage(start);
   }, [locale]);
 
-  // Night: the driver route follows the phone's dark setting. On the root element, so the page behind the screens,
-  // the sheets and their scrim all switch together.
+  // Night colours follow the phone's dark setting. On the root, so sheets and the scrim switch too.
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add("night-capable");
@@ -86,7 +82,6 @@ function Phone() {
   );
 }
 
-/** "Language: English", at the foot of the run list. */
 export function LanguageRow() {
   const open = useContext(LanguageContext);
   const { t, lang } = useDriverText();

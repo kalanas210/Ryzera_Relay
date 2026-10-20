@@ -222,7 +222,6 @@ describe("store words", () => {
     } as unknown as StoreHome;
     const at = (hhmm: string) => new Date(`2026-04-07T${hhmm}:00+05:30`);
     expect(openReminder([reminder], home, at("15:20"))?.id).toBe("r");
-    // read, past the cutoff, or answered with an order: it steps back into Updates
     expect(openReminder([{ ...reminder, read_at: "2026-04-07T15:21:00+05:30" }], home, at("15:30"))).toBeUndefined();
     expect(openReminder([reminder], home, at("16:00"))).toBeUndefined();
     const sent = { ...home, orders: [{ ...dry, requested_date: "2026-04-08" }] } as StoreHome;

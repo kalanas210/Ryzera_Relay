@@ -26,15 +26,12 @@ const NAV: { to: string; label: string; icon: LucideIcon; key: string }[] = [
 
 export type Depot = "All" | "Peliyagoda" | "Kandy";
 
-/** Letter and number shortcuts stay off while a field has focus or a dialog is open. */
 export function typingOrInDialog(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
   return Boolean(target?.closest?.("input, textarea, select, [contenteditable], dialog"));
 }
 
-/** The desk shell: nav rail, and the depot choice kept in the address so a view can be shared. It fills the window
- *  below the demo bar and its pages scroll inside it, so the rail's foot stays on screen and a drag on the plan
- *  board never scrolls the header away. */
+// The desk fills the window below the demo bar. Pages scroll inside it, so the rail stays put.
 export function DispatcherShell() {
   const me = useMe("dispatcher");
   const signOut = useSignOut("dispatcher");
@@ -64,7 +61,6 @@ export function DispatcherShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, params]);
 
-  // each page opens at its top, as it would with the window scrolling
   const shown = useRef(pathname);
   useEffect(() => {
     if (shown.current === pathname) return;
@@ -80,7 +76,7 @@ export function DispatcherShell() {
   return (
     <div
       ref={shell}
-      // --desk-h is the window below the demo bar: the height the pages scroll in, for anything sticky inside them
+      // --desk-h is the height the pages scroll in, for anything sticky inside them
       style={{ "--desk-h": `calc(100dvh - ${top}px)`, height: "var(--desk-h)" } as CSSProperties}
       className="flex min-h-80 flex-col overflow-hidden bg-asphalt-50"
     >
@@ -135,7 +131,7 @@ export function DispatcherShell() {
             </span>
           </button>
         </nav>
-        {/* a div, not main: the phone's Live runs page carries its own main landmark */}
+        {/* A div, not main. The phone's Live runs page has its own main landmark. */}
         <div ref={main} data-drag-scroll className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           <Outlet />
         </div>
@@ -166,8 +162,6 @@ export function DispatcherShell() {
   );
 }
 
-/** How far the element starts below the top of the page: the demo bar's height, kept current as the bar wraps,
- *  appears or goes. */
 function useOffsetTop(ref: RefObject<HTMLElement | null>): number {
   const [top, setTop] = useState(0);
   useLayoutEffect(() => {
@@ -233,7 +227,6 @@ const SHORTCUTS: { keys: string[][]; action: string; where: string }[] = [
   { keys: [["Ctrl", "Enter"]], action: "Publish plan, when allowed: opens the publish check", where: "Plan" },
 ];
 
-/** The shortcuts sheet: every desk key that works, and where. None of them sends anything to a store or a driver. */
 function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Sheet
@@ -295,7 +288,6 @@ export function useDepot(defaultDepot: Depot = "All"): [Depot, (d: Depot) => voi
 
 const DEPOT_KEYS: Record<string, Depot> = { KeyA: "All", KeyP: "Peliyagoda", KeyK: "Kandy" };
 
-/** Desktop page header: title, meta, the scenario clock, the depot switch and page controls. */
 export function DeskHeader({
   title,
   meta,
@@ -310,13 +302,11 @@ export function DeskHeader({
   depot?: Depot;
   onDepot?: (d: Depot) => void;
   allowAll?: boolean;
-  /** Why "All" is off on this page. */
   allTitle?: string;
   children?: ReactNode;
 }) {
   const now = useSimNow(15_000);
 
-  // Shift A, Shift P and Shift K switch the depot, where the switch allows that depot
   useEffect(() => {
     if (!onDepot) return;
     const onKey = (event: KeyboardEvent) => {

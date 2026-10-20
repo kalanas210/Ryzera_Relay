@@ -1,20 +1,6 @@
-/** The driver's phone and Relay: the run it last heard, the outbox it sends from, and whether it has signal.
- *
- *  Every action is written to the outbox first and the screens update from the phone's own records at once. The
- *  sender goes when the browser says it is back online, when the app comes to the front, at start, after each new
- *  record and with the minute check-in; there is no retry button. With no signal the screens work from the last run
- *  kept in IndexedDB, so the expected times stay the ones Relay last sent and are never pushed later.
- *
- *  No signal means any of: the browser is offline, the last request found no connection, the story's scripted
- *  outage for this driver is running on the scenario clock, or the demo bar's switch is on. The switch blocks every
- *  request from the driver screens; only the demo's own channel tells Relay it is on, so the story's autopilot leaves
- *  this driver to the phone in the judge's hand and a jump never plays a stop that may be waiting on it. Inside the
- *  scripted outage Relay itself takes nothing from the phone; the phone still reads the demo's stand-in for its own
- *  memory (the run as it last saw it, and what a demo jump recorded for its driver) and hands that stand-in what it
- *  saves, so a jump never plays a stop the phone already holds.
- *
- *  What the phone keeps belongs to one copy of the day: when the demo bar starts a new copy or resets this one, the
- *  kept run, the outbox and the drafts of the old copy are let go. */
+// The phone and Relay: the last run it heard, the outbox it sends from, and whether it has signal.
+// Every action goes to the outbox first, so the screens update from the phone's own records at once.
+// No retry button. The outbox sends on coming online, app focus, a new record and each check-in.
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api } from "@/api/client";
@@ -42,14 +28,12 @@ import type { CheckinOut, DriverRun, HeldPhoto, Outage, RecordResult, RecordsOut
 export const RUN_KEY = ["driver", "run"] as const;
 const role = "driver" as const;
 const CHECKIN_MS = 60_000;
-/** A reconnect's "Sending 3 stops" stays up long enough to read, even when the send itself is quicker. */
 const SENDING_MIN_MS = 1_500;
 
 const outbox = new Outbox();
 
 type Snapshot = { run: DriverRun; saved_at: number };
 
-/** The last time records saved with no signal reached Relay: "Stops 2, 3 and 4 reached the office at 7:14 AM". */
 export type Reconnect = { trip_id: string; at: string; stopIds: string[]; photos: number };
 
 export type RecordInput = {
@@ -62,9 +46,9 @@ export type RecordInput = {
 
 type Driver = {
   me: Me | undefined;
-  /** Relay's last run, as fetched or as kept on the phone. */
+  // Relay's last run, fetched or kept on the phone.
   server: DriverRun | null;
-  /** The same run with this phone's own records laid over it. */
+  // The same run with this phone's own records laid on top.
   run: DriverRun | null;
   loaded: boolean;
   now: Date | null;
@@ -72,7 +56,6 @@ type Driver = {
   offlineSince: string | null;
   items: LocalItem[];
   pill: PillView;
-  /** What a reconnect is sending right now. */
   batch: Counts | null;
   reconnect: Reconnect | null;
   save: (input: RecordInput, options?: { locate?: boolean }) => Promise<FieldRecord>;
@@ -87,8 +70,7 @@ export function useDriver(): Driver {
   return driver;
 }
 
-/** No connection, or a gateway that cannot reach Relay: either way the phone has no word from Relay. The story's
- *  outage answers 503 itself and is told apart by the outage window. */
+// The story's outage answers 503 itself, so it is told apart by the outage window.
 function unreachable(error: ApiError): boolean {
   return error.offline || error.status === 502 || error.status === 504;
 }
@@ -98,7 +80,6 @@ export function inside(outage: Outage | null | undefined, at: Date | null): bool
   return Date.parse(outage.from) <= at.getTime() && at.getTime() < Date.parse(outage.to);
 }
 
-/** Scenario time now: the demo clock if the phone has read it, else the kept run's time moved on by the wall clock. */
 function scenarioNow(client: QueryClient, snapshot: Snapshot | null | undefined): Date {
   const state = client.getQueryState<DemoState>(["demo"]);
   if (state?.data) return new Date(Date.parse(state.data.now) + (Date.now() - state.dataUpdatedAt) * state.data.rate);
@@ -106,15 +87,14 @@ function scenarioNow(client: QueryClient, snapshot: Snapshot | null | undefined)
   return new Date();
 }
 
-/** The copy of the day this phone works in: the demo's code and edition, or "phone" when there is no demo to ask
- *  (demo mode off, Relay out of reach, or no network at all), when the phone works from what it kept. */
+// "phone" when there is no demo to ask, else the demo code and edition.
 function useCopy(): string | null {
   const demo = useDemoState();
   if (demo.data) return demo.data.demo_mode ? `${demo.data.workspace.code}:${demo.data.workspace.edition}` : "phone";
   return demo.isError || demo.fetchStatus === "paused" ? "phone" : null;
 }
 
-/** Let go of what the phone kept for another copy of the day, once, when the copy changes. True if it did. */
+// A new or reset copy of the day drops the kept run, the outbox and the drafts.
 async function forgetOtherCopies(copy: string, username: string): Promise<boolean> {
   if (copy === "phone") return false;
   const kept = await phone.get<string>("copy");
@@ -124,11 +104,10 @@ async function forgetOtherCopies(copy: string, username: string): Promise<boolea
   await outbox.clear();
   await Promise.all(["lastContact", `run:${username}`, `reconnect:${username}`].map((key) => phone.remove(key)));
   await phone.removeWhere((key) => key.startsWith("draft:"));
-  setForcedOffline(false); // the switch's "no signal since" belongs to the old copy's clock
+  setForcedOffline(false); // The switch's "no signal since" belongs to the old copy's clock.
   return true;
 }
 
-/** A record or photo a demo jump saved on this phone in the storm, added once with the id the story gave it. */
 async function keepHeld(held: NonNullable<DriverRun["held"]>): Promise<void> {
   const [queued, sent] = await Promise.all([outbox.waiting(), outbox.sent()]);
   const known = new Set([...queued.map((q) => q.id), ...sent.map((s) => s.id)]);
@@ -175,7 +154,6 @@ export function DriverSync({ children }: { children: ReactNode }) {
   const [batch, setBatch] = useState<Counts | null>(null);
   const [reconnect, setReconnect] = useState<Reconnect | null>(null);
 
-  // what this phone kept from before, for this copy of the day: the run, when it last reached Relay, the last reconnect
   useEffect(() => {
     if (!username || !copy) return;
     let live = true;
@@ -222,17 +200,19 @@ export function DriverSync({ children }: { children: ReactNode }) {
 
   const known = client.getQueryData<DriverRun>(RUN_KEY) ?? snapshot?.run ?? null;
   const now = simNow ?? (snapshot ? scenarioNow(client, snapshot) : null);
-  // The demo clock carries the story's outage too, so a jump into it cuts the phone off before it asks anything.
+  // The demo clock carries the story's outage too, so a jump into it cuts the phone off first.
   const demo = useDemoState().data as DemoState | undefined;
   const outage = (username ? demo?.outages?.[username] : undefined) ?? known?.outage ?? null;
   const outageOn = inside(outage, now);
+  // No signal means any of these. The browser is offline, the last request found no connection,
+  // the story's scripted outage is running, or the demo bar's switch is on. The switch blocks every
+  // request. Only the demo's own channel tells Relay it is on, so a jump never plays a waiting stop.
   const blocked = forced.on || outageOn;
   const offline = blocked || !online || netDown;
   const blockedRef = useRef(blocked);
   blockedRef.current = blocked;
   const offlineRef = useRef(offline);
   offlineRef.current = offline;
-  // the story's storm, not the demo bar's switch: the phone still reads and feeds the demo's stand-in for its memory
   const storm = outageOn && !forced.on;
   const stormRef = useRef(storm);
   stormRef.current = storm;
@@ -241,9 +221,8 @@ export function DriverSync({ children }: { children: ReactNode }) {
     queryKey: RUN_KEY,
     queryFn: async ({ signal }) => {
       const fresh = await api.get<DriverRun>("/api/driver/run", { role, signal });
-      // Inside the story's outage the answer is the phone's own memory, not Relay's: the run as the phone last saw
-      // it before the signal went, and what a demo jump recorded for the driver, which joins the outbox as saved on
-      // this phone. It is no contact with Relay.
+      // In the story's outage the answer is the phone's own memory, not Relay's.
+      // That is the run as last seen, plus what a demo jump recorded. It is no contact with Relay.
       if (inside(fresh.outage, new Date(fresh.now))) {
         if (fresh.held) await keepHeld(fresh.held);
         const memory = { ...fresh, held: null };
@@ -254,7 +233,6 @@ export function DriverSync({ children }: { children: ReactNode }) {
       if (usernameRef.current) void phone.put(`run:${usernameRef.current}`, fresh);
       return fresh;
     },
-    // nothing is asked before the phone knows which copy of the day it is in, so it never mixes two
     enabled: Boolean(username) && Boolean(copy) && snapshot !== undefined && !forced.on,
     refetchInterval: 30_000,
   });
@@ -265,7 +243,6 @@ export function DriverSync({ children }: { children: ReactNode }) {
 
   const server = query.data ?? snapshot?.run ?? null;
 
-  // the outbox, read again whenever it changes
   useEffect(() => {
     let live = true;
     let ticket = 0;
@@ -283,7 +260,6 @@ export function DriverSync({ children }: { children: ReactNode }) {
   }, []);
 
   const failed = useCallback((error: unknown) => {
-    // no connection, or the story's outage answered for Relay: either way nothing arrived
     if (error instanceof ApiError && (unreachable(error) || error.status === 503)) {
       if (unreachable(error)) setNetDown(true);
       return new Offline(error.message);
@@ -321,8 +297,8 @@ export function DriverSync({ children }: { children: ReactNode }) {
           contact(at);
           return { outcome: out.outcome, at };
         } catch (error) {
-          // Relay cannot take the photo (too large, not a picture): sending it again never helps, so it leaves the
-          // queue with the reason
+          // Relay cannot take this photo (too large, not a picture). Sending it again never helps,
+          // so it leaves the queue with the reason.
           if (error instanceof ApiError && (error.status === 422 || error.status === 413)) {
             return { outcome: "rejected", reason: error.message };
           }
@@ -333,9 +309,9 @@ export function DriverSync({ children }: { children: ReactNode }) {
     [client, contact, failed, keep],
   );
 
-  // In the story's storm, what this phone saves is handed to the demo's stand-in for its memory, so a demo jump
-  // leaves those stops to it. Relay applies nothing from it until the signal returns. A hand-off that fails goes
-  // again on the sender's own triggers until Relay has it; Relay keeps each record once, by its id.
+  // In the storm, what this phone saves goes to the demo's stand-in for its memory.
+  // So a jump leaves those stops to it. Relay applies nothing until signal returns.
+  // A failed hand-off goes again, and Relay keeps each record once.
   const handed = useRef(new Set<string>());
   const handing = useRef(new Set<string>());
   const hand = useCallback(async () => {
@@ -355,8 +331,7 @@ export function DriverSync({ children }: { children: ReactNode }) {
       await api.post("/api/driver/held", { device_id, records, photos }, { role });
       for (const id of ids) handed.current.add(id);
     } catch {
-      // not handed yet: it goes again when the browser is back online, the app comes to the front, a record is saved
-      // or the minute comes round
+      // Not handed over yet. It goes again on the sender's next trigger.
     } finally {
       for (const id of ids) handing.current.delete(id);
     }
@@ -365,7 +340,6 @@ export function DriverSync({ children }: { children: ReactNode }) {
   const kick = useCallback(async () => {
     if (!usernameRef.current) return;
     if (blockedRef.current) {
-      // nothing goes to Relay with no signal; in the story's storm the phone still hands what waits to the stand-in
       await hand();
       return;
     }
@@ -387,13 +361,11 @@ export function DriverSync({ children }: { children: ReactNode }) {
       window.setTimeout(() => setBatch(null), Math.max(0, SENDING_MIN_MS - (Date.now() - started)));
     }
     if (result.held) {
-      // a record still waiting for its location: try again once its wait is over
       const until = Math.max(...waiting.map((q) => q.held_until ?? 0));
       window.setTimeout(() => void kick(), Math.max(500, until - Date.now() + 100));
     }
   }, [client, transport, hand]);
 
-  // back in coverage (the outage ended, the switch went off): send, and hear the run again
   const wasBlocked = useRef(blocked);
   useEffect(() => {
     if (!username) return;
@@ -418,7 +390,7 @@ export function DriverSync({ children }: { children: ReactNode }) {
     };
   }, [kick]);
 
-  // the minute check-in: no location, just "this phone is here", which is what the office reads as last contact
+  // The minute check-in has no location. The office reads it as last contact.
   useEffect(() => {
     if (!username) return;
     const learn = (next: Outage | null) => {
@@ -427,11 +399,11 @@ export function DriverSync({ children }: { children: ReactNode }) {
       setSnapshot((cur) => (cur && !same(cur.run.outage) ? { ...cur, run: { ...cur.run, outage: next } } : cur));
     };
     const beat = async () => {
-      if (blockedRef.current) return kick(); // no check-in with no signal, but the storm's hand-off still goes
+      if (blockedRef.current) return kick(); // No check-in without signal. The storm hand-off still goes.
       try {
         const device_id = await phone.deviceId();
         const waiting_records = (await outbox.waiting()).length;
-        if (blockedRef.current) return; // the outage may have begun while the phone looked
+        if (blockedRef.current) return; // The outage may have begun while the phone looked.
         const out = await api.post<CheckinOut>("/api/driver/checkin", { device_id, waiting_records }, { role });
         learn(out.outage);
         if (inside(out.outage, new Date(out.now))) return;
@@ -459,7 +431,7 @@ export function DriverSync({ children }: { children: ReactNode }) {
       };
       const savedOffline = offlineRef.current;
       if (options.locate) {
-        // the time is saved now; the location is tried in the background and the record waits for it at most 15 s
+        // The time is saved now. The record waits 15 s at most for its location.
         await outbox.add(body, { savedOffline, holdMs: LOCATION_WAIT_MS });
         void locate()
           .then((fix) => outbox.release(body.id, fix ?? {}))
@@ -481,8 +453,8 @@ export function DriverSync({ children }: { children: ReactNode }) {
     [kick],
   );
 
-  // The demo bar's switch, said on the demo's own channel until Relay has it. With the switch off at the start there
-  // is nothing to say: the phone's first check-in tells Relay it has signal.
+  // The demo bar's switch is told to Relay on the demo's own channel until Relay has it.
+  // With the switch off at the start, the phone's first check-in tells Relay it has signal.
   const said = useRef<string | null>(null);
   const [sayAgain, setSayAgain] = useState(0);
   const demoMode = Boolean(demo?.demo_mode);
@@ -511,7 +483,6 @@ export function DriverSync({ children }: { children: ReactNode }) {
     };
   }, [demoMode, username, copy, forced.on, sayAgain]);
 
-  // the storm begins, or the outbox changes in it (a save, or what a demo jump recorded for this phone): hand it over
   // biome-ignore lint/correctness/useExhaustiveDependencies: a change to the outbox is the trigger; hand reads it itself
   useEffect(() => {
     if (storm && username) void hand();

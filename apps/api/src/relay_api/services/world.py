@@ -1,17 +1,4 @@
-"""The world simulator: the people a judge is not playing.
-
-A copy of the day has people on every side of Relay: the other loaders at the dock, the other drivers, the
-other stores. The simulator moves them with the scenario clock, through the same rows a person's actions write.
-It is a function of time: `advance(db, now)` brings the world to where it should be at `now`, never backwards,
-and can run any number of times. A load a person has touched (`Trip.claimed_at`) is theirs to finish, but its
-simulated driver still accepts it once it is complete and leaves; the loads of the judges' own driver are left
-alone, and the story autopilot plays those when a judge skips ahead or nobody is playing Kasun.
-
-On the road, every other driver arrives and delivers at Relay's expected times from when the truck really left,
-sends each record the way a phone does (services/field.py), checks in each minute so the office never reads the
-run as silent, and finishes back at the hub. A backup the office sends is picked at the dock and leaves like any
-other load; a backup turned back drives home and stops there, and one called off before it left never goes.
-"""
+"""Plays the loaders and drivers a judge is not playing, up to the scenario clock."""
 
 from __future__ import annotations
 
@@ -52,23 +39,19 @@ from relay_api.services.ordering import current_run
 from relay_engine.clock import Conditions
 from relay_engine.network import Brand
 
+# Cases a minute for one loader.
 LOAD_RATE = 4.0
-"""Cases a minute for one loader working through a load."""
+# Minutes before the truck leaves that a Fresh load is ready, so a late line never holds it.
 NIGHT_SLACK = 40
-"""Minutes a Fresh load is ready before its truck leaves, so a late line never holds the truck."""
 DAY_SLACK = 30
 ACCEPT_AFTER = timedelta(minutes=2)
-"""From a load marked complete to its driver accepting it on the phone, at the soonest."""
 DEVICE = "relay-world"
-"""The phone every simulated driver reports from."""
+# A standby driver is on call from the first departure until the Fresh window closes.
 STANDBY_UNTIL = time(8, 0)
-"""A standby driver is on call, phone in hand, from the first departure until the Fresh window closes."""
 
 
 @dataclass(frozen=True)
 class Report:
-    """Something a simulated driver reports from the road, as the story's timeline has it."""
-
     vehicle_id: str
     trip_no: int
     day: str
@@ -78,10 +61,11 @@ class Report:
     note: str
 
 
+# Sampath tells the office at 4:28 AM he is slow on the Matale road.
+# Nuwan marks it handled in the story.
 REPORTS: tuple[Report, ...] = (
     Report("VEH042", 1, DELIVERY_DAY, "04:28", ProblemReason.DELAYED, 45, "Slow on the Matale road, one lane open."),
 )
-"""Sampath, slowed on the Matale road, tells the office at 4:28 AM; the story has Nuwan mark it handled."""
 
 
 @dataclass(frozen=True)
@@ -95,8 +79,6 @@ class DockSlot:
 
 @dataclass(frozen=True)
 class Beat:
-    """One record a driver on the road sends, at the time it happens."""
-
     at: datetime
     kind: FieldEventKind
     stop: Stop | None
@@ -119,9 +101,8 @@ def _jitter(trip: Trip, modulo: int) -> int:
     return zlib.crc32(f"{trip.vehicle_id}/{trip.trip_no}".encode()) % modulo
 
 
+# The dock's other loaders take the loads in departure order, in turn.
 def dock_slots(trips: list[Trip], cases: dict[uuid.UUID, int], loaders: list[AppUser]) -> dict[uuid.UUID, DockSlot]:
-    """When each load is picked, finished, accepted and leaves. The dock's two other loaders take the loads in
-    departure order, in turn."""
     out: dict[uuid.UUID, DockSlot] = {}
     for n, trip in enumerate(sorted(trips, key=lambda t: (t.planned_depart, t.vehicle_id, t.trip_no))):
         minutes = max(10, math.ceil(cases[trip.id] / LOAD_RATE))
@@ -137,10 +118,9 @@ def dock_slots(trips: list[Trip], cases: dict[uuid.UUID, int], loaders: list[App
     return out
 
 
+# A backup's planned departure is one pick time after the move (services/backup.py), so the
+# pick starts that long before it. Kept out of the night's turns, so no other load changes hands.
 def backup_slot(trip: Trip, cases: int, loaders: list[AppUser]) -> DockSlot:
-    """A backup is picked from the moment the office sends it: its planned departure is the pick time after the move
-    (services/backup.py), so the pick starts that long before it and the van leaves on time. Kept out of the
-    night's turns, so no other load changes hands when a backup is added."""
     minutes = max(10, math.ceil(cases / LOAD_RATE))
     start = trip.planned_depart - timedelta(minutes=minutes)
     return DockSlot(
@@ -152,8 +132,8 @@ def backup_slot(trip: Trip, cases: int, loaders: list[AppUser]) -> DockSlot:
     )
 
 
+# The story's own truck. The autopilot plays it when a judge skips ahead or nobody plays Kasun.
 def judge_trips(db: Session, plan: Plan) -> set[object]:
-    """Trips driven by a judge account's driver: the story's own truck, which the judges load and drive."""
     judges = {
         u.id for u in db.scalars(select(AppUser).where(AppUser.judge_account.is_(True), AppUser.role == Role.DRIVER))
     }
@@ -165,9 +145,9 @@ def judge_trips(db: Session, plan: Plan) -> set[object]:
     return {t.id for t in plan.trips if t.vehicle_id in vehicles}
 
 
+# Safe to run any number of times, and never goes backwards. A run of an earlier day still on
+# the road when the stores' day turns over at midday drives home and finishes.
 def advance(db: Session, now: datetime) -> None:
-    """Bring every load and every run the world plays up to `now`: the current run's, and any run of an earlier day
-    still on the road when the stores' day turned over at midday, which drives home and finishes."""
     run_date = current_run(db, now)
     plans = db.scalars(select(Plan).where(Plan.run_date == run_date, Plan.status == PlanStatus.PUBLISHED)).all()
     still_out = db.scalars(
@@ -191,7 +171,7 @@ def advance(db: Session, now: datetime) -> None:
             reverse=True,
         )
         judged = judge_trips(db, plan)
-        # each vehicle's trips in turn, so a first trip that ends in this pass frees the vehicle for its second
+        # trips in turn per vehicle, so a first trip that ends in this pass frees it for its second
         trips = sorted(
             (t for t in plan.trips if t.status is not TripStatus.CANCELLED and t.id not in judged),
             key=lambda t: (t.vehicle_id, t.trip_no),
@@ -211,6 +191,7 @@ def advance(db: Session, now: datetime) -> None:
                 continue
             if trip.departed_at is None and today:
                 slot = slots[trip.id]
+                # a load a person has touched is theirs to finish
                 if trip.claimed_at is None:
                     _load(db, trip, loads[trip.id], slot, now)
                 # a second trip's load waits at the bay until the vehicle is back from the first
@@ -223,9 +204,9 @@ def advance(db: Session, now: datetime) -> None:
         _on_duty(db, plan, trips, drivers, phones, now)
 
 
+# Reads each trip again under the lock so claimed_at is current. A load a person's request holds
+# right now (dock.lock_trip) is passed over, and the next tick plays it.
 def _hold(db: Session, trips: list[Trip]) -> set[uuid.UUID]:
-    """Lock the loads this pass may write, reading each trip again under the lock so `claimed_at` is current. A load
-    a person's request holds at this moment (`dock.lock_trip`) is passed over, and the next tick plays it."""
     if not trips:
         return set()
     return {
@@ -240,8 +221,6 @@ def _hold(db: Session, trips: list[Trip]) -> set[uuid.UUID]:
 
 
 def _load(db: Session, trip: Trip, load: Load, slot: DockSlot, now: datetime) -> None:
-    """One of the dock's other loaders works through a load nobody has touched: cases go on at a steady rate from
-    the slot's start, and the load is marked complete at its ready time."""
     if now < slot.start:
         return
     loader_id = slot.loader.id if slot.loader else None
@@ -275,9 +254,8 @@ def _load(db: Session, trip: Trip, load: Load, slot: DockSlot, now: datetime) ->
     db.add(load.handover)
 
 
+# Also covers a load a person completed, since nobody plays its driver.
 def _drive(look: Lookup, plan: Plan, trip: Trip, load: Load, slot: DockSlot, at_bay: datetime, now: datetime) -> None:
-    """The simulated driver accepts a complete load on the phone, no sooner than the vehicle is at the bay, and
-    leaves at the planned time. This holds for a load a person completed too, since nobody plays its driver."""
     handover = load.handover
     if handover is None:
         return
@@ -296,12 +274,9 @@ def _drive(look: Lookup, plan: Plan, trip: Trip, load: Load, slot: DockSlot, at_
         trip.status = TripStatus.DEPARTED
 
 
-# ------------------------------------------------------------------------------------------------ on the road
+# Times are Relay's expected ones, counted from when the truck really left. A stop moved to another
+# vehicle is skipped, because the phone was told.
 def road(db: Session, plan: Plan, trip: Trip, conditions: Conditions) -> list[Beat]:
-    """What the driver of a trip on the road records from here on, at Relay's expected times from when the truck
-    really left: each arrival and delivery not yet recorded, a report the story gives the driver, and the trip
-    finished at the last dock, where drivers tap Finish trip (the drive home follows). A trip turned back finishes
-    once it is home. A stop moved to another vehicle is skipped: the phone was told."""
     net = adapters.network(db)
     day = plan.run_date
     district = net.districts[trip.district]
@@ -311,7 +286,7 @@ def road(db: Session, plan: Plan, trip: Trip, conditions: Conditions) -> list[Be
         return adapters.minutes_of(day, moment)
 
     if trip.status is TripStatus.RETURNING:
-        # turned back on the way out: home the way it came, as far as it had got
+        # turned back on the way out, so it drives home the way it came, as far as it had got
         turned = minutes(trip.turned_back_at or trip.departed_at)
         out = turned - minutes(trip.departed_at)
         whole = district.depot_to_district_min * conditions.factor(district.name, minutes(trip.departed_at))
@@ -351,11 +326,11 @@ def road(db: Session, plan: Plan, trip: Trip, conditions: Conditions) -> list[Be
         visits.append((stop, t))
     beats.append(Beat(adapters.at_minutes(day, t), FieldEventKind.TRIP_FINISHED, None, _id(trip.id, "finished")))
     beats.extend(_reports(db, day, trip, visits))
-    return sorted(beats, key=lambda b: b.at)  # stable: a report made in the minute of an arrival comes after it
+    return sorted(beats, key=lambda b: b.at)  # stable, so a report in the minute of an arrival comes after it
 
 
+# Each report is about the stop the driver is at, or driving to.
 def _reports(db: Session, day: date, trip: Trip, visits: list[tuple[Stop, float]]) -> list[Beat]:
-    """The story's reports for this trip still to make: each about the stop the driver is at, or driving to."""
     out = []
     for report in REPORTS:
         if trip.is_backup or (trip.vehicle_id, trip.trip_no) != (report.vehicle_id, report.trip_no):
@@ -368,7 +343,7 @@ def _reports(db: Session, day: date, trip: Trip, visits: list[tuple[Stop, float]
             continue
         stop = next((s for s, leave in visits if adapters.at_minutes(day, leave) > moment), None)
         if stop is None:
-            continue  # every stop done: on the way home, nothing to report
+            continue  # every stop done, so the driver is on the way home
         payload = {"reason": report.reason.value, "delay_min": report.delay_min, "note": report.note}
         out.append(Beat(moment, FieldEventKind.PROBLEM, stop, event_id, payload))
     return out
@@ -383,7 +358,6 @@ def _road(
     phones: Phones,
     now: datetime,
 ) -> None:
-    """Send what the driver has recorded by `now`, each record at its own time, as a phone in contact does."""
     if driver is None:
         return  # nobody on record drives it, so nobody records it
     for beat in road(db, plan, trip, conditions):
@@ -393,17 +367,13 @@ def _road(
         records.receive(db, beat.at, driver, DEVICE, [beat.record(trip)])
 
 
+# Same id every time the world plays a record, so a replay is a duplicate.
 def _id(key: uuid.UUID, what: str) -> uuid.UUID:
-    """A record's id, the same every time the world plays it, so a replay is a duplicate. Rows of one copy have ids
-    of their own, so these never meet another copy's."""
     return uuid.uuid5(key, what)
 
 
-# ------------------------------------------------------------------------------------------------ phones
+# Each phone checks in once a minute while its driver is on duty.
 class Phones:
-    """The simulated drivers' phones. Each checks in once a minute while its driver is on duty, so the office reads
-    the run as in contact; Relay's messages reach it on the next check-in."""
-
     def __init__(self, db: Session) -> None:
         self.db = db
         # oldest first, so a driver's freshest row is the one kept
@@ -423,8 +393,8 @@ class Phones:
             contact.device_id = DEVICE
 
 
+# Judges are left out. Their phones are their own.
 def _drivers(db: Session, look: Lookup, plan: Plan) -> dict[str, AppUser]:
-    """Each vehicle's driver for the day, judges left out: the judges' phones are their own."""
     out = {u.vehicle_id: u for u in look.users.values() if u.role is Role.DRIVER and u.vehicle_id}
     for day in db.scalars(select(VehicleDay).where(VehicleDay.run_date == plan.run_date)):
         if day.driver_id in look.users:
@@ -432,11 +402,10 @@ def _drivers(db: Session, look: Lookup, plan: Plan) -> dict[str, AppUser]:
     return {vehicle_id: u for vehicle_id, u in out.items() if not u.judge_account}
 
 
+# Drivers at the wheel, or at the truck with an accepted load, check in. So does the standby driver.
 def _on_duty(
     db: Session, plan: Plan, trips: list[Trip], drivers: dict[str, AppUser], phones: Phones, now: datetime
 ) -> None:
-    """Every simulated driver at the wheel, or at the truck with the load accepted, checks in; so does the depot's
-    standby driver while on call. Messages waiting for them are picked up on the check-in."""
     duty: dict[uuid.UUID, AppUser] = {}
     for trip in trips:
         driver = drivers.get(trip.vehicle_id)
@@ -466,6 +435,6 @@ def _on_duty(
             Notification.created_at <= now,
         )
     ):
-        # a message to the driver at the wheel is played aloud on arrival, so it is heard the minute it is sent
+        # a message to the driver at the wheel is played aloud, so it is heard the minute it is sent
         notice.delivered_at = notice.created_at
         notice.read_at = notice.read_at or notice.created_at

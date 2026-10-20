@@ -1,7 +1,4 @@
-/** The driver's building blocks (spec-driver.md, Components needed): the phone header with its sync pill, the step
- *  progress, the next stop card, stop rows, the window status line, detail cells, choice chips and segments, the
- *  field stepper and text fields, the photo tile and the confirmation panel. Field density throughout: buttons 56
- *  and 48 high, rows at least 64, every target at least 48 by 48. */
+// Driver building blocks. Field density: buttons 56 and 48 high, rows 64 or more, targets 48 by 48 or more.
 import {
   ArrowLeft,
   Box,
@@ -38,9 +35,6 @@ import { useDriver } from "./sync";
 import type { DriverRun, DriverStop, DriverTrip } from "./types";
 import { useDriverText } from "./words";
 
-/* ------------------------------------------------------------------------------------------- header and pill */
-
-/** Sync pill, driver: status only, never a button. It counts stops, the way the driver thinks of the run. */
 export function DriverPill() {
   const { pill } = useDriver();
   const { t } = useDriverText();
@@ -65,7 +59,7 @@ export function DriverPill() {
       role="status"
       aria-label={spoken}
       className={cx(
-        // never cut short: a long Tamil label takes a second line inside its 180 rather than lose words
+        // A long Tamil label takes a second line inside its 180 rather than lose words.
         "inline-flex min-h-8 max-w-[180px] shrink-0 items-center gap-1.5 rounded-chip px-2.5 py-1 t-label leading-tight",
         pill.state === "synced"
           ? "bg-done-soft text-done"
@@ -78,7 +72,6 @@ export function DriverPill() {
   );
 }
 
-/** Top bar / phone header with sync pill / field: root (Heading 1), back, close (no title on DRV-04) or plain. */
 export function DriverHeader({
   title,
   root,
@@ -113,7 +106,7 @@ export function DriverHeader({
       )}
     >
       {lead}
-      {/* a second line rather than lost words beside a two-line Tamil pill, so a stop's title keeps its number */}
+      {/* Wraps to a second line beside a two-line Tamil pill, so a stop's title keeps its number. */}
       <h1 className={cx("min-w-0 flex-1 text-asphalt-900 [overflow-wrap:anywhere]", root ? "t-h1" : "t-h2")}>
         {title}
       </h1>
@@ -122,9 +115,6 @@ export function DriverHeader({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------- words */
-
-/** A place in the reader's script; Latin letters (and the Latin face) where Relay has no translation. */
 export function PlaceName({ name, className }: { name: string; className?: string }) {
   const { place } = useDriverText();
   const p = place(name);
@@ -142,7 +132,6 @@ export function GoodsChip({ temp }: { temp: DriverTrip["temp"] }) {
   );
 }
 
-/** Status chip / waiting to send, or sending while it goes. */
 export function SendChip({ local }: { local: Pick<StopLocal, "waiting" | "sending"> }) {
   const { t } = useDriverText();
   const { batch } = useDriver();
@@ -165,9 +154,6 @@ export function accessIcon(stop: Pick<DriverStop, "dock_type" | "van_only">): Lu
   return stop.van_only ? Van : (ACCESS_ICON[stop.dock_type] ?? Store);
 }
 
-/* ------------------------------------------------------------------------------------------- trip and stops */
-
-/** Step progress: one square-ended segment per stop; delivered, then the next stop in signal yellow, then to come. */
 export function StepProgress({ trip, next }: { trip: DriverTrip; next: DriverStop | null }) {
   return (
     <div aria-hidden className="flex h-2 gap-1">
@@ -190,7 +176,6 @@ export function StepProgress({ trip, next }: { trip: DriverTrip; next: DriverSto
   );
 }
 
-/** Window status line: opens soon, open, closing soon (under 30 minutes) or closed, counted to the minute. */
 export function WindowLine({
   stop,
   runDate,
@@ -200,7 +185,7 @@ export function WindowLine({
   stop: DriverStop;
   runDate: string;
   now: Date;
-  /** DRV-02's wording under "Receiving window"; DRV-01 says "Window ..." */
+  // DRV-02 wording under "Receiving window". DRV-01 says "Window ...".
   short?: boolean;
 }) {
   const { t, duration, left, clock } = useDriverText();
@@ -224,7 +209,6 @@ export function WindowLine({
   );
 }
 
-/** Detail row / stacked / field: icon and label on one line, the value in Field title below. */
 export function Detail({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
@@ -244,8 +228,6 @@ export function markerState(stop: DriverStop, next: DriverStop | null): MarkerSt
   return next?.stop_id === stop.stop_id ? "next" : "pending";
 }
 
-/** Next stop card / full: the largest thing on the run list, with the stop's window, both named times and the way
- *  in. Its main button is the screen's one primary unless something else (leaving the hub) is. */
 export function NextStopCard({
   run,
   trip,
@@ -328,8 +310,6 @@ export function NextStopCard({
   );
 }
 
-/** The short chip for a stop with cases the dispatcher decided to send short: "6 rice and dhal cases short, store
- *  told". It grows in height rather than cut its words. */
 export function ShortChip({ stop, long }: { stop: DriverStop; long?: boolean }) {
   const { t, caseItem } = useDriverText();
   const shortLines = stop.lines.filter((l) => l.short > 0);
@@ -347,8 +327,7 @@ export function ShortChip({ stop, long }: { stop: DriverStop; long?: boolean }) 
   );
 }
 
-/** Stop row / field on the run list: marker, place, what is known about it, and a way in. Stops after the next one
- *  show both named times; the next stop's times are on its card. */
+// Stops after the next one show both named times. The next stop's times are on its card.
 export function StopRow({ run, stop, next }: { run: DriverRun; stop: DriverStop; next: DriverStop | null }) {
   const { t, clock, expectedAt, windowOf, access, place, caseItem } = useDriverText();
   const { items, batch, now } = useDriver();
@@ -429,7 +408,7 @@ export function StopRow({ run, stop, next }: { run: DriverRun; stop: DriverStop;
     const text = local.sending || batch ? t("chip.sending") : t("chip.waiting");
     chips.push({ key: "send", text, node: <SendChip local={local} /> });
   }
-  // read aloud as one sentence: the dots between the parts become pauses, not words
+  // Read aloud as one sentence, so the dots between the parts become pauses.
   const label = [t("row.label", { n: stop.seq, place: place(stop.place).text }), meta, ...lines]
     .concat(chips.map((c) => c.text))
     .join(", ")
@@ -468,9 +447,6 @@ export function StopRow({ run, stop, next }: { run: DriverRun; stop: DriverStop;
   );
 }
 
-/* --------------------------------------------------------------------------------------------------- inputs */
-
-/** Choice chip / 48 or 56: single or multiple choice, with a check on the chosen one. */
 export function ChoiceChip({
   selected,
   onClick,
@@ -504,8 +480,6 @@ export function ChoiceChip({
   );
 }
 
-/** Input / segmented control / field: two separate segments, 48 high, 8 apart. Named by the heading above it when
- *  there is one (`labelledBy`), so the name is not read twice. */
 export function TwoSegments<T extends string>({
   value,
   options,
@@ -546,7 +520,6 @@ export function TwoSegments<T extends string>({
   );
 }
 
-/** Input / number stepper / field, 152 by 48: plus stops at what was on the truck. */
 export function FieldStepper({
   value,
   max,
@@ -589,7 +562,6 @@ export function FieldStepper({
   );
 }
 
-/** Input / text / field (56 high) or multiline (96 high), with its label above. */
 export function TextField({
   label,
   value,
@@ -603,7 +575,6 @@ export function TextField({
   onChange: (value: string) => void;
   placeholder?: string;
   multiline?: boolean;
-  /** People's names are typed in Latin letters. */
   latin?: boolean;
 }) {
   const id = useId();
@@ -639,7 +610,6 @@ export function TextField({
   );
 }
 
-/** A photo kept as a Blob, shown from an object URL that is let go when it changes. */
 export function useBlobUrl(blob: Blob | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -654,8 +624,6 @@ export function useBlobUrl(blob: Blob | null | undefined): string | null {
   return url;
 }
 
-/** Photo capture tile: empty (dashed, "Take a photo") or captured (the photo with its time). The camera opens from a
- *  file input with capture="environment"; the photo is shrunk on the phone before it is kept. */
 export function PhotoTile({
   blob,
   time,
@@ -711,7 +679,6 @@ export function PhotoTile({
   );
 }
 
-/** Confirmation panel: the big check, a title and what happens next. */
 export function ConfirmPanel({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
     <section
@@ -727,13 +694,10 @@ export function ConfirmPanel({ title, children }: { title: ReactNode; children: 
   );
 }
 
-/** "081 000 2145" as a number to dial: digits only, with a leading + kept for an international number. */
 function telLink(phone: string): string {
   return `tel:${phone.trim().replace(/(?!^\+)[^\d]/g, "")}`;
 }
 
-/** "Call Nuwan at dispatch": a tel: link drawn as a field button. Quiet and left-aligned under the report list, the
- *  primary when the truck cannot move. */
 export function CallButton({ phone, primary, children }: { phone: string; primary?: boolean; children: ReactNode }) {
   return (
     <a
@@ -751,7 +715,6 @@ export function CallButton({ phone, primary, children }: { phone: string; primar
   );
 }
 
-/** One helper line beside the main button, in place of a banner on task screens. */
 export function Helper({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
     <p className="flex items-start gap-2 t-label text-asphalt-700">
@@ -761,7 +724,6 @@ export function Helper({ icon: Icon, children }: { icon: LucideIcon; children: R
   );
 }
 
-/** Section title row: Heading 2 with an optional thing on the right. */
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3">

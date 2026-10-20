@@ -2,16 +2,14 @@ import type { Page, Response } from "@playwright/test";
 import { type DemoState, expect, test } from "../support/relay";
 import { dockTap, drag, expectAllSynced, minuteOrNext, photo, sign } from "../support/screens";
 
-/** The README's judge walkthrough, end to end, in the order it is written, in one private copy of the day. The steps a
- *  judge performs are done through the screens; the demo bar's jumps between them go through the demo API, except
- *  where the README has the judge press the bar itself. Each step checks what the README tells the judge to notice.
- *
- *  One browser context holds all four roles, one tab each, as the README suggests: the dispatcher at a desk
- *  (1440 x 900), the store manager, the loader and the driver on a phone (375 x 812). Step 22, trying the engine,
- *  starts another copy, so it is a test of its own and runs beside the first. */
+// The README's judge walkthrough, end to end, in one private copy of the day.
+// Judge steps go through the screens. The demo bar's jumps go through the demo API, except where
+// the README has the judge press the bar itself.
+// One browser context holds all four roles, one tab each. The dispatcher is at a desk (1440 x 900),
+// the rest on a phone (375 x 812). Step 22 starts another copy, so it is a test of its own.
 
 test("the judge walkthrough, from the first order to the outlook @desk", async ({ copy, page: desk }) => {
-  // a plan proposal and a dozen jumps of the story autopilot: 1.5 to 2.5 minutes on a fresh database
+  // A plan proposal and a dozen jumps of the story autopilot take 1.5 to 2.5 minutes on a fresh database.
   test.setTimeout(5 * 60_000);
 
   let store!: Page;
@@ -25,16 +23,15 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await desk.getByRole("button", { name: "Demo controls" }).click();
     const controls = desk.getByRole("dialog", { name: "Demo controls" });
     const code = controls.getByText(/This is a private copy of the day, walkthrough [A-Z0-9]{6}\./);
-    // the browser is already in the copy the test began in; the button starts another, with a new code
+    // the browser is already in the copy the test began in, and the button starts another with a new code
     await expect(code).toContainText(copy.code);
     await controls.getByRole("button", { name: "Start a private copy" }).click();
     await expect(code).not.toContainText(copy.code);
     const started = /walkthrough ([A-Z0-9]{6})/.exec((await code.textContent()) ?? "")?.[1];
     expect(started).toMatch(/^[A-Z0-9]{6}$/);
     await controls.getByRole("button", { name: "Close" }).click();
-    // the bar names this copy and its clock, which is this browser's alone
     await expect(desk.getByText(`Walkthrough ${started}`, { exact: true })).toBeVisible();
-    // every later call from this browser works in the new copy: its cookie replaced the first one
+    // the new copy's cookie replaced the first, so later calls from this browser work in the new copy
     const state = await copy.state();
     expect(state.workspace.code).toBe(started);
     expect(state.workspace.is_default).toBe(false);
@@ -46,7 +43,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(store.getByRole("heading", { name: "My orders" })).toBeVisible();
     await store.getByRole("button", { name: "Place an order" }).click();
     await expect(store.getByRole("heading", { name: "Place an order" })).toBeVisible();
-    // the cutoff countdown, and chilled selected
     await expect(store.getByText("Orders for Wednesday close at 4:00 PM")).toBeVisible();
     await expect(store.getByText(/^1 h 5\d min left$/)).toBeVisible();
     await expect(store.getByRole("radio", { name: "Chilled" })).toBeChecked();
@@ -56,7 +52,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(store.getByText("40 cases")).toBeVisible();
     await store.getByRole("textbox", { name: "Produce crate" }).fill("32");
     await store.getByRole("textbox", { name: "Meat and fish box" }).fill("20");
-    // weight and volume worked out as the counts go in
     await expect(store.getByText("92 cases")).toBeVisible();
     await expect(store.getByText("659.2 kg")).toBeVisible();
     await expect(store.getByText("3.464 m³")).toBeVisible();
@@ -94,7 +89,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
 
     await desk.getByRole("button", { name: "Jump to 3:12 PM: Chasing the last orders" }).click();
     await expect(desk.getByRole("button", { name: "Jump to 4:00 PM: Cutoff: the queue locks" })).toBeVisible();
-    // orders arrive as the other stores order
     await expect.poll(kandyOrders).toBeGreaterThan(before);
     await expect(desk.getByRole("heading", { name: "Not ordered yet" })).toBeVisible();
     await expect(desk.getByRole("row", { name: /ORD0098599 OUT119 Kegalle Chilled .* Waited Monday$/ })).toBeVisible();
@@ -104,7 +98,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(
       desk.getByRole("button", { name: "Kandy hub 57 VEH039 and VEH058 are in the workshop", exact: true }),
     ).toBeVisible();
-    // the chilled summary as a screen reader reads it, each term followed by its own value
     await expect(desk.locator("body")).toMatchAriaSnapshot(`
       - paragraph: Kandy hub chilled for Wednesday
       - term: Chilled orders
@@ -138,8 +131,7 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(
       desk.getByText("Every order is placed, but VEH057 trip 2 now breaks 3 rules.", { exact: false }),
     ).toBeVisible();
-    // the three broken rules, in the trip's own words: the stop past its close is OUT117 Hemmathagama itself, at
-    // 8:01 AM after its 7:45 close
+    // The stop past its close is OUT117 Hemmathagama itself, at 8:01 AM after its 7:45 close.
     await expect(
       desk.getByText("Weight: 1,460.8 of 1,040 kg. Volume: 7.676 of 7.0 m³. Window: OUT117 at 8:01 AM, closes 7:45."),
     ).toBeVisible();
@@ -160,7 +152,7 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
       drawer.getByRole("heading", { name: "5 refrigerated vehicles can serve 22 of the 23 chilled orders" }),
     ).toBeVisible();
     await expect(drawer.getByRole("heading", { name: "Relay's choice: which order waits" })).toBeVisible();
-    // rule 1 leaves only OUT117 and OUT119, and rule 2 protects OUT119 Kegalle because its Monday order waited
+    // Rule 1 leaves only OUT117 and OUT119. Rule 2 protects OUT119 Kegalle because its Monday order waited.
     await expect(drawer.getByText(/Only OUT117 and OUT119 could wait without taking another vehicle/)).toBeVisible();
     await expect(drawer.getByText("OUT119 Kegalle had its Monday chilled order wait, so it rides.")).toBeVisible();
     await expect(drawer.getByRole("heading", { name: "What the choice costs" })).toBeVisible();
@@ -177,7 +169,7 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     const controls = desk.getByRole("dialog", { name: "Demo controls" });
     const jumped = desk.waitForResponse(isJump, { timeout: 120_000 });
     await controls.getByRole("button", { name: "Go to 6:39 PM, Publishing the plan" }).click();
-    // Relay published Peliyagoda at 6:31 PM on the way, and plays none of the steps Nuwan already took
+    // Relay published Peliyagoda at 6:31 PM on the way, and plays none of the steps Nuwan took.
     const played = await playedBy(jumped);
     expect(played).toContain("Nuwan publishes Peliyagoda");
     expect(played, "Nuwan proposed the Kandy plan in step 4").not.toContain("Relay proposes the Kandy plan");
@@ -193,7 +185,7 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
       desk.getByText("Relay expects 6 of the 53 Fresh stops to arrive after their window", { exact: true }),
     ).toBeVisible();
     await expect(desk.getByRole("columnheader", { name: "Why Relay keeps it" })).toBeVisible();
-    // the plan bar and the foot of the Publish check both have a Publish plan button: this is the check's own
+    // the plan bar and the Publish check both have a Publish plan button, this is the check's own
     await desk.getByRole("region", { name: "Publish check" }).getByRole("button", { name: "Publish plan" }).click();
     const confirm = desk.getByRole("dialog", { name: "Publish the Kandy hub plan?" });
     await expect(confirm.getByText("When you publish")).toBeVisible();
@@ -212,7 +204,7 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(store.getByRole("heading", { name: "1 order coming, 1 moved to Thursday" })).toBeVisible();
     await expect(store.getByRole("heading", { name: "Expected around 5:20 AM" })).toBeVisible();
     await expect(store.getByText("Dry-box truck VEH045, Kandy hub")).toBeVisible();
-    // opening the notice marks it read in the background, and Relay has that read
+    // opening the notice marks it read in the background
     const read = store.waitForResponse(
       (r) => r.request().method() === "POST" && /\/api\/store\/notices\/[^/]+\/read$/.test(new URL(r.url()).pathname),
     );
@@ -243,7 +235,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
       .fill("Mawanella's curb is a bus stop from 5:30 AM");
     await swap.getByRole("button", { name: "Swap stops" }).click();
     await expect(swap).toBeHidden();
-    // Mawanella is stop 2 now, and Hemmathagama stop 3
     await expect(desk.getByRole("button", { name: "Move Mawanella earlier, to stop 1" })).toBeVisible();
     await expect(desk.getByRole("button", { name: "Move Hemmathagama earlier, to stop 2" })).toBeVisible();
   });
@@ -261,14 +252,12 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(dock.getByText(/^Was stop 2 until/).first()).toBeVisible();
 
     await expect(dock.getByRole("button", { name: /^36 Rice and dhal .*Stop 3/ })).toBeVisible();
-    // each line's Flag button is described by the line's case and stop
     await dock.getByRole("button", { name: "Flag", exact: true, description: /^Rice and dhal Stop 3/ }).click();
     const flag = dock.getByRole("dialog");
     await expect(flag.getByRole("radio", { name: "Missing" })).toBeChecked();
     await flag.getByRole("textbox").fill("6");
     await expect(flag.getByText("Only 30 were on the shelf. All 30 are on the truck.")).toBeVisible();
     await flag.getByRole("button", { name: "Flag 6 missing" }).click();
-    // the line waits for Nuwan while loading goes on
     await expect(
       dock.getByRole("button", { name: /^30 of 36 Rice and dhal Stop 3 .*Waiting for Nuwan$/ }),
     ).toBeVisible();
@@ -282,14 +271,12 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
       has: desk.getByRole("button", { name: /^6 rice and dhal cases missing on VEH045, stop 3/ }),
     });
     await expect(shortfall).toBeVisible();
-    // what the shelf and the hub hold
     await expect(shortfall.getByText("Dry · 30 of 36 rice and dhal cases on the shelf")).toBeVisible();
     await expect(
       shortfall.getByText(
         "No spare at the hub. The next rice and dhal delivery comes at 5:00 AM, after VEH045 leaves.",
       ),
     ).toBeVisible();
-    // both choices
     await expect(shortfall.getByRole("button", { name: "Send short, no replacement" })).toBeVisible();
     await shortfall.getByRole("button", { name: "Send short, add to Thursday" }).click();
     await expect(exceptions.getByText("Dilani Jayawardena was told.").first()).toBeVisible();
@@ -302,19 +289,19 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
       dock.getByRole("button", { name: /^30 of 36 Rice and dhal Stop 3 .*30 loaded, 6 short 6 come on Thursday$/ }),
     ).toBeVisible();
     await expect(dock.getByRole("status").filter({ hasText: /Nuwan answered:\s*stop 3 rice and dhal/ })).toBeVisible();
-    // each remaining line, tapped as its cases go on: a line still to load reads only its count, case, stop and kind
+    // a line still to load reads only its count, case, stop and kind
     const toLoad = dock.getByRole("button", { name: /^\d+ (Rice and dhal|Packet foods|Tea and biscuit) Stop \d Dry$/ });
     await expect(toLoad).toHaveCount(8);
     for (let left = 8; left > 0; left--) {
       await toLoad.first().click();
       await expect(toLoad).toHaveCount(left - 1);
     }
-    // the dock's next-page buttons take no tap in their first half second, so a double tap never skips the totals
+    // The dock's next-page buttons take no tap in their first half second, so a double tap never skips the totals.
     await dockTap(
       dock.getByRole("button", { name: "Go to handover" }),
       dock.getByRole("heading", { name: "Shortfall" }),
     );
-    // the shortfall, and the planned and loaded cases per stop: 383 planned, 377 loaded
+    // 383 planned, 377 loaded
     await expect(dock.getByText("6 rice and dhal cases missing from ORD0098595.")).toBeVisible();
     await expect(dock.getByRole("heading", { name: "Planned and loaded" })).toBeVisible();
     await expect(dock.getByText(/Total cases\s*383\s*377/)).toBeVisible();
@@ -337,25 +324,22 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(phone.getByText(/Total cases\s*383\s*377/)).toBeVisible();
     await phone.getByRole("button", { name: "Accept load" }).click();
     await expect(phone.getByText(new RegExp(`Load accepted ${minuteOrNext("3:16 AM").source}`))).toBeVisible();
-    // Leave the hub saves the time the truck drives out, at once, as Kasun does: a record saved while the one before
-    // it is still on its way goes in that same send
+    // Leave the hub saves at once. A record saved while the one before it is still on its way goes in that same send.
     await phone.getByRole("button", { name: "Leave the hub" }).click();
     await expect(phone.getByText(new RegExp(`Left Kandy hub ${minuteOrNext("3:16 AM").source}`))).toBeVisible();
-    // Relay has both records once the phone reads All synced
     await expectAllSynced(phone);
   });
 
   await test.step("13. Kasun records the first stop, Kegalle, at 4:52 AM", async () => {
     const { played } = await copy.jump("first_stop");
     expect(played).toContain("Kasun arrives at Kegalle");
-    // Kasun's own taps reached Relay before the jump, so the autopilot leaves them alone
+    // Kasun's own taps reached Relay before the jump, so the autopilot leaves them alone.
     expect(played, "Kasun accepted the load in step 12").not.toContain("Kasun accepts the load");
     expect(played, "Kasun left the hub in step 12").not.toContain("Kasun leaves the hub");
     await phone.goto("/driver");
     await phone.getByRole("button", { name: "Open stop 1" }).click();
     const arrival = phone.getByRole("status").filter({ hasText: "Arrived 4:52 AM. 30 min behind plan" });
     await expect(arrival).toBeVisible();
-    // beside it the time Relay expected, and the receiving window
     await expect(arrival.getByText(/^Expected around 4:\d\d\sAM$/)).toBeVisible();
     await expect(phone.getByText("Receiving window", { exact: true })).toBeVisible();
     await expect(phone.getByText("3:00 to 8:00 AM", { exact: true })).toBeVisible();
@@ -364,7 +348,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await phone.getByLabel(/Take a photo/).setInputFiles(photo());
     await phone.getByRole("button", { name: "Complete stop" }).click();
     await expect(phone.getByText("Relay has it, and the store can see it now.")).toBeVisible();
-    // the photo follows the record; both are with Relay before the signal drops
     await expectAllSynced(phone);
   });
 
@@ -379,8 +362,8 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     const sheet = phone.getByRole("dialog");
     await sign(phone, sheet.getByRole("img", { name: /Signature box/ }));
     await sheet.getByRole("button", { name: "Use this signature" }).click();
-    // In the storm the phone hands what it saves to the demo's stand-in for its memory, which is all that keeps the
-    // next jump from recording stop 2 itself: the test waits for that hand-off before it moves on
+    // In the storm the phone hands what it saves to the demo's stand-in for its memory. That alone keeps the
+    // next jump from recording stop 2 itself, so the test waits for the hand-off.
     const handed = phone.waitForResponse(
       (r) =>
         r.request().method() === "POST" &&
@@ -391,7 +374,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     expect((await handed).ok(), "the phone handed its stop 2 record to the storm's stand-in").toBe(true);
     await expect(phone.getByText("Stop 2 saved on this phone")).toBeVisible();
     await expect(phone.getByRole("status").filter({ hasText: "1 stop to send" })).toBeVisible();
-    // the run and the waiting record come back from the phone
     await phone.goto("/driver");
     await expect(phone.getByRole("heading", { name: "VEH045 · Trip 1 · Fresh dry, Kegalle district" })).toBeVisible();
     await expect(phone.getByRole("status").filter({ hasText: "1 stop to send" })).toBeVisible();
@@ -405,7 +387,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(runs.getByText(/No contact\s*since 5:41\sAM/)).toBeVisible();
     await expect(runs.getByText(/Last record: stop 2, arrived 5:30\sAM\./)).toBeVisible();
     const exceptions = desk.getByRole("region", { name: "Exceptions" });
-    // for each stop to come, an estimate and a likely range
     const hemmathagama = exceptions.getByRole("listitem").filter({ hasText: "Stop 3, Hemmathagama" });
     await expect(hemmathagama).toContainText("around 6:35");
     const aranayake = exceptions.getByRole("listitem").filter({ hasText: "Stop 4, Aranayake" });
@@ -439,7 +420,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await store.goto("/store");
     await expect(store.getByRole("heading", { name: "Arriving around 6:35 AM" })).toBeVisible();
     await store.getByRole("link", { name: "Track delivery" }).click();
-    // the tracker keeps the planned and the expected time, says when Kasun was last heard and gives the likely range
     await expect(store.getByRole("heading", { name: "Your delivery" })).toBeVisible();
     await expect(store.getByText("Arriving around", { exact: true })).toBeVisible();
     await expect(store.getByText("6:35 AM", { exact: true })).toBeVisible();
@@ -466,7 +446,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await desk.goto("/dispatcher/live");
     const exceptions = desk.getByRole("region", { name: "Exceptions" });
     await expect(exceptions.getByText(/Hemmathagama confirmed receipt/).first()).toBeVisible();
-    // Relay moves Aranayake's estimate from the receipt
     await expect(exceptions.getByText(/stop 4 estimated/).first()).toBeVisible();
     await expect(exceptions.getByText("The store confirmed receipt, so Kasun has been there.")).toBeVisible();
     await expect(exceptions.getByRole("button", { name: "Cancel backup" })).toBeVisible();
@@ -489,7 +468,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await expect(phone.getByText(/Saved offline, sent 7:1\d\sAM/).first()).toBeVisible();
     await phone.getByRole("button", { name: "Finish trip" }).click();
     await expect(phone.getByText(/Trip finished at/).first()).toBeVisible();
-    // the phone's own offline record of stop 2 and the finish reach Relay before the clock moves on
     await expectAllSynced(phone);
   });
 
@@ -498,12 +476,11 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     expect(played, "every step from 7:14 AM on was taken by hand").toEqual([]);
     await desk.goto("/dispatcher/live");
     const runs = desk.getByRole("region", { name: "Kandy hub Fresh runs" });
-    // each run row is a group named for its vehicle and driver, so each line read belongs to that vehicle's row
     const veh045 = runs.getByRole("group", { name: "VEH045, Kasun Bandara" });
     await expect(veh045.getByText(/Trip finished at 7:1\d\sAM/)).toBeVisible();
     await expect(veh045.getByText(/Offline 5:41 to 7:14/)).toBeVisible();
     await expect(veh045.getByText(/^\d+ records received$/)).toBeVisible();
-    // stop 2 is the record Kasun's phone saved in the storm in step 14, at 5:41 AM, not the autopilot's at 5:59 AM
+    // Stop 2 is the record Kasun's phone saved in the storm in step 14, at 5:41 AM, not the autopilot's at 5:59 AM.
     await expect(
       veh045
         .getByRole("list", { name: "VEH045 stops" })
@@ -519,7 +496,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
     await store.goto("/store");
     await store.getByRole("link", { name: "See the receipt and Kasun's proof" }).click();
     await expect(store.getByRole("heading", { name: "Proof of delivery from Kasun Bandara" })).toBeVisible();
-    // the photo, the delivery time, the receiver's name and when it was saved and sent
     await expect(
       store.getByRole("button", { name: /^Delivery photo, \d{1,2}:\d{2}\sAM\. Tap to enlarge\.$/ }),
     ).toBeVisible();
@@ -530,7 +506,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
         /^Saved on Kasun's phone at \d{1,2}:\d{2}\sAM and sent at 7:14\sAM,\swhen the phone reached us again\.$/,
       ),
     ).toBeVisible();
-    // the 6 rice and dhal cases and the chilled order are listed for Thursday
     await expect(store.getByRole("heading", { name: "Still to come on Thursday 9 April" })).toBeVisible();
     await expect(store.getByText("Your chilled order, 92 cases")).toBeVisible();
     await expect(store.getByText("6 rice and dhal cases", { exact: true })).toBeVisible();
@@ -545,8 +520,6 @@ test("the judge walkthrough, from the first order to the outlook @desk", async (
       }),
     ).toBeVisible();
     await expect(desk.getByRole("heading", { name: "What to arrange" })).toBeVisible();
-    // the six weeks: forecast demand by brand, chilled space against the refrigerated fleet, and the vehicles needed
-    // on each week's busiest day
     const weeks = desk.getByRole("region", { name: "Weeks ahead" });
     await expect(weeks.getByRole("button", { name: /^Week \d+ / })).toHaveCount(6);
     await expect(weeks.getByText("Forecast demand, m³ a week", { exact: true })).toBeVisible();
@@ -571,9 +544,8 @@ test("22. try the engine: a rule-breaking drop, a vehicle to the workshop, defer
   copy,
   page: desk,
 }) => {
-  // step 22 starts another private copy: this test's own. Three proposals and a re-plan; the three with VEH043 in the
-  // workshop are new to the engine cache on a fresh database, so each searches for up to a minute (2.5 minutes in all
-  // on a busy laptop)
+  // Three proposals and a re-plan. The three with VEH043 in the workshop are new to the engine cache
+  // on a fresh database, so each searches for up to a minute (2.5 minutes in all on a busy laptop).
   test.setTimeout(5 * 60_000);
   await copy.signIn("dispatcher");
   await copy.jump("cutoff");
@@ -587,7 +559,6 @@ test("22. try the engine: a rule-breaking drop, a vehicle to the workshop, defer
     const veh045 = desk.getByRole("button", { name: /^Trip 1 · Kegalle .*leaves 3:29\sAM/ });
     await drag(desk, card, veh045, {
       whileHeld: async () => {
-        // while the card is held, the dry-box trips say why they cannot take it
         await expect(desk.getByText("Needs a refrigerated vehicle").first()).toBeVisible();
       },
     });
@@ -613,13 +584,13 @@ test("22. try the engine: a rule-breaking drop, a vehicle to the workshop, defer
     await expect(dialog.getByText(/the moves you made on this board are replaced/)).toBeVisible();
     await dialog.getByRole("button", { name: "Propose again" }).click();
     await expect(desk.getByText("Kandy hub: 57 orders, 54 on 18 trips, 3 wait.")).toBeVisible({ timeout: 120_000 });
-    // Hemmathagama rides now, and Nuwara Eliya, Badulla Town and Hali-Ela wait
+    // Hemmathagama rides now, and Nuwara Eliya, Badulla Town and Hali-Ela wait.
     await expect(desk.getByRole("button", { name: /^OUT117 Hemmathagama ORD0098596/ })).toHaveCount(0);
     await expect(desk.getByRole("button", { name: /^OUT105 Nuwara Eliya / })).toBeVisible();
   });
 
   await test.step("Defer anyway on the protected OUT119 Kegalle: Kegalle waits with the reason, Nuwara Eliya rides", async () => {
-    // the plan bar's, which the waiting tray repeats
+    // the plan bar's button, which the waiting tray repeats
     await desk.getByRole("button", { name: "Review deferrals", description: "Open deferrals (D)" }).click();
     const drawer = desk.getByRole("dialog", { name: "Deferrals for the Kandy hub" });
     await expect(
@@ -631,10 +602,8 @@ test("22. try the engine: a rule-breaking drop, a vehicle to the workshop, defer
       .getByRole("textbox", { name: /Why is this needed/ })
       .fill("Kegalle asked to take its chilled order on Thursday");
     await drawer.getByRole("button", { name: "Defer OUT119" }).click();
-    // Relay plans again with Kegalle waiting: the drawer now says what the override costs, with the note as the reason
     await expect(drawer.getByRole("heading", { name: "What the override costs" })).toBeVisible({ timeout: 120_000 });
     await expect(drawer.getByText(/orders wait, OUT119 by override/)).toBeVisible();
-    // what OUT119 will read: the note is the reason
     const notice = drawer.getByRole("complementary");
     await expect(notice.getByText("What OUT119 will see", { exact: true })).toBeVisible();
     await expect(
@@ -654,12 +623,10 @@ test("22. try the engine: a rule-breaking drop, a vehicle to the workshop, defer
   });
 });
 
-/** A jump the demo bar makes: the POST that moves this copy's clock. */
 function isJump(response: Response): boolean {
   return response.request().method() === "POST" && new URL(response.url()).pathname === "/api/demo/clock";
 }
 
-/** The story steps a jump played, from its answer. */
 async function playedBy(jump: Promise<Response>): Promise<string[]> {
   const answer = await jump;
   expect(answer.ok()).toBe(true);

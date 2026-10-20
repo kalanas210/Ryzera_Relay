@@ -31,7 +31,7 @@ class Receipt(WorkspaceScoped, Base):
     confirmed_at: Mapped[datetime]
     confirmed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     before_driver_proof: Mapped[bool] = mapped_column(default=False)
-    """Confirmed at the store before the driver's phone had sent its proof."""
+    """Confirmed at the store before the driver's phone sent its proof."""
     lines: Mapped[list[Any]] = mapped_column(default=list)
     client_ref: Mapped[str | None] = mapped_column(String(64))
 

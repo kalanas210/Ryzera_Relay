@@ -17,7 +17,7 @@ export const HOME: Record<Role, string> = {
   store_manager: "/store",
 };
 
-// `device` is the screen each role is built and judged on (README, Accounts), shown in brackets after the title
+// device is the screen each role is built and judged on (README, Accounts)
 const ROLES: { role: Role; title: string; device: string; where: string; icon: LucideIcon }[] = [
   {
     role: "store_manager",
@@ -58,7 +58,7 @@ export function SignIn() {
   const [role, setRole] = useState<Role | null>(wanted);
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
-  // a tap on a role brings its sign-in into view: on a phone it opens below the four cards, out of sight
+  // on a phone the sign-in opens below the four cards, so a tap on a role scrolls it into view
   const form = useRef<HTMLElement>(null);
   const [picked, setPicked] = useState(0);
 
@@ -67,7 +67,7 @@ export function SignIn() {
   const usesPin = role === "loader";
 
   useEffect(() => {
-    // pick the judge account for the role by default, keeping a password typed before the names came in
+    // Pick the role's judge account. A password typed before the names came in is kept.
     if (role && !people.some((p) => p.username === username) && people[0]) {
       setUsername(people[0].username);
       if (username) setSecret("");
@@ -242,11 +242,10 @@ function LoaderPin({
   onPin: (value: string) => void;
   error: boolean;
   busy: boolean;
-  /** The loaders' names could not be loaded. */
   failed: boolean;
 }) {
   const person = people.find((p) => p.username === username);
-  // The keys wait for a name: a PIN tapped before the names come in would be sent for nobody.
+  // The keys wait for a name, or a PIN tapped early would be sent for nobody.
   return (
     <div className="mx-auto flex max-w-[358px] flex-col gap-5">
       <div className="flex flex-col gap-2">

@@ -1,4 +1,4 @@
-# Keep the build context small and never copy local installs into an image.
+# Keeps the build context small and local installs out of the images.
 **/node_modules
 **/dist
 **/.vite

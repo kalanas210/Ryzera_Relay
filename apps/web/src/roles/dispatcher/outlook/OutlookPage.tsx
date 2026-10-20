@@ -52,13 +52,11 @@ const FIGURE_TEXT: Record<KeyFigure["tone"], string> = {
 };
 const SPACE_BAR = { normal: "bg-petrol-700", near: "bg-attention", over: "bg-problem" };
 const SPACE_TEXT = { normal: "text-asphalt-900", near: "text-attention", over: "text-problem" };
-/**
- * The frame's columns are 290 and six of 169. A desk with a classic scrollbar first takes 2.5 from each week, which
- * keeps every row label on one line; past that the label column gives way, down to 200, before the weeks narrow.
- */
+// The frame's columns are 290 and six of 169. A classic scrollbar first takes 2.5 from each week
+// to keep row labels on one line. Past that the label column gives way, down to 200, before the weeks.
 const WEEK_KEEP = 166.5;
 
-/** DSP-05 Capacity outlook: six weeks ahead, when the depot will need every refrigerated vehicle it has. */
+// DSP-05 Capacity outlook. Six weeks ahead, when the depot needs every refrigerated vehicle it has.
 export function OutlookPage() {
   const [depotParam, setDepot] = useDepot("Kandy");
   const depot: OutlookDepot = depotParam === "Peliyagoda" ? "Peliyagoda" : "Kandy";
@@ -155,13 +153,11 @@ function AnswerCard({ data }: { data: Outlook }) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ the grid
 export function OutlookGrid({ data, className }: { data: Outlook; className?: string }) {
   const weeks = data.weeks;
   const labels = data.labels!;
   const columns = weeks.length;
   const lead = weeks.findIndex((w) => w.busiest?.headline);
-  // one week's days at a time: the pointer's week, else the focused one, until Escape puts them away
   const [hovered, setHovered] = useState<number | null>(null);
   const [focused, setFocused] = useState<number | null>(null);
   const [shut, setShut] = useState(false);
@@ -241,7 +237,7 @@ export function OutlookGrid({ data, className }: { data: Outlook; className?: st
       ))}
 
       {lead >= 0 && data.headline ? (
-        // placed by its column only: with no row lines an absolutely placed item spans the grid's full height
+        // Placed by its column only. With no row lines an absolute item spans the full grid height.
         <div
           aria-hidden
           className={cx(
@@ -273,7 +269,6 @@ function Legend() {
   );
 }
 
-/** A week's header. Hovering or focusing it shows the week's open days; the grid keeps one open at a time. */
 function WeekHeader({
   week,
   data,
@@ -322,7 +317,6 @@ function WeekHeader({
   );
 }
 
-/** A week's name, dates and calendar. `hint` marks the name as the way to the week's days, as on the grid. */
 function WeekTitle({ week, hint }: { week: OutlookWeek; hint?: boolean }) {
   return (
     <>
@@ -357,7 +351,6 @@ function WeekTitle({ week, hint }: { week: OutlookWeek; hint?: boolean }) {
   );
 }
 
-/** Each open day of a week: chilled orders, kg, and refrigerated vehicles needed of those in service. */
 function DaysTable({ week, data }: { week: OutlookWeek; data: Outlook }) {
   return (
     <table className="mt-2 w-full t-label">
@@ -458,7 +451,7 @@ function Value({ value, className }: { value: number | undefined; className?: st
   );
 }
 
-/** The Tech values sit on one band across the weeks: a single Tech order can be most of a week's volume. */
+// One band across the weeks, since a single Tech order can be most of a week's volume.
 function TechValue({ value, first, last }: { value: number | undefined; first: boolean; last: boolean }) {
   return (
     <div className="relative">
@@ -479,7 +472,6 @@ function Missing() {
   return <span className="t-caption text-asphalt-500">No forecast</span>;
 }
 
-/** Capacity meter / compact vertical: chilled m³ against one load per refrigerated vehicle per open day. */
 function SpaceMeter({ week }: { week: OutlookWeek }) {
   const limit = week.chilled_limit_m3;
   if (!week.demand || limit === null || week.chilled_pct === null) return <Missing />;
@@ -510,7 +502,6 @@ function SpaceMeter({ week }: { week: OutlookWeek }) {
   );
 }
 
-/** Capacity meter / vehicles: one segment per refrigerated vehicle at the depot. */
 function VehiclesMeter({ day }: { day: BusiestDay }) {
   const s = day.segments;
   const segments = [
@@ -519,7 +510,7 @@ function VehiclesMeter({ day }: { day: BusiestDay }) {
     ...Array<string>(s.standby).fill(cx("border bg-white", STATE_EDGE[day.state])),
     ...Array<string>(s.workshop).fill("bg-asphalt-100"),
   ];
-  // the vehicles, not the segments: a workshop segment stands only for the vehicles nobody needs
+  // Say the vehicles, not the segments. A workshop segment stands only for vehicles nobody needs.
   const said = [
     `${day.needed} needed`,
     `${day.available} in service`,
@@ -560,8 +551,6 @@ function ChilledKg({ day }: { day: BusiestDay }) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ narrow screens
-/** Below the desk width the weeks stack, each with its own numbers and its days a tap away. */
 function WeekList({ data, className }: { data: Outlook; className?: string }) {
   return (
     <section aria-label="Weeks ahead" className={cx("grid gap-3 md:grid-cols-2 lg:grid-cols-3", className)}>
@@ -644,7 +633,6 @@ function WeekCard({ week, data }: { week: OutlookWeek; data: Outlook }) {
   );
 }
 
-// ------------------------------------------------------------------------------------------------ below the grid
 function ArrangeCard({ data }: { data: Outlook }) {
   return (
     <section className="flex flex-wrap gap-x-8 gap-y-4 rounded-card border border-asphalt-200 bg-white px-5 py-3">

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Relay API: FastAPI on Python 3.12, installed from the workspace lockfile with uv.
+# The Relay API image. FastAPI on Python 3.12, installed from the lockfile with uv.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir uv==0.11.28 \
 
 WORKDIR /app
 
-# Dependencies first, so code changes don't reinstall them.
+# Dependencies first, so a code change does not reinstall them.
 COPY pyproject.toml uv.lock ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
 COPY packages/engine/pyproject.toml packages/engine/pyproject.toml

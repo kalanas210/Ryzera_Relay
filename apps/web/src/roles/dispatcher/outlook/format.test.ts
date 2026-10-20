@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { NBSP, ordersCaption, shortDay, weekRange } from "./format";
 
-/** The page keeps ranges and dates on one line with no-break spaces; the tests read them as plain spaces. */
+// The page uses no-break spaces. The tests read them as plain spaces.
 const plain = (text: string) => text.replaceAll(NBSP, " ");
 
 describe("outlook dates", () => {

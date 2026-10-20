@@ -48,11 +48,11 @@ function writeLocked(locked: boolean) {
     if (locked) localStorage.setItem(LOCK_KEY, "1");
     else localStorage.removeItem(LOCK_KEY);
   } catch {
-    // private mode: the lock lasts for this page only
+    // Private mode. The lock lasts for this page only.
   }
 }
 
-/** The shared dock tablet: the signed-in loader's language, the PIN switch, and the lock after 15 idle minutes. */
+// The shared dock tablet. It locks after 15 idle minutes and switches loaders by PIN.
 export function LoaderShell() {
   const me = useMe("loader");
   const { lang } = useLoaderText();
@@ -66,14 +66,12 @@ export function LoaderShell() {
     setLockedState(value);
   }, []);
 
-  // Each loader's language comes back when they sign in.
   const userId = me.data?.id;
   const locale = me.data?.locale;
   useEffect(() => {
     if (userId && isLang(locale)) void i18n.changeLanguage(locale);
   }, [userId, locale]);
 
-  // Lock after 15 minutes with no taps; the sheet then opens with the last person selected.
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => {
     const arm = () => {
@@ -104,9 +102,8 @@ export function LoaderShell() {
 
   return (
     <DockContext.Provider value={dock}>
-      {/* Everything the dock shows sits in here, its sheets included (a <dialog> keeps its place in the page), so
-          Sinhala and Tamil get their fonts and taller ramp and screen readers the right voice. The demo bar above
-          stays English. */}
+      {/* The sheets sit in here too (a <dialog> keeps its place in the page), so Sinhala and Tamil get their
+          fonts and screen readers the right voice. The demo bar above stays English. */}
       <div lang={lang} className="min-h-dvh bg-asphalt-50">
         <Outlet />
         <SwitchSheet
@@ -139,11 +136,10 @@ export function LoaderShell() {
   );
 }
 
-/** What a failed PIN entry says. `shown` goes false at the next digit, and the text stays, laid out unseen, so the
- *  message line keeps its height until the sheet closes. */
+// shown goes false at the next digit. The text stays, laid out unseen, so the message line keeps its height.
 export type PinFailure = { text: string; wrongPin: boolean; shown: boolean };
 
-/** What a failed PIN entry says: a wrong PIN only when the server said so, never for a dropped connection. */
+// A wrong PIN only when the server said so, never for a dropped connection.
 export function pinError(
   t: ReturnType<typeof useLoaderText>["t"],
   error: Error,
@@ -155,8 +151,6 @@ export function pinError(
   return { text: otherwise(error.message), wrongPin: false, shown: true };
 }
 
-/** The line between the PIN dots and the keys: a note, or what went wrong. It is sized for the longest of them in
- *  the reader's language, so a wrong PIN, and the next digit that clears it, never move the keys under a finger. */
 export function PinMessage({ note, error }: { note?: ReactNode; error: PinFailure | null }) {
   const { t } = useLoaderText();
   const problem = (text: string) => <p className="t-body-strong text-center text-problem">{text}</p>;
@@ -173,13 +167,11 @@ export function PinMessage({ note, error }: { note?: ReactNode; error: PinFailur
   );
 }
 
-/** "Password relay2026 · PIN 2580" gives "2580". */
 export function pinFromHint(hint: string | undefined): string | undefined {
   return hint?.match(/\bPIN (\d+)/)?.[1];
 }
 
-/** A demo account's PIN, for the dock's PIN sheets to show the way the sign-in screen does, and only in a
- *  walkthrough. The account's username comes too, for a sheet that only knows the person's name. */
+// The PIN shows only in a walkthrough. The username comes too, for a sheet that only knows the name.
 export function useDemoPin(pick: (account: Account) => boolean): { pin?: string; username?: string } {
   const accounts = useAccounts();
   const demo = useDemoState();
@@ -208,7 +200,6 @@ function SwitchSheet({
   const [pin, setPin] = useState("");
   const [error, setError] = useState<PinFailure | null>(null);
 
-  // Every open starts from whoever is signed in, so a pick left from a cancelled switch never carries over.
   useEffect(() => {
     if (open) {
       setPicked(current);
@@ -278,7 +269,7 @@ function SwitchSheet({
   );
 }
 
-/** Loader picker / person button. The driver's tablet acceptance shows a single one, already selected. */
+// The driver's tablet acceptance shows a single one, already selected.
 export function PersonButton({
   person,
   selected,
@@ -313,9 +304,7 @@ export function PersonButton({
   );
 }
 
-/** Top bar / phone header with sync pill: the root version (Relay mark, depot and date) or the back version. With
- *  `tablet`, from 768 px up it becomes Top bar / tablet header: a Heading 1 title over its meta, and the loader
- *  button that opens the PIN switch. */
+// With tablet set, from 768 px up this becomes the tablet header, with the loader button for the PIN switch.
 export function DockHeader({
   title,
   meta,
@@ -326,7 +315,6 @@ export function DockHeader({
   title: ReactNode;
   meta?: ReactNode;
   back?: string;
-  /** The back button's name, when it goes somewhere other than tonight's loads. */
   backLabel?: string;
   tablet?: { meta: ReactNode };
 }) {
@@ -343,8 +331,7 @@ export function DockHeader({
   );
   const status = (
     <>
-      {/* The pill is as wide as its longest label in the reader's language, so going from All synced to Sending
-          and back never moves the buttons beside it. The unseen copies match SyncPill's box. */}
+      {/* The pill is as wide as its longest label, so the buttons beside it never move. */}
       <span className="inline-grid shrink-0 justify-items-end">
         <span className="col-start-1 row-start-1 inline-flex">
           <SyncPill
@@ -409,7 +396,6 @@ export function DockHeader({
   );
 }
 
-/** The loader bar under LDR-01's header: who is signed in on the tablet, Switch and Lock. */
 export function LoaderBar() {
   const { t } = useLoaderText();
   const me = useMe("loader");

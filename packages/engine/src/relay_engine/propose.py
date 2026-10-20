@@ -1,16 +1,4 @@
-"""Relay's proposal for one depot's run, and why each order that waits, waits.
-
-Chilled orders compete for the few refrigerated vehicles, so they are planned exactly, all districts at once:
-first the most orders any allocation can carry (what is unavoidable), then, keeping that many, the allocation
-that best follows Relay's three rules (what is Relay's choice):
-
-1. Keep every other vehicle on its usual run.
-2. Never make a store wait twice in a row without an override.
-3. Keep the most goods moving.
-
-Ambient orders (Fresh dry, Style and Tech) rarely run short of vehicles, so each vehicle first takes its usual
-run, and whatever is left is placed on free trip slots in a second, smaller search.
-"""
+"""Relay's proposal for one depot's run, and why each order that waits, waits."""
 
 from __future__ import annotations
 
@@ -57,7 +45,6 @@ class RunInput:
     usual: Mapping[str, Sequence[UsualTrip]]
     conditions: Conditions
     protected: set[str] = field(default_factory=set)
-    """Orders whose store's last order of the same temperature waited (rule 2)."""
 
 
 @dataclass(slots=True)
@@ -101,7 +88,6 @@ def propose(run: RunInput, *, explain: bool = True) -> Proposal:
     return Proposal(trips, reports, totals, deferred, analyses)
 
 
-# ---------------------------------------------------------------------------------------------- chilled
 def _options(run: RunInput, orders: Sequence[Order], fleet: Sequence[VehicleDay]) -> list[Option]:
     caps = [run.network.vehicles[v.vehicle_id] for v in fleet if v.status is VehicleStatus.AVAILABLE]
     if not caps:
@@ -115,6 +101,8 @@ def _options(run: RunInput, orders: Sequence[Order], fleet: Sequence[VehicleDay]
     )
 
 
+# Chilled orders compete for few refrigerated vehicles. First find the most any allocation can carry.
+# That much is unavoidable. Then, keeping that many, pick the allocation that best follows the rules.
 def _plan_chilled(
     run: RunInput, orders: Sequence[Order], fleet: Sequence[VehicleDay], explain: bool
 ) -> tuple[list[Slot], GroupAnalysis | None, list[Deferred]]:
@@ -162,6 +150,8 @@ def _plan_chilled(
     return best.slots, analysis, [_why(analysis, o) for o in waiting]
 
 
+# The three deferral rules. 1 keeps every other vehicle on its usual run.
+# 2 never makes a store wait twice in a row without an override. 3 keeps the most goods moving.
 def _why(analysis: GroupAnalysis, order_id: str) -> Deferred:
     pool = set(analysis.pool)
     keeping = set(analysis.pool_keeping_usual_runs)
@@ -177,7 +167,7 @@ def _why(analysis: GroupAnalysis, order_id: str) -> Deferred:
     return Deferred(order_id, unavoidable=False, rule=3, reason="Letting it wait keeps the most goods moving")
 
 
-# ---------------------------------------------------------------------------------------------- ambient
+# Ambient orders rarely run short of vehicles, so each vehicle takes its usual run first.
 def _plan_ambient(
     run: RunInput, orders: Sequence[Order], fleet: Sequence[VehicleDay]
 ) -> tuple[list[Slot], list[Deferred]]:
@@ -228,13 +218,8 @@ def _plan_ambient(
     return chosen, waits
 
 
-# ---------------------------------------------------------------------------------------------- timing
+# A store whose last order waited goes first on its trip.
 def _timed_trips(run: RunInput, slots: Iterable[Slot], orders: Mapping[str, Order]) -> list[Trip]:
-    """Stop order and departure for each chosen trip.
-
-    A store whose last order waited goes first on its trip. A vehicle with two trips gets its first trip's stop
-    order and departure chosen together with the second trip, so that across both the fewest stores are expected
-    late and the tightest margin is as wide as it can be (up to 30 minutes)."""
     network = run.network
     days = {v.vehicle_id: v for v in run.vehicles}
     lead = {orders[o].outlet_id for o in run.protected if o in orders}
@@ -271,7 +256,6 @@ def _pair(
     if latest is None:
         return None
     cap = latest[1] - RELOAD_MINUTES
-    # the most promising first-trip stop orders on their own, then every departure for each
     ranked = []
     for seq in sequence_candidates(network, first.outlets):
         found = timed(network, conditions, seq, first.brand, ready, latest=_latest(first), back_by=cap)
@@ -299,8 +283,7 @@ def _pair(
             )
             if two is None:
                 continue
-            # fewest stores expected late, then the tightest margin up to 30 minutes, then the latest start: the
-            # first trip leaves no earlier than the second trip needs
+            # Fewest stores late, then the tightest margin up to 30 minutes, then the latest start.
             key = (
                 one.expected_late + two.expected_late,
                 -round(min(one.margin, two.margin, MARGIN_MINUTES), 3),

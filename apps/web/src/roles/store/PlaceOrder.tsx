@@ -40,11 +40,11 @@ import {
 } from "./api";
 import { clock, closesLine, dayWhen, defaultTemp, eveningOf, kindOf, type Temp } from "./words";
 
-/** The order the form offers its types in, chilled first as STM-02 is drawn. */
+// Chilled first, as STM-02 is drawn.
 const TEMPS: Temp[] = ["chilled", "ambient"];
 
-/** STM-02 Place order: count standard cases; Relay works out weight and volume and keeps the cutoff in view. With
- *  ?change=ORD0098595 the same form changes that order until its cutoff. */
+// STM-02 Place order. The store counts standard cases, Relay works out weight and volume.
+// With ?change=ORD0098595 the same form changes that order until its cutoff.
 export function PlaceOrder() {
   const [params] = useSearchParams();
   const change = params.get("change");
@@ -58,7 +58,7 @@ function NewOrder() {
   const place = usePlaceOrder();
   const [temp, setTemp] = useState<Temp | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  // one id per attempt, kept across "Try again", so a retry can never create a second order
+  // One id per attempt, kept across Try again, so a retry never makes a second order.
   const [clientRefs, setClientRefs] = useState<Record<Temp, string>>(() => ({
     ambient: crypto.randomUUID(),
     chilled: crypto.randomUUID(),
@@ -68,7 +68,6 @@ function NewOrder() {
   const data = home.data;
   const types = data?.case_types ?? [];
   const forDay = data?.ordering_for ?? null;
-  // what the store already sent for that day, dry before chilled as Waypoint numbers them
   const already = useMemo(
     () =>
       (data?.orders ?? [])
@@ -82,7 +81,7 @@ function NewOrder() {
   const totals = useMemo(() => total(rows, counts), [rows, counts]);
   const unsent = (t: Temp) => types.filter((c) => c.temp === t).reduce((n, c) => n + (counts[c.code] ?? 0), 0);
 
-  // the countdown ran out before the next answer: ask again, so the form moves on to the next run at once
+  // The countdown ran out. Ask again, so the form moves on to the next run at once.
   const expired = Boolean(data && now && !data.closed_for && Date.parse(data.cutoff) <= now.getTime());
   const refetch = home.refetch;
   useEffect(() => {
@@ -98,7 +97,6 @@ function NewOrder() {
   const day = formatWeekday(dayOf(forDay));
   const offline = place.error instanceof ApiError && place.error.offline;
   const closed = data.closed_for && data.closed_at ? { day: data.closed_for, at: data.closed_at } : null;
-  // orders moved onto this day's run from an earlier one: they are coming, so the store orders only what else it needs
   const movedIn = data.orders.filter((o) => o.run_date === forDay && o.requested_date !== o.run_date);
   const second = already.find((o) => o.temp === selected);
 
@@ -243,7 +241,7 @@ function NewOrder() {
         rows={rows}
         counts={counts}
         onChange={(code, v) => {
-          // once counted, the type stays put: a later answer (the cutoff passing, an order arriving) never hides them
+          // Once counted, the type stays put. A later answer never hides the counts.
           setTemp(selected);
           setCounts((c) => ({ ...c, [code]: v }));
         }}
@@ -252,7 +250,7 @@ function NewOrder() {
   );
 }
 
-/** STM-01 Change this order: the order's own counts, filled in, until the cutoff for its day. */
+// STM-01 Change this order. Its own counts are filled in, until the cutoff for its day.
 function ChangeOrder({ orderRef }: { orderRef: string }) {
   const home = useStoreHome();
   const now = useSimNow(15_000);
@@ -295,7 +293,7 @@ function ChangeOrder({ orderRef }: { orderRef: string }) {
   }
 
   const rows = data.case_types.filter((t) => t.temp === order.temp);
-  // the store's own counts: cases Waypoint carried onto the order from a short delivery stay on top of them
+  // The store's own counts. Cases Waypoint carried over from a short delivery stay on top of them.
   const own = Object.fromEntries(order.lines.map((l) => [l.case_type, l.qty - l.carried_qty]));
   const carried = order.lines.filter((l) => l.carried_qty > 0);
   const counts = edited ?? own;
@@ -387,7 +385,7 @@ function helperFor(temp: Temp): string {
     : "Dry goods only. Chilled goods go as their own order.";
 }
 
-/** Not sent: offline is a wait, never red; anything else is the server's own words. */
+// Offline is a wait, never red. Anything else shows the server's own words.
 function SendNotice({ error, saved }: { error: Error | null; saved: string }) {
   if (error instanceof ApiError && error.offline) {
     return (
@@ -403,7 +401,7 @@ function SendNotice({ error, saved }: { error: Error | null; saved: string }) {
   ) : null;
 }
 
-/** Cutoff line / countdown, under 4 hours left; amber in the last hour. */
+// Shown under 4 hours before the cutoff. Amber in the last hour.
 function Countdown({ day, cutoff, minutesLeft }: { day: string; cutoff: string; minutesLeft: number }) {
   const urgent = minutesLeft < 60;
   return (
@@ -426,7 +424,6 @@ function Countdown({ day, cutoff, minutesLeft }: { day: string; cutoff: string; 
   );
 }
 
-/** Cutoff line / closed: "Orders for Wednesday closed at 4:00 PM. Anything you send now goes on Thursday's run." */
 function ClosedLine({ day, at, next }: { day: string; at: string; next: string }) {
   return (
     <div className="flex items-start gap-3 rounded-card bg-attention-soft px-4 py-3">
@@ -514,8 +511,7 @@ function Totals({ cases, kgs, m3s }: { cases: number; kgs: number; m3s: number }
   );
 }
 
-/** STM-02 / received: only once Relay has the order. An order Relay received after a cutoff says which run it joins;
- *  what happens next is said from now. */
+// STM-02 received. Shown only once Relay has the order. A late order says which run it joins.
 function Received({
   order,
   home,
@@ -535,12 +531,12 @@ function Received({
 }) {
   const run = formatWeekday(dayOf(order.run_date));
   const late = order.run_date !== order.requested_date;
-  // sent from a form opened after today's cutoff: the day that closed is the one to name
+  // Sent from a form opened after today's cutoff, so name the day that closed.
   const closed =
     late || !home.closed_for || !home.closed_at || order.requested_date !== home.ordering_for
       ? null
       : { day: formatWeekday(dayOf(home.closed_for)), at: home.closed_at };
-  // the cutoff of the run it joined: its own, or the one taking orders now for an order moved past its cutoff
+  // Cutoff of the run it joined. A late order joins the run that is taking orders now.
   const runCloses = !late ? order.locks_at : order.run_date === home.ordering_for ? home.cutoff : null;
   return (
     <PhoneScreen

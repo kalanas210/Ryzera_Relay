@@ -7,15 +7,13 @@ type Props = {
   min?: number;
   max?: number;
   label: string;
-  /** "dairy crates": the buttons read "Fewer dairy crates" and "More dairy crates". */
   unit: string;
-  /** The buttons' names in the reader's language, when the screen is not in English. */
   fewerLabel?: string;
   moreLabel?: string;
   size?: "store" | "field";
 };
 
-/** A number stepper with a typeable value. The field size is the loader's: 64 px buttons and a Display value. */
+// The field size is the loader's, with 64 px buttons and a Display value.
 export function Stepper({
   value,
   onChange,
